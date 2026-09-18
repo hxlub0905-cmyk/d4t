@@ -9,8 +9,7 @@
 |---|---|---|
 | ``ebi_patch`` | KLARF + patch TIFF（每顆連續幾頁）| ``Open KLARF…`` |
 | ``rsem`` | KLARF + 每顆一個影像檔 | ``Open KLARF…``（自動判別）|
-| ``tiff_stack`` | 一個多頁 TIFF、**沒有 KLARF** | ``Open stack…`` |
-| ``folder`` | 一個資料夾的單張影像、沒有 KLARF | ``Open folder…`` |
+| ``folder`` | 一個資料夾的影像、或單獨一張、沒有 KLARF（`.raw` 也走這裡）| ``Open images…`` |
 
 後兩者沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那件事在載入的當下就講
 （資料集標籤上常駐 ``· no KLARF``，見 :func:`no_klarf_message`）。
@@ -53,7 +52,18 @@ __all__ = [
 #: 「目前 d4t 可以支援 patch + 對應 KLARF，我需要他也能支援 **RSEM image +
 #: KLARF，或單純圖片**」。四條路對應四種 source，而「一種 source 一個入口」
 #: 是使用者定的分類原則 —— 見 `StudioWindow` 工具列的三顆 Open。
-SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
+#: **2026-09-18（F110）：第五種。** ``doe_folder`` —— 一個子目錄一顆 defect、
+#: 裡面每個檔案是一個 imaging condition（DOE）。它跟 ``folder`` **正好相反**
+#: （那邊是一個檔案一顆），所以是自己一種 kind 而不是那條路上的一個開關：
+#: 同一個 kind 兩種形狀的下場是畫布說謊 —— `SINGLE_IMAGE_KINDS` 裡寫著
+#: ``folder``，而 DOE 的一顆有好幾張，畫布上那張預設的 `load_single` 對它
+#: 一定報錯。
+#: **2026-09-18（F114）：``tiff_stack`` 拿掉了。** 使用者：「stack 功能請幫我
+#: 拿掉 我們用不到」。拿掉的是**產品面**（入口與這張清單）—— `ingest` 那一支
+#: `load_tiff_stack` 一個位元都沒動，CLI 照樣讀得動，要回來只是把字串加回
+#: 這裡與 `INPUT_SOURCES`。六個入口對使用者太多是他原話裡的另一半。
+SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "rsem", "folder",
+                                  "doe_folder")
 
 #: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
 #:
@@ -66,7 +76,7 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #:   「Reference from pattern」（使用者：「那可能要拿回來 不過要改名字
 #:   不然會誤會」），當晚收起來，**2026-08-20（F16）刪掉**（使用者：
 #:   「完全沒用，請直接拿掉」）。同一張卡走完了四種下場。
-#: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」）。
+#: * ``align`` —— **收起來**（使用者：「之後真需要我再回來」），**2026-09-17（F109）拿回來了** —— DOE 就是那個「之後」。
 #:
 #: **三種處置，判準都是使用者說了哪一句話**，不是我覺得那張卡有沒有用。
 #: 收起來＝卡片庫看不到、引擎照認、舊 recipe 照跑；刪掉＝`REGISTRY` 裡沒有，
@@ -116,7 +126,11 @@ SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "tiff_stack", "rsem", "folder")
 #: 廠內那一組收起來的卡。**「align 是收起來的」這句話只寫在這裡一次** ——
 #: `PROFILES` 那張表引用這個名字，不再各自打一遍字串。三個地方各寫一次的話，
 #: 打開其中一組而忘了另一組，症狀是「換了 profile 但那張卡還在／還是不在」。
-_DEFAULT_HIDDEN: Tuple[str, ...] = ("align",)
+#: ⚠ **2026-09-17（F109）起是空的** —— `align` 拿回來了。使用者當初說的是
+#: 「之後真需要我再回來」，而 DOE（同一顆 defect、不同 E-beam condition、比 SNR）
+#: 就是那個「之後」。它做錯的那件事（只有被移動的那一條被重採樣）同一輪修掉了：
+#: 現在整數平移、裁共同重疊區，灰階一個位元都不動。
+_DEFAULT_HIDDEN: Tuple[str, ...] = ()
 
 HIDDEN_STEPS: Sequence[str] = _DEFAULT_HIDDEN
 
@@ -273,7 +287,7 @@ class InputSource(NamedTuple):
     空白狀態上的那一句話、導覽對話框上的那顆鈕。三份會漂 —— 而且已經漂了：
     工具列有三顆 Open，空白狀態只講 KLARF（「Open a KLARF to see your patches
     here.」），於是**帶著一個資料夾的圖片進來的人，在最大的那一塊畫面上找不到
-    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `Load layout labels`，
+    自己那條路**。第四種（GLAS 匯出）更慘：卡片庫裡有一張 `layout(GDS)`，
     而它的入口那一顆鈕根本沒被 `addWidget` 到工具列上（見
     `test_every_button_built_for_the_toolbar_is_actually_on_it`）。
 
@@ -302,11 +316,21 @@ class InputSource(NamedTuple):
     short: str = ""
 
 
-#: Studio 的四種資料入口（順序就是畫面上的順序）。
+#: Studio 的**三個**資料入口（順序就是畫面上的順序）。
 #:
-#: KLARF 那一條服務兩種 kind，而那**不是**「一個入口服務兩種 source」的例外：
-#: patch 與一顆一張的差別寫在 KLARF 裡（`Images N { … }`），ingest 判得出來。
-#: 拆成兩顆鈕等於要使用者回答一個檔案已經回答了的問題，而答錯就是一個錯誤訊息。
+#: **2026-09-18（F114-2）：五顆併成三顆。** 使用者：「目前的 input 入口搞得我
+#: 很亂（user 可能會被嚇掉）」→「入口整合成 3 顆」。判準是**使用者答不答得出來**：
+#:
+#: * 併掉的 ``folder`` / ``image`` / ``raw`` 是**同一種 kind**（``folder``），
+#:   只差在「一個檔還是一疊檔」與「byte 要怎麼變成像素」—— 而那兩件事
+#:   **看一眼那條路徑就知道**。看得出來的事不該拿去問人（推廣鐵則），所以
+#:   `Open images…` 吃「一個資料夾**或**一個檔案」，分岔在
+#:   `open_dialogs._open_picked`。
+#: * 沒併的兩顆是因為**看不出來**：KLARF 那顆服務兩種 kind，而 patch 與一顆
+#:   一張的差別寫在 KLARF 裡（`Images N { … }`）—— 拆成兩顆等於要使用者回答
+#:   一個檔案已經回答了的問題。DOE 那顆與 `Open images…` 都可以指向一個目錄，
+#:   而**選錯不會報錯**：`folder` 會把每一個 condition 當成一顆 defect，
+#:   得到一批看起來完全正常的錯資料。那種時候多一顆鈕是便宜的。
 INPUT_SOURCES: Tuple[InputSource, ...] = (
     InputSource(
         key="klarf", kinds=("ebi_patch", "rsem"), title="Open KLARF…",
@@ -316,34 +340,23 @@ INPUT_SOURCES: Tuple[InputSource, ...] = (
               "is comes from the KLARF, you do not have to say."),
         icon="folder", has_klarf=True),
     InputSource(
-        key="stack", kinds=("tiff_stack",), title="Open stack…",
-        short="Stack…",
-        what=("One multi-page TIFF and nothing else - you say how many pages "
-              "there are per defect, and every group of that many becomes "
-              "one defect."),
-        icon="stack", has_klarf=False),
-    InputSource(
-        key="folder", kinds=("folder",), title="Open folder…",
-        short="Folder…",
-        what="A folder of single images: every image file becomes one defect.",
+        key="images", kinds=("folder",), title="Open images…",
+        short="Images…",
+        what=("A folder of images, or one image on its own - every image "
+              "becomes one defect. Headerless .raw works too: it asks how "
+              "they are laid out, because a .raw file does not say."),
         icon="folder_open", has_klarf=False),
-    # F85（2026-09-07）：**一張大圖**那條路。使用者要的是 PEAR 的用法
-    # （一張圖、鋪一組 ROI、看均勻度），而在這之前唯一的入口是上面那一顆
-    # —— 也就是得先把那張圖放進一個資料夾，而那一步沒有換到任何東西。
-    #
-    # ⚠ ``kinds`` 仍然是 ``folder``：資料形狀跟上面那條逐項相同
-    # （`ingest.load_image_file` 的 docstring 有理由）。所以資料集標籤上
-    # 會寫 ``folder`` —— 使用者看過並接受（kind 講的是資料形狀，不是入口）。
     InputSource(
-        key="image", kinds=("folder",), title="Open image\u2026",
-        short="Image\u2026",
-        what="One image file on its own - it becomes a single defect.",
-        icon="image", has_klarf=False),
+        key="doe_folder", kinds=("doe_folder",), title="Open conditions…",
+        short="Conditions…",
+        what=("A folder of folders: every sub-folder is one defect, and the "
+              "images inside it are that defect's imaging conditions."),
+        icon="folder_stack", has_klarf=False),
 )
 
 
 class Attachment(NamedTuple):
-    """掛在**已經載好的** lot 上的附加檔（不是第五種 source）。"""
+    """掛在**已經載好的** lot 上的附加檔（**不是另一種 source**）。"""
 
     key: str
     title: str
@@ -400,8 +413,8 @@ def recipe_is_supported(info: Dict[str, Any]) -> bool:
 def unsupported_kind_message(kind: Any) -> str:
     """載到不支援的資料集時，狀態列要說的話（白話 + 講得出替代路徑）。"""
     return ("d4t Studio does not know this kind of input: “%s”. It reads "
-            "KLARF datasets (patch pairs or one image per defect), multi-page "
-            "image stacks, and folders of single images. The command line can "
+            "KLARF datasets (patch pairs or one image per defect) and "
+            "folders of images. The command line can "
             "still run it: python -m d4t run <recipe> <data>."
             % (kind or "unknown"))
 

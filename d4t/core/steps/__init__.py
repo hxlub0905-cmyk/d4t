@@ -6,7 +6,7 @@
 ``d4t.core.pipeline.step.REGISTRY`` / ``list_steps()`` 取卡。
 
 已註冊的 key（影像段 → 算法段）：
-  load_patch, load_single, load_sidecar, normalize, tone, denoise, flatten,
+  load_patch, load_single, load_sidecar, normalize, denoise, tone, flatten,
   align, subtract, align_to, pair_source,
   roi_reference,
   glv_stats, cd_measure, focus_quality,
@@ -88,14 +88,15 @@ from . import denoise        # denoise
 from . import tone           # tone（亮度/對比/gamma/曲線/反相）
 from . import flatten        # flatten
 from . import align          # align
-from . import arith          # subtract / invert
+from . import arith          # subtract（``invert`` F7-20 併進 tone）
+from . import combine        # combine（N 條流併成一條；F110 從 arith 拆出來）
 from . import align_to       # 小圖在大圖裡的位置（F15-C）
 from . import pair_source    # 另一份資料的對應那一顆（F15）
 # Region 段只剩**一張**（F30 收成兩張，2026-09-02 再收成一張）。
 # `roi_cross`（Profile）與 `roi_template`（Template）折進 `roi_reference` 變成
 # 它的兩個 method，所以那兩個模組**不在這裡 import** —— 它們不再自己註冊，
 # 是被 `roi_reference` 取用的實作。
-from . import roi_reference  # roi_reference（四種找法 → 具名區域）
+from . import roi_reference  # roi_reference（三種找法 → 具名區域）
 # ⚠ **Measure 段的順序就是這幾行的順序**（使用者 2026-08-25：「Measure 的 card
 # 順序幫我改命名&重排：GLV → CD → Focus index」）。`list_steps` 照 REGISTRY 的
 # 插入序回，而 REGISTRY 的插入序就是這裡的 import 序 —— 卡片庫裡看到的先後
@@ -104,10 +105,10 @@ from . import roi_reference  # roi_reference（四種找法 → 具名區域）
 from . import glv_stats      # glv_stats（GLV：stats / compare）
 from . import cd             # cd_measure（CD）
 from . import quality        # focus_quality（Focus index）
-from . import output         # Output 段（csv / report / klarf / image）
+from . import output         # Output 段（report / klarf / comparison / charts）
 
 __all__ = [
-    "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith",
+    "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith", "combine",
     "quality", "glv_stats",
     "output",
 ]

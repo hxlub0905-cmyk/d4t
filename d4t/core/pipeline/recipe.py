@@ -658,7 +658,18 @@ NON_DECISION_NODELESS_CODES = frozenset({
 #: 目前這一版 recipe 的形狀（F42 B3，2026-08-27）。
 #:
 #: 1 = 區域依賴存在**參數**裡（F12 §3）；
-#: 2 = 存在**線**裡（方案 B）。
+#: 2 = 存在**線**裡（方案 B）；
+#: 4 = ``align`` 從「一條 moving 對一條 fixed，吐一條新流」變成「一組 streams
+#:     就地對齊」（F109）。**這一道只能靠版本號判斷** —— 舊檔案的 `align`
+#:     多半一個舊參數都沒寫（靠 `moving="ref"` / `out="ref_aligned"` 那組預設），
+#:     而「舊檔案靠舊預設」跟「新 recipe 靠新預設」從缺一個 key 是分不出來的
+#:     （鐵則 9 那個坑的原文就在下面 `from_json_dict` 裡）。
+#:
+#: 5 = `subtract` 拆成**比較卡**（留著 `subtract` 這個 key）與**融合卡**
+#:     （新的 `combine`），而 `absolute`（bool）換成 `sign`（三選一）（F110）。
+#:     換卡那一道看的是**舊的值**（``op`` 是不是 max/min/mean，合鐵則 9）；
+#:     `absolute` 那一道跟第 4 版同一個理由只能靠版本號 —— 它有預設值，
+#:     舊檔案多半沒寫它。
 #:
 #: 新建的 recipe 就是「這一版寫的」，所以 :class:`Recipe` 的預設值是它 ——
 #: 那不是裝飾：遷移以 ``version < RECIPE_VERSION`` 為判準，而一份記憶體裡組出來
@@ -666,7 +677,7 @@ NON_DECISION_NODELESS_CODES = frozenset({
 #: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
 #: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
 #: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
-RECIPE_VERSION = 3
+RECIPE_VERSION = 5
 
 
 def _cycles_with(edges: List["Edge"], extra: "Edge",
@@ -1918,10 +1929,10 @@ def _migrate_folded_output_cards(nodes: Dict[str, "RecipeNode"]) -> None:
 def _migrate_folded_region_cards(nodes: Dict[str, "RecipeNode"]) -> None:
     """``roi_cross`` / ``roi_template`` → ``roi_reference`` ＋ 對應的 ``method``（F30）。
 
-    使用者 2026-08-25：「把 Profile / Template 也折進 roi_reference」。四張
-    Region 卡回答的是同一句話（「哪些地方應該長得一樣」），所以它們是一張卡的
-    四個 method —— 跟 ``roi_from_mask``（F29）與 ``roi_compare``（F16）同一個
-    形狀，連遷移的寫法都照抄。
+    使用者 2026-08-25：「把 Profile / Template 也折進 roi_reference」。當時那四張
+    Region 卡回答的是同一句話（「哪些地方應該長得一樣」），所以它們折成了一張卡
+    的 method —— 跟 ``roi_from_mask``（F29）與 ``roi_compare``（F16）同一個形狀，
+    連遷移的寫法都照抄。（**今天幾個 method 看 ``roi_reference.METHODS``**。）
 
     判準是「**舊 step 名在不在**」（鐵則 9）。換完之後不再命中，所以
     ``to_json_dict → from_json_dict`` 走第二次什麼都不會發生（identity）——
@@ -2129,6 +2140,143 @@ def _migrate_reference_into_ports(nodes: Dict[str, "RecipeNode"],
             params[pname] = ""
             edges[:] = [e for e in edges
                         if not (e.dst == nid and e.dst_in == pname)]
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+
+
+def _migrate_align_into_streams(nodes: Dict[str, "RecipeNode"],
+                               edges: List["Edge"]) -> None:
+    """``align`` 換形狀：一條 moving 對一條 fixed → 一組 ``streams`` 就地對齊（F109）。
+
+    舊形狀是 ``moving`` / ``fixed`` / ``out``，只寫出**一條**新流（預設
+    ``ref_aligned``）。新形狀是 ``streams``（含基準）＋ ``fixed``，每條**寫回原名**
+    —— 因為新卡會把所有參與的流一起裁成共同重疊區，基準那一條不跟著裁的話，
+    出去的幾條尺寸就對不起來。
+
+    所以這一道要做兩件事，少做第二件的話**舊檔案會安靜地拿不同尺寸的兩張圖去相減**：
+
+    1. 把三個舊參數換成兩個新的；
+    2. **把下游指著 ``out`` 的地方改成指 ``moving``** —— 參數格與線上的埠名都要。
+
+    ⚠ **判準是版本號，不是「舊 key 在不在」。** 一般的遷移該看舊東西存不存在
+    （鐵則 9），但這一道不行：實測 ``tests/fixtures/recipes/dual_route_basic.json``
+    的 align 節點**三個舊參數一個都沒寫**，整個靠預設值跑 —— 而那正是鐵則 9 說
+    「分不出來」的那種訊號。版本號是這裡唯一看得見的差異，所以
+    ``RECIPE_VERSION`` 跟著升到 4。
+
+    ⚠ 第 2 件事要問 ``REGISTRY`` 「這一格是不是影像流」，所以它跟
+    :func:`_migrate_folded_output_cards` 一樣**要求卡片庫已經 import 過**
+    （CLI、Studio、worker 的 ``_init_worker`` 三個入口都會）。
+    只 import ``recipe`` 而不 import ``d4t.core.steps`` 的話，第 1 件照做、
+    第 2 件靜靜跳過 —— 那是既有的慣例，不是這一道新增的風險。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "align":
+            continue
+        params = dict(node.params)
+        moving = str(params.pop("moving", "ref") or "ref").strip()
+        fixed = str(params.get("fixed", "test") or "test").strip()
+        out = str(params.pop("out", "ref_aligned") or "").strip()
+        params["fixed"] = fixed
+        params["streams"] = "%s,%s" % (fixed, moving) if fixed != moving else fixed
+        params["suffix"] = ""
+        nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
+                                enabled=node.enabled)
+        if not out or out == moving:
+            continue
+        # 下游別再指著那條不再存在的流。
+        for other_id, other in list(nodes.items()):
+            if other_id == nid:
+                continue
+            spec = REGISTRY.get(other.step)
+            if spec is None:
+                continue
+            changed = dict(other.params)
+            touched = False
+            for ps in spec.params:
+                if ps.type not in IMAGE_TYPES or ps.direction != "in":
+                    continue
+                if str(changed.get(ps.name, "") or "").strip() == out:
+                    changed[ps.name] = moving
+                    touched = True
+            if touched:
+                nodes[other_id] = RecipeNode(id=other.id, step=other.step,
+                                             params=changed,
+                                             enabled=other.enabled)
+        for i, e in enumerate(list(edges)):
+            if e.src == nid and e.src_out == out:
+                edges[i] = Edge(src=e.src, dst=e.dst, src_out=moving,
+                                dst_in=e.dst_in)
+
+
+def _migrate_split_out_combine(nodes: Dict[str, "RecipeNode"],
+                               edges: List["Edge"]) -> None:
+    """`subtract` 的 max/min/mean → 新的 `combine` 卡（F110，2026-09-18）。
+
+    那三個 ``op`` 回答的不是這張卡在問的問題。判準是**訊號形狀**：比較是
+    2 條進 1 條出，融合是 N 條進 1 條出 —— 而 max/min/mean 跟「兩張」沒有關係。
+
+    換卡要換三件事，少任何一件舊檔案都開不起來：
+
+    1. ``step``：``subtract`` → ``combine``；
+    2. 參數：``a`` / ``b`` 兩顆埠併成一格 ``streams``，``op`` → ``method``；
+    3. **線上的埠名**：指進來的邊 ``dst_in`` 從 ``a`` / ``b`` 變成 ``streams``。
+       少了這一件，畫布上那兩條線指向不存在的埠 —— 而畫布會照實畫出來（F9），
+       使用者看到的是「我的 recipe 壞了」。
+
+    判準照鐵則 9 看**舊的值**（``op`` 是不是那三個之一），不是看新鍵缺席 ——
+    所以跑第二次是 no-op。``absolute`` 一起帶過去嗎？**不帶**：融合沒有
+    「取絕對值」的意思（它不產生負值），而那一格在舊檔案裡對 max/min/mean
+    本來就沒有作用（舊的 `run` 只在 ``subtract`` 那一支讀它）。
+    """
+    moved = {"max": "max", "min": "min", "mean": "mean"}
+    for nid, node in list(nodes.items()):
+        if node.step != "subtract":
+            continue
+        op = str(node.params.get("op", "subtract") or "subtract").strip()
+        if op not in moved:
+            continue
+        old = dict(node.params)
+        a = str(old.get("a", "test") or "").strip()
+        b = str(old.get("b", "ref") or "").strip()
+        params: Dict[str, Any] = {
+            "streams": ",".join([x for x in (a, b) if x]),
+            "method": moved[op],
+        }
+        if old.get("out"):
+            params["out"] = old["out"]
+        nodes[nid] = RecipeNode(id=node.id, step="combine", params=params,
+                                enabled=node.enabled)
+        for i, e in enumerate(list(edges)):
+            if e.dst == nid and e.dst_in in ("a", "b"):
+                edges[i] = Edge(src=e.src, dst=e.dst, src_out=e.src_out,
+                                dst_in="streams")
+
+
+def _migrate_absolute_into_sign(nodes: Dict[str, "RecipeNode"]) -> None:
+    """`subtract` 的 ``absolute``（bool）→ ``sign``（三選一）（F110）。
+
+    判準是**「舊鍵在不在」**（鐵則 9 的正牌用法），而這一道剛好用得上它 ——
+    跟 F109 的 align 不一樣。
+
+    ⚠ 差別在**預設值的意思有沒有變**：align 那一道非得靠版本號，因為舊預設
+    （``moving="ref"``、``out="ref_aligned"``）跟新預設是兩種不同的行為，
+    從「缺一個 key」分不出是哪一種。這一道沒有那個問題 ——
+    舊的 ``absolute=True`` 跟新的 ``sign="abs"`` **是同一件事**，所以
+    **檔案裡沒寫 ``absolute`` 就什麼都不要做**：不寫也跑得出一模一樣的結果，
+    而寫下去就是「讀檔幫使用者填了一個他沒寫的值」
+    （`test_reading_a_recipe_never_invents_a_parameter` 守的正是這件事 ——
+    這一道第一版真的踩到了它）。
+
+    ``True`` → ``abs``、``False`` → ``signed``。沒有一個舊值會變成 ``split``
+    —— 那是這一輪新長出來的第三種答案。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "subtract" or "absolute" not in node.params:
+            continue
+        params = dict(node.params)
+        keep = bool(params.pop("absolute"))
+        params["sign"] = "abs" if keep else "signed"
         nodes[nid] = RecipeNode(id=node.id, step=node.step, params=params,
                                 enabled=node.enabled)
 
@@ -2793,7 +2941,15 @@ class Recipe:
             _migrate_region_params_into_edges(nodes, routes, edges)
             # 逐框比較的參照怎麼取（F68）—— 舊檔案釘回當時的行為。
             _migrate_glv_ref_pairing(nodes)
+            # align 換形狀（F109）—— 連下游指著 `ref_aligned` 的地方一起改。
+            _migrate_align_into_streams(nodes, edges)
             version = RECIPE_VERSION
+        # F110：`subtract` 拆成比較卡與融合卡。**兩道都看舊的東西在不在**
+        # （鐵則 9 的正牌用法），所以不掛在版本閘底下 —— 跑第二次是 no-op。
+        # ⚠ 換卡那一道要排在 `absolute` 那一道**前面**：換完之後的節點已經不是
+        # `subtract` 了，而 `absolute` 對融合卡沒有意義。
+        _migrate_split_out_combine(nodes, edges)
+        _migrate_absolute_into_sign(nodes)
         hydrate_regions(nodes, edges)
         return cls(
             recipe_id=str(d["recipe_id"]),
@@ -3258,6 +3414,65 @@ def _chart_metric_issues(recipe: "Recipe", step_cls, p: Dict[str, Any],
     return []
 
 
+def _content_written(step_cls, p: Dict[str, Any]) -> Dict[str, str]:
+    """這張卡寫出去的每一條流**裝的是什麼**（``{流名: "gray"|"label"}``）。
+
+    只有明著宣告 ``content`` 的輸出格會說出不一樣的答案；其餘一律灰階。
+    一張卡把 label map 讀進來又寫出去（今天沒有這種卡）不會自動保留 label ——
+    宣告不推導，跟 `ParamSpec.direction` 同一個理由。
+    """
+    out: Dict[str, str] = {}
+    for spec in step_cls.params:
+        what = spec.content_written()
+        if not what:
+            continue
+        raw = str(p.get(spec.name, "") or "").strip()
+        for v in ([x.strip() for x in raw.split(",")]
+                  if spec.type.endswith("s") else [raw]):
+            if v:
+                out[v] = what
+    return out
+
+
+def _wrong_content(step_cls, p: Dict[str, Any], nid: str, k: str,
+                   content: Dict[str, str]) -> List[Issue]:
+    """一條 label map 接進了一格只收灰階的輸入（F110）。
+
+    **今天這條線完全合法，而三層都沒擋。** label map 的像素值*就是*層號
+    （0 = 背景、1..N = 第 N 個 POI 層），所以正規化它、拉對比、平滑它 ——
+    三件事都跑得完、都不報錯，而 1、2、3 被混成 1.7 這種不存在的層號之後，
+    下游的每一個區域都是錯的。`steps/load_sidecar.py` 的模組說明逐字寫著這件事，
+    但在這一輪之前那句話只是一句話。
+
+    error 級而不是 warning：這不是「你可能不想這樣做」，是**下游拿到的東西
+    一定是錯的**，而且錯得看不出來。
+    """
+    bad: List[Issue] = []
+    for spec in step_cls.params:
+        if not spec.is_image_input():
+            continue
+        raw = str(p.get(spec.name, "") or "").strip()
+        vals = ([x.strip() for x in raw.split(",")]
+                if spec.type.endswith("s") else [raw])
+        for v in vals:
+            what = content.get(v, "")
+            if not v or not what or spec.accepts(what):
+                continue
+            bad.append(Issue(
+                code="wrong-content", level="error", node_id=nid,
+                title=f"step '{nid}' is being fed a layout label map",
+                detail=(
+                    "route '%s': '%s' is a label map - every pixel value in it "
+                    "IS a layer number, not a brightness. “%s” on this card "
+                    "works on pictures, and running it on layer numbers "
+                    "blends 1, 2 and 3 into values like 1.7 that are not any "
+                    "layer at all. It would not fail; every region after it "
+                    "would just be wrong. Send the label map straight to the "
+                    "Region card instead."
+                    % (k, v, spec.label or spec.name))))
+    return bad
+
+
 def _uneven_treatment(step_cls, p: Dict[str, Any], nid: str, k: str,
                       history: Dict[str, List[Any]],
                       from_input: Set[str], registry) -> List[Issue]:
@@ -3275,10 +3490,17 @@ def _uneven_treatment(step_cls, p: Dict[str, Any], nid: str, k: str,
         return []
     keys, seen = [], set()
     for spec in step_cls.input_specs():
-        v = str(p.get(spec.name, "") or "").strip()
-        if v and v in from_input and v not in seen:
-            seen.add(v)
-            keys.append(v)
+        raw = str(p.get(spec.name, "") or "").strip()
+        # ⚠ **複數的輸入格要拆開**（F109）：`align` 的 `streams` 是 `image_keys`，
+        # 值長得像 ``"test,ref"`` —— 整串去比對 `from_input` 永遠不會中，於是這條
+        # lint 對它一聲都不吭。這裡拆開之後，任何「一格吃好幾條流」的 Compare 卡
+        # 都回到這條檢查底下。
+        vals = ([x.strip() for x in raw.split(",")]
+                if spec.type in IMAGE_TYPES and spec.type.endswith("s") else [raw])
+        for v in vals:
+            if v and v in from_input and v not in seen:
+                seen.add(v)
+                keys.append(v)
     if len(keys) < 2:
         return []
     a, b = keys[0], keys[1]
@@ -3639,6 +3861,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         #: 直接來自輸入卡的那幾條流。`diff` 這種中途產生的流不算 ——
         #: 拿它跟 `test` 比「處理歷史」沒有意義（來歷本來就不同）。
         from_input: Set[str] = set()
+        #: 每一條流**裝的是什麼**（F110）。跟 `history` 同一個形狀、同一個
+        #: 迴圈餵：來源是產出那一格的 `content` 宣告，沿著線傳下去。
+        content: Dict[str, str] = {}
         for nid in order:
             node = recipe.nodes.get(nid)
             if node is None or not node.enabled:
@@ -3663,6 +3888,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                                                  region_owner))
                 feats |= set(step_cls.resolve_features(p))
                 regions |= set(step_cls.resolve_regions_out(p))
+                # ⚠ 內容型別的**唯一來源是入口卡**（`load_sidecar` 就是一張
+                # 入口卡），所以這一行非在 `continue` 之前不可。
+                content.update(_content_written(step_cls, p))
                 continue
             # **還沒接上來源**（F10）。這一條要排在 missing-image 前面，
             # 而且擋掉後面所有以「這張卡會產出什麼」為前提的檢查 ——
@@ -3830,6 +4058,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.extend(_late_normalize(step_cls, p, nid, k, history))
             issues.extend(_uneven_treatment(step_cls, p, nid, k, history,
                                             from_input, registry))
+            # 問的是**這張卡吃進來的**，所以排在它自己的宣告記進去之前。
+            issues.extend(_wrong_content(step_cls, p, nid, k, content))
+            content.update(_content_written(step_cls, p))
             issues.extend(_chart_metric_issues(recipe, step_cls, p, nid, k,
                                                registry))
             if step_cls.resolve_group() == GROUP_ENHANCE:

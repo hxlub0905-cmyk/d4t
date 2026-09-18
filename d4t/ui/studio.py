@@ -92,7 +92,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -126,7 +125,10 @@ from d4t.core.pipeline.verdict_trace import verdict_trace
 from . import autosave
 from .splitters import HairlineSplitter
 from . import card_menu
+from functools import partial
+
 from . import clipboard
+from . import open_dialogs
 from . import windows_menu
 from . import baseline
 from . import fit_screen
@@ -1007,7 +1009,8 @@ class StudioWindow(QMainWindow):
 
     def _build_shortcuts(self) -> None:
         handlers = {
-            "open_klarf": self._on_open_klarf,
+            "open_klarf": partial(open_dialogs.open_source, self,
+                                  "klarf"),
             "open_recipe": self._on_open_recipe,
             "save_recipe": self._on_save_recipe,
             "save_recipe_as": self._on_save_recipe_as,
@@ -1519,7 +1522,7 @@ class StudioWindow(QMainWindow):
                 b.setObjectName("primary")     # 最常見的那一條是主要動作
             b.setMinimumWidth(140)
             b.clicked.connect(
-                getattr(self, "_on_open_%s" % src.key))
+                partial(open_dialogs.open_source, self, src.key))
             self.empty_source_buttons[src.key] = b
             row.addWidget(b)
             what = QLabel(src.what if src.has_klarf else
@@ -3912,7 +3915,8 @@ class StudioWindow(QMainWindow):
                         "coordinates and no write-back - CSV and Excel "
                         "reports still work.")
             act.setToolTip(tip)
-            act.triggered.connect(getattr(self, "_on_open_%s" % src.key))
+            act.triggered.connect(
+                partial(open_dialogs.open_source, self, src.key))
             menu.addAction(act)
         btn = self.param_form.source_button()
         menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
@@ -3941,7 +3945,7 @@ class StudioWindow(QMainWindow):
             if not spec.visible_for(node.params):
                 continue
             try:
-                n = float(node.params.get(spec.name, spec.default))
+                n = spec.extent_px(node.params.get(spec.name, spec.default))
             except (TypeError, ValueError):
                 continue
             # 1 = 不濾波（`denoise` 的 ksize=1 就是原樣回傳），畫一個 1px 的框
@@ -4530,42 +4534,15 @@ class StudioWindow(QMainWindow):
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
-    def load_stack_path(self, path: Any, per_defect: int = 1,
-                        sync: bool = False) -> bool:
-        """載入一個**多頁 TIFF、沒有 KLARF**（F11 Input-2）。
+    def load_folder_path(self, folder: Any, sync: bool = False,
+                         doe: bool = False) -> bool:
+        """載入一個**資料夾的單張影像**（F11 Input-3），或 DOE 的一疊 condition。
 
-        ``per_defect`` 是「一顆 defect 幾張圖」—— 那是**資料的屬性**（機台怎麼收
-        的），所以在這裡問，不放進 recipe。recipe 只負責**命名**那幾張
-        （`load_patch` 的 `channel_map`）。分組與命名分開，同一批資料的「一顆幾張」
-        才不會因為換一份 recipe 而改變。
-        """
-        path = str(path)
-        n = max(1, int(per_defect))
-        if not os.path.isfile(path):
-            self._status("File not found: %s" % path)
-            return False
-        self._pending_dataset_name = os.path.basename(path)
-        if sync:
-            try:
-                ds = DatasetLoadWorker.run_sync_stack(path, n)
-            except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load image stack: %s: %s"
-                             % (type(e).__name__, e), "error")
-                return False
-            return self._on_dataset_loaded(ds)
-        if not self.dataset_worker.start_stack(path, n):
-            self._status("A dataset is already loading — please wait.")
-            return False
-        self._progress_busy("Loading %s…" % os.path.basename(path))
-        self._status("Loading: %s (%d image(s) per defect)"
-                     % (os.path.basename(path), n))
-        return True
-
-    def load_folder_path(self, folder: Any, sync: bool = False) -> bool:
-        """載入一個**資料夾的單張影像**（F11 Input-3）。
-
-        沒有 KLARF、沒有座標，每個影像檔一顆 defect。多頁 TIFF 在這條路上只讀
-        得到第一頁 —— ingest 會為此發一句警告並指向 ``Open stack…``。
+        沒有 KLARF、沒有座標。``doe=False``：每個影像檔一顆 defect，多頁 TIFF
+        在這條路上只讀得到第一頁（ingest 會為此發一句警告並指向 ``Open stack…``）。
+        ``doe=True``（F110）：**一個子目錄一顆、裡面每個檔案一個 imaging
+        condition** —— 正好相反，所以它是第五種 kind 而不是這裡的一個開關；
+        這一格只決定呼叫哪一支 ingest。
         """
         d = str(folder)
         if not os.path.isdir(d):
@@ -4574,13 +4551,13 @@ class StudioWindow(QMainWindow):
         self._pending_dataset_name = os.path.basename(d.rstrip("/\\"))
         if sync:
             try:
-                ds = DatasetLoadWorker.run_sync_folder(d)
+                ds = DatasetLoadWorker.run_sync_folder(d, doe)
             except Exception as e:  # UI 邊界，一律回報
                 self._status("Could not load folder: %s: %s"
                              % (type(e).__name__, e), "error")
                 return False
             return self._on_dataset_loaded(ds)
-        if not self.dataset_worker.start_folder(d):
+        if not self.dataset_worker.start_folder(d, doe):
             self._status("A dataset is already loading — please wait.")
             return False
         self._progress_busy("Loading %s…" % os.path.basename(d.rstrip("/\\")))
@@ -5292,9 +5269,9 @@ class StudioWindow(QMainWindow):
 
     #: 會產生投影曲線的那一支（面板只在編輯它的時候出現）。
     #:
-    #: ⚠ **一張卡、四個 method**（F30）—— 所以判準是 ``(key, method)``，
-    #: 不是 key。只看 key 的話 Region 卡全部都會亮起那塊面板，而其中三支根本
-    #: 產不出投影曲線：使用者會看到一塊永遠是空的面板。
+    #: ⚠ **一張卡、好幾個 method**（F30；幾個看 ``roi_reference.METHODS``，
+    #: 這裡不抄）—— 判準因此是 ``(key, method)`` 不是 key。只看 key 的話 Region
+    #: 卡全部亮起那塊面板，而別的 method 產不出投影曲線：那是一塊永遠空的面板。
     PROFILE_STEP = "roi_reference"
     PROFILE_METHOD = "stripes in the image"
 
@@ -7175,7 +7152,8 @@ class StudioWindow(QMainWindow):
         if dlg is None:
             dlg = WelcomeDialog(self)
             dlg.demo_requested.connect(self._on_demo_requested)
-            dlg.open_klarf_requested.connect(self._on_open_klarf)
+            dlg.open_klarf_requested.connect(
+                partial(open_dialogs.open_source, self, "klarf"))
             dlg.library_requested.connect(self.open_recipe_library)
             self.welcome_dialog = dlg
         dlg.show()
@@ -7258,13 +7236,6 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 對話框（測試不走這條路）
     # ==================================================================== #
-    def _on_open_klarf(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open KLARF", "", "KLARF (*.001 *.klarf *.txt);;All files (*)")
-        if not path:
-            return
-        self.load_dataset_path(path)
-
     # ---- 第二份 lot（F15）--------------------------------------------------
     def _on_open_pair_source(self, node_id: str) -> None:
         """`pair_source` 卡上的 `Open data…`：載一份**第二個** lot 掛上去。
@@ -7573,44 +7544,6 @@ class StudioWindow(QMainWindow):
         self.refresh_preview()
         return msg
 
-    def _on_open_stack(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open image stack", "",
-            "Multi-page TIFF (*.tif *.tiff *.I01);;All files (*)")
-        if not path:
-            return
-        # 「一顆幾張」問一次就好，而且**預設值要是這個檔案自己的頁數線索**：
-        # 問這一格的時候使用者手上唯一的事實是「這個檔案有幾頁」，所以先講出來。
-        pages = 0
-        try:
-            from d4t.core.ingest import tiff_index
-            pages = int(tiff_index.n_pages(path))
-        except Exception:  # 只是拿來寫提示
-            pages = 0
-        prompt = ("How many images make up one defect?\n\n"
-                  "%s\nEvery N consecutive pages become one defect; enter 1 if "
-                  "each page is its own defect. Name them afterwards on the "
-                  "Load images card." % ("This file has %d page(s)." % pages
-                                         if pages else ""))
-        n, ok = QInputDialog.getInt(self, "Images per defect", prompt, 1, 1,
-                                    max(1, pages) if pages else 999)
-        if not ok:
-            return
-        self.load_stack_path(path, n)
-
-    def _on_open_folder(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Open folder of images", "")
-        if not d:
-            return
-        self.load_folder_path(d)
-
-    def _on_open_image(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open image", "",
-            "Images (*.png *.tif *.tiff *.I01 *.jpg *.jpeg *.bmp);;All files (*)")
-        if not path:
-            return
-        self.load_image_path(path)
 
     def _on_open_recipe(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

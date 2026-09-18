@@ -60,8 +60,8 @@ from d4t.core.pipeline.step import REGISTRY              # noqa: E402
 #: 掃哪幾個目錄。
 #:
 #: **`bundle/` 不在裡面**：`bundle/d4t_bundle.py` 是 `tools/release.py` 產出來
-#: 的（3.7 MB、32,000 行），它的大小是「repo 有多大」的鏡像，不是一個人寫出來
-#: 的檔案。對產出物設上限只會得到一道每次 commit 都要調的關。
+#: 的，它的大小是「repo 有多大」的鏡像，不是一個人寫出來的檔案（水位表在
+#: `AGENTS.md` §2，守它的是 `tests/test_docs_match_registry.py`）。對產出物設上限只會得到一道每次 commit 都要調的關。
 #:
 #: **`tests/` 也不在裡面**：測試檔變長通常是好事（多守一件事），而這一份要抓
 #: 的是「沒有人決定卻變大」，那件事發生在出貨的程式碼上。
@@ -174,7 +174,16 @@ FILE_CEILINGS = {
     # `except Exception:` 後面直接 pass/continue/return 的地方多一行
     # `swallowed("studio.<函式>")`，加一行 import。**這一格從此不再往上**
     # （見下面 `HARD_CAPS`）。
-    "d4t/ui/studio.py": 7753,
+    # 2026-09-18（F110）：7,753 → **7,717**（−36）。第五顆 Open 鈕（DOE）要加，
+    # 而這一格只准往下 —— 所以先搬走等量的東西：五顆 Open 的對話框與那個
+    # 「按下去要做什麼」的分岔整族搬進 `ui/open_dialogs.py`，`studio.py` 只留
+    # `partial(open_dialogs.open_source, self, src.key)`。
+    # **順便讓一句話變成真的**：`CLAUDE.md` §5 寫著「加／改一個入口＝改
+    # `INPUT_SOURCES`，不要動 UI」，而在這之前加一列就得同時在這裡長一支
+    # `_on_open_<key>` 出來，不然那顆鈕按下去是 AttributeError。
+    # 2026-09-18（F114）：7,717 → **7,686**（−31）。stack 拿掉，`load_stack_path`
+    # 跟著走 —— 見下面 `HARD_CAPS` 那一段。
+    "d4t/ui/studio.py": 7686,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -188,12 +197,35 @@ FILE_CEILINGS = {
     # 這條規則寫在自己的迴圈裡，而 `validate` 對 Output 卡的 `rank_by` 根本
     # 不知道 let 存在（指到 working number 被標成 nobody produces it）。
     # 2026-09-09（logger）：3,865 → 3,870。同上：五處 `except Exception:` 留痕。
-    "d4t/core/pipeline/recipe.py": 3870,
+    # 2026-09-17（F109）：3,870 → 3,949（+79）。第 20 道遷移
+    # （`_migrate_align_into_streams`，RECIPE_VERSION 3 → 4）。**它比前 19 道
+    # 都長，而那不是隨便寫的**：align 的舊 `out` 參數是一個**下游看得見的名字**
+    # （`ref_aligned`），所以換掉它的不是那一張卡自己的三個鍵，還有每一張指著
+    # 那個名字的 `image_key` 參數與 `recipe.edges` 上的 `src_out`。少改任何一邊，
+    # 舊 recipe 開起來就是一條斷掉的線 —— 而畫布會照實畫出來（F9），使用者看到
+    # 的是「我的 recipe 壞了」。
+    # 那 79 行裡有一半是說明：下一個要改「卡片寫出去的名字」的人得先讀到這件事。
+    # 2026-09-18（F110）：3,949 → 4,017（+68）。`wrong-content` —— 把 layout
+    # label map 接進 Normalize 今天是一條**完全合法**的線，而 lint／畫布／引擎
+    # 三層都沒擋。label map 的像素值就是層號，正規化會把 1、2、3 混成 1.7，
+    # 而且**不會報錯**：跑得完、有數字、下游每一個區域都是錯的。
+    # 多的是兩支（`_content_written` 傳播、`_wrong_content` 檢查）與它們的理由。
+    # 2026-09-18（F110，同一輪第二次）：4,017 → 4,101（+84）。第 21、22 道遷移
+    # —— `subtract` 拆卡（換 step、併兩顆埠、改線上的埠名）與 `absolute` → `sign`。
+    # 那 84 行裡有一半是**兩道遷移判準不同的理由**：一道看舊的值（鐵則 9 正牌），
+    # 一道看舊鍵在不在，而 F109 的 align 那一道只能靠版本號 —— 三種判準的差別
+    # 在「預設值的意思有沒有變」，下一個寫遷移的人得先讀到這件事。
+    "d4t/core/pipeline/recipe.py": 4101,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右
     # 兩段以前畫進同一個矩形而沒有一方讓寬度，面板窄到 200 px 時疊在一起。
-    "d4t/ui/inspectors.py": 3660,
+    # 2026-09-17（F109）：3,660 → 3,669（+9）。`AlignInspector` 的散佈圖以前寫死
+    # `align_dx`／`align_dy` 兩個名字，而 align 現在對 N 條流、三條以上時特徵名
+    # **帶著流名前綴** —— 寫死的那一版在 DOE（一次 N 個 condition，正是這張圖最
+    # 有用的時候）會畫出一張**空圖**，而空圖上寫的是「跑一次試跑就看得到」。
+    # 多的幾行是「跟卡片要名字，不自己拼字串」與那句為什麼。
+    "d4t/ui/inspectors.py": 3669,
     # 節點畫布。沒有被點名，只是它超過一般上限，凍住免得它安靜地漂。
     #
     # 2026-09-08（U18/U19/U20）：2,705 → 2,887（+182）。三件都長在畫布上，
@@ -342,7 +374,9 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        298,
+        293,
+        # 2026-09-18（F114）：294 → 293。使用者把 stack 拿掉（「我們用不到」），
+        # `load_stack_path` 跟著走。**刪掉也要把尺調下來**（反向測試在守）。
         # 2026-09-09：294 → 298。`write_outputs`（跑與寫拆開）、`rerun`
         # （邏輯在 `batch.rerun_decision`）、`_on_defect_selected`（Results
         # 單擊帶過去）、`_preview_whole_route`（Output 卡／判定樹跑到底）。
@@ -383,7 +417,8 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        437,
+        433,
+        # 2026-09-18（F114）：434 → 433。同上 —— `load_stack_path` 帶走一個名字。
         # 2026-09-09（第二次）：431 → 437。`_last_run`（上一批的底稿：rows／
         # 量測簽章／被停掉／幾顆，一個 dict 不是四個名字）、`_tree_focus`
         # （編樹時預覽跑到底），以及下面那四支方法的名字。
@@ -413,11 +448,26 @@ COUNT_CEILINGS = {
         "StudioWindow 的 self.* 名字數（2026-09-02 是 386）",
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[1],
     ),
-    # 19 道遷移撐 3 個 RECIPE_VERSION，而且**只增不減** —— 沒有任何一份文件說
-    # 過「舊到哪一版可以不再自動轉」。第 20 道要寫的時候，這一格會先問那句話。
+    # 22 道遷移撐 5 個 RECIPE_VERSION，而且**只增不減** —— 沒有任何一份文件說
+    # 過「舊到哪一版可以不再自動轉」。第 23 道要寫的時候，這一格會先問那句話。
+    #
+    # 2026-09-18（F110）：20 → 22。`subtract` 拆成比較卡與融合卡（`combine`），
+    # 而 `absolute`（bool）換成 `sign`（三選一）。**兩道都看舊的東西在不在**
+    # （鐵則 9 的正牌用法，不是 F109 那種只能靠版本號的情況）——
+    # `absolute` 那一道的第一版寫成版本閘，被
+    # `test_reading_a_recipe_never_invents_a_parameter` 當場擋下來：
+    # 舊的 `absolute=True` 跟新的 `sign="abs"` 是同一件事，所以檔案裡沒寫就
+    # 什麼都不該寫進去。
+    #
+    # 2026-09-17（F109）：19 → 20。align 從 `moving`/`fixed`/`out` 改成
+    # `streams`/`fixed`/`suffix`（一張卡對 N 條流，DOE 要的形狀）。
+    # **這一格問的那句話這一次有答案**：`tests/fixtures/recipes/dual_route_basic.json`
+    # 用著 align 而且撐著三組黃金值裡的兩組，出貨的 recipe 也可能帶著舊參數 ——
+    # 不寫這道遷移，那些檔案開起來是一張參數全空的卡，跑出來的數字跟以前不一樣
+    # **而且不會報錯**。那正是這個 repo 最貴的失敗（「跑得完、有數字、而且是錯的」）。
     "recipe_migrations": (
-        19,
-        "recipe.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 3）",
+        22,
+        "recipe.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 5）",
         _migration_count,
     ),
 }
@@ -436,9 +486,18 @@ COUNT_CEILINGS = {
 #: 數字凍在 2026-09-09 `d4t/core/log.py` 那一刀落地之後（每個被吃掉的例外
 #: 多一行 `swallowed(...)`，那是整個 repo 一起做的機械改動，不是 Studio 長了）。
 HARD_CAPS = {
-    "d4t/ui/studio.py": 7753,
-    "studio_window_methods": 298,
-    "studio_window_attributes": 437,
+    # 2026-09-18（F110）：三格一起往下。五顆 Open 的對話框與分岔搬進
+    # `ui/open_dialogs.py` —— 行 7,753 → 7,717、方法 298 → 294（五支
+    # `_on_open_<key>` 收成模組層的一支）、`self.*` 437 → 434。
+    # 那一輪要**加**第五顆 Open 鈕，而這三格只准往下：規矩就是先從它手上
+    # 搬走等量的東西，而搬完之後多出來的餘裕要鎖住，不是留著下次偷偷用掉。
+    # 2026-09-18（F114）：三格再往下。使用者把 stack 拿掉（「我們用不到」），
+    # 而 `load_stack_path` 是 `StudioWindow` 上的一支 —— 行 7,717 → 7,686、
+    # 方法 294 → 293、`self.*` 434 → 433。**刪掉東西也要把尺跟著調** ——
+    # 留著那段餘裕就是留給下一個人偷偷用掉的空間。
+    "d4t/ui/studio.py": 7686,
+    "studio_window_methods": 293,
+    "studio_window_attributes": 433,
 }
 
 

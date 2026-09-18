@@ -33,12 +33,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from . import imageio, tiff_index
+from .rawfile import RAW_EXTS, RawSpec, read_raw, suggest_shift
 from . import klarf_core
 from .klarf_core import KlarfDoc
 
@@ -101,6 +102,13 @@ class ImageRef:
     path: str
     page: Optional[int]
     channel: str
+    #: `.raw` 專用：**這個檔要怎麼讀**（寬高、位元深度、檔頭長度、降位位移）。
+    #:
+    #: 為什麼幾何住在**資料**上而不是卡片的參數上（F113）：`.raw` 裡沒有任何
+    #: 一個 byte 在講寬高，那是**這一批檔案的性質**，不是「這份 recipe 想怎麼
+    #: 量」。放進 recipe 的話，同一份 recipe 換一批不同尺寸的 raw 就會安靜地
+    #: 讀出一張斜掉的圖；放在這裡，載入的當下就對得起來或當場報錯。
+    raw: Optional["RawSpec"] = None
 
 
 @dataclass
@@ -172,7 +180,10 @@ class DefectItem:
 
     def _read(self, ref: "ImageRef", what: str,
               exact: bool = False) -> np.ndarray:
-        if ref.page is not None:
+        spec = ref.raw
+        if spec is not None:
+            arr = read_raw(ref.path, spec)
+        elif ref.page is not None:
             arr = tiff_index.read_page(ref.path, ref.page)
         elif exact:
             arr = imageio.load_exact(ref.path)
@@ -185,7 +196,7 @@ class DefectItem:
 
 @dataclass
 class Dataset:
-    kind: str                               # "ebi_patch" | "rsem" | "folder"
+    kind: str                   # "ebi_patch" | "rsem" | "tiff_stack" | "folder"
     klarf: Optional[KlarfDoc]
     items: List[DefectItem] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -480,7 +491,7 @@ def load_image_file(path) -> Dataset:
     唯一的入口是 :func:`load_folder` —— 也就是**得先把那張圖放進一個資料夾**。
     那一步沒有換到任何東西。
 
-    ⚠ **``kind`` 仍然是 ``folder``，不新增第五種。** 資料形狀跟
+    ⚠ **``kind`` 仍然是 ``folder``，不新增一種。** 資料形狀跟
     :func:`load_folder` 逐項相同（``images={"single": …}``、沒有座標、寫不回
     KLARF），而多一個 kind 要同時動 `scope.SUPPORTED_KINDS`、
     `recipe_is_supported` 與那幾支測試 —— 換到的是零。代價是資料集標籤上會
@@ -549,6 +560,156 @@ def load_folder(folder) -> Dataset:
     if not items:
         warnings.append(f"No image files found in folder: {d}")
     return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)
+
+
+#: DOE：一個資料夾裡一顆 defect 都湊不出來時說的那一句。
+_DOE_EMPTY_WARNING = (
+    "%d folder(s) have no image in them, so they are not defects (%s). "
+    "In this mode every sub-folder is one defect and the images inside it "
+    "are that defect's imaging conditions.")
+
+#: DOE：兩個子目錄同名（不同層）時說的那一句。
+_DOE_DUPLICATE_WARNING = (
+    "%d folder name(s) appear more than once, and a defect id has to be "
+    "unique (%s). Only the first one of each was loaded - rename the others.")
+
+
+#: `.raw` 一個檔案都湊不出來時說的那一句。
+_RAW_EMPTY_WARNING = (
+    "No .raw files in: %s. This entry reads headerless raw images - a folder "
+    "of PNG/TIFF is \u201cOpen folder\u2026\u201d instead.")
+
+
+def load_raw_folder(folder, spec: "RawSpec") -> Dataset:
+    """一個資料夾的 **`.raw`** → ``Dataset(kind="folder")``，每個檔案一顆 defect。
+
+    ⚠ **kind 仍然是 ``folder``，不是第六種。** `.raw` 跟 PNG／TIFF 的差別只在
+    「怎麼把 byte 變成像素」，而那件事在這裡就做完了 —— 一顆一張、沒有 KLARF、
+    寫不回 KLARF，那些**形狀**跟 ``folder`` 一模一樣。新開一種 kind 的話，
+    `SINGLE_IMAGE_KINDS`／起手卡／每一條 kind lint 都要多一格，而它們的答案會
+    跟 ``folder`` 逐字相同 —— 那是抄第二份出來，而抄出來的那份會漂。
+    **新的是入口，不是 kind**（`scope.INPUT_SOURCES` 上 ``folder`` 與 ``image``
+    早就是兩個入口共用一個 kind 的先例）。
+
+    ``spec.shift`` 是 ``None`` 時**當場量一次並整批共用**：讀第一個檔案，看實際
+    用到幾位元（12-in-16 還是滿量程），之後每一張都用同一個位移。
+    逐張量會讓兩張圖不再可比，而「比」是這個工具的全部（見 `rawfile` 的說明）。
+    """
+    d = str(folder)
+    if not os.path.isdir(d):
+        return Dataset(kind="folder", klarf=None, items=[],
+                       warnings=[f"Not a directory: {d}"])
+    names = [n for n in sorted(os.listdir(d))
+             if os.path.isfile(os.path.join(d, n))
+             and os.path.splitext(n)[1].lower() in RAW_EXTS]
+    if not names:
+        return Dataset(kind="folder", klarf=None, items=[],
+                       warnings=[_RAW_EMPTY_WARNING % d])
+
+    warnings: List[str] = []
+    use = spec
+    if use.shift is None:
+        first = os.path.join(d, names[0])
+        try:
+            probe = read_raw(first, replace(use, shift=None))
+        except IOError as e:
+            return Dataset(kind="folder", klarf=None, items=[],
+                           warnings=[str(e)])
+        shift = suggest_shift(probe, use.bits)
+        use = replace(use, shift=shift)
+        # **決定了什麼要講出來**（同 `require_8bit` 的原則：不准安靜地硬套）。
+        warnings.append(
+            "Read as %s. The brightest pixel in %s uses %d bits, so every "
+            "image in this folder is shifted down by %d bit(s) to 8-bit - the "
+            "same shift for all of them, so they stay comparable."
+            % (use.describe(), names[0],
+               max(1, int(np.asarray(probe).max()).bit_length()), shift))
+
+    items = [DefectItem(defect_id=os.path.splitext(n)[0], die=None,
+                        xrel_nm=None, yrel_nm=None,
+                        images={"single": ImageRef(
+                            path=os.path.join(d, n), page=None,
+                            channel="single", raw=use)})
+             for n in names]
+    return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)
+
+
+def load_doe_folder(root) -> Dataset:
+    """**一個子目錄 = 一顆 defect、裡面每個檔案 = 一個 imaging condition。**
+
+    這是 DOE 要的形狀（F110，使用者定調）：同一顆 defect、位置固定在 FOV 正中間、
+    FOV 相同，用不同的 E-beam condition（Landing energy／電流）各拍一張，
+    對齊之後在同一組 target／ref box 上比 SNR。對標公司內的 imageY 流程。
+
+    ⚠ **跟 :func:`load_folder` 正好相反**，所以它是**第五種 kind** 而不是那一條
+    路上的一個開關：那邊是「一個檔案一顆」，這邊是「一個資料夾一顆」。同一個
+    ``kind`` 兩種形狀的下場是畫布說謊 —— ``step.SINGLE_IMAGE_KINDS`` 裡寫著
+    ``folder``，而 DOE 的一顆有好幾張，於是畫布上那張預設的 ``load_single``
+    對它一定報錯。一種 source 一張載入卡（`CLAUDE.md` §5），而這一種走
+    ``load_patch``（它本來就吃 N 張 → N 條流）。
+
+    **分組是資料層的事、命名是 recipe 的事** —— 照 :func:`load_tiff_stack` 那條
+    紀律。這裡只按檔名排序給 ``test`` / ``ref`` / ``img3``… 這種位置名
+    （:func:`_channel_name`），要叫 ``le300`` / ``le500`` 是 ``load_patch`` 的
+    ``channel_map`` 的事。
+
+    ⚠ **流的順序是「檔名排序」**，而那是一個契約：這些 ``ImageRef`` 的 ``page``
+    都是 ``None``，所以 `steps/load._in_defect_order` 會退回 **dict 插入順序**
+    —— 也就是這裡 ``sorted()`` 的順序，而 ``channel_map`` 的 1-based 編號正是
+    照它數的。
+
+    只掃**一層**子目錄：``defect_id`` 是快取 key 與 Studio 的 ``_items_by_id``
+    的一部分，而巢狀結構裡同名的目錄天生可能重複 —— 撞名的第二個之後
+    **不載入並講出來**，不是安靜地蓋掉（那會讓一顆 defect 拿到另一顆的圖）。
+    湊不出東西的空目錄也一樣：進 ``warnings``，不吞掉（同 `load_tiff_stack`
+    對零頭的處置）。
+    """
+    d = str(root)
+    if not os.path.isdir(d):
+        return Dataset(kind="doe_folder", klarf=None, items=[],
+                       warnings=[f"Not a directory: {d}"])
+    items: List[DefectItem] = []
+    warnings: List[str] = []
+    empty: List[str] = []
+    dupes: List[str] = []
+    seen: set = set()
+    for name in sorted(os.listdir(d)):
+        sub = os.path.join(d, name)
+        if not os.path.isdir(sub):
+            continue            # 這條路上「檔案」不是一顆 defect，是放錯地方
+        files = [f for f in sorted(os.listdir(sub))
+                 if os.path.isfile(os.path.join(sub, f))
+                 and os.path.splitext(f)[1].lower() in _IMAGE_EXTS]
+        if not files:
+            empty.append(name)
+            continue
+        if name in seen:
+            dupes.append(name)
+            continue
+        seen.add(name)
+        item = DefectItem(defect_id=name, die=None, xrel_nm=None,
+                          yrel_nm=None)
+        for j, f in enumerate(files):
+            ch = _channel_name(j, ("test", "ref"))
+            item.images[ch] = ImageRef(path=os.path.join(sub, f), page=None,
+                                       channel=ch)
+        items.append(item)
+    if empty:
+        warnings.append(_DOE_EMPTY_WARNING
+                        % (len(empty), ", ".join(empty[:3])
+                           + ("…" if len(empty) > 3 else "")))
+    if dupes:
+        warnings.append(_DOE_DUPLICATE_WARNING
+                        % (len(dupes), ", ".join(dupes[:3])
+                           + ("…" if len(dupes) > 3 else "")))
+    if not items:
+        warnings.append(
+            "No sub-folders with images in: %s. In this mode every sub-folder "
+            "is one defect and the images inside it are that defect's imaging "
+            "conditions - a folder of loose image files is “Open folder…” "
+            "instead." % d)
+    return Dataset(kind="doe_folder", klarf=None, items=items,
+                   warnings=warnings)
 
 
 # --------------------------------------------------------------------------- #

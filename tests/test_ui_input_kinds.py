@@ -8,8 +8,8 @@
 
 **那個判斷現在被驗證了，所以這支測試換一個方向鎖同一件事**：
 
-1. 四種 kind 都進得來（`ebi_patch` / `rsem` / `tiff_stack` / `folder`），
-   而每一種有自己的入口；
+1. `SUPPORTED_KINDS` 上的每一種都進得來，而每一種有自己的入口
+   （⚠ **不寫死那張清單** —— F114 拿掉 `tiff_stack` 時付過這筆錢）；
 2. 沒有 KLARF 的那兩種**當場講**「寫不回 KLARF」；
 3. 收起來的機制還在（`HIDDEN_STEPS` 現在收著 `align`，見 §4）——
    下一次要暫時藏一張卡時，加一個字串就好；
@@ -69,12 +69,29 @@ def window(qapp):
 
 
 # --------------------------------------------------------------------------- #
-# 1. 四種輸入都進得來
+# 1. 支援的輸入都進得來，而且每一種都有入口
 # --------------------------------------------------------------------------- #
-def test_all_four_kinds_are_supported():
+def test_every_supported_kind_is_supported_and_has_a_way_in():
+    """**這一條刻意不寫死任何一種 kind 的名字。**
+
+    它本來抄著 `("ebi_patch", "rsem", "tiff_stack", "folder")`，而 2026-09-18
+    （F114）使用者把 stack 拿掉（「我們用不到」）的那一刻，這支測試紅了 ——
+    紅得沒有道理：**壞掉的不是「支援的 kind 都進得來」這個機制**，只是那張清單
+    短了一個。把值抄進測試裡的下場，是每一次產品範圍的決定都要順手改一次測試
+    （`test_ui_scope_profiles.py` 付過同一筆錢）。
+
+    問的改成機制本身：`SUPPORTED_KINDS` 上的每一種都要 (a) 被認得、(b) **有一個
+    入口打得開**。少了 (b) 就是「支援一種使用者點不到的資料」。
+    """
     from d4t.ui import scope          # Qt-free，不必等 qapp
-    for kind in ("ebi_patch", "rsem", "tiff_stack", "folder"):
+
+    assert scope.SUPPORTED_KINDS, "一種都不支援的話這支測試問不出任何事"
+    reachable = {k for src in scope.INPUT_SOURCES for k in src.kinds}
+    for kind in scope.SUPPORTED_KINDS:
         assert scope.is_supported_kind(kind), kind
+        assert kind in reachable, (
+            "%s 在 SUPPORTED_KINDS 上，但沒有任何一個 INPUT_SOURCES 打得開它"
+            % kind)
     assert not scope.is_supported_kind("something_else")
 
 
@@ -122,7 +139,7 @@ def test_one_image_on_its_own_loads_as_a_single_defect(window, tmp_path):
     f = tmp_path / "field.png"
     imageio.save_gray(str(f), np.full((32, 48), 90, np.uint8))
     assert window.load_image_path(str(f), sync=True) is True
-    assert window.dataset.kind == "folder"        # 形狀相同，不新增第五種 kind
+    assert window.dataset.kind == "folder"        # 形狀相同，不新增一種 kind
     assert len(window.dataset.items) == 1
     assert window.dataset.items[0].defect_id == "field"
     # 沒有 KLARF ⇒ 寫不回 —— 那句話跟另外兩條路走同一個地方（常駐標籤）
@@ -178,22 +195,78 @@ def test_a_multipage_tiff_opened_as_one_image_says_where_to_go(tmp_path):
     assert same.warnings == ds.warnings
 
 
-def test_the_image_entry_is_on_the_one_table_that_grows_the_buttons():
+def test_every_entry_is_on_the_one_table_that_grows_the_buttons():
     """加一個入口＝改 `INPUT_SOURCES`，不動 UI（`CLAUDE.md` §5）。
 
     工具列那顆鈕、空白狀態那一列、以及它的處理函式全部從這張表長出來，
     所以這一條同時守住三個地方 —— 少接一個的下場實測過（F11 Input-5：
-    `Load layout labels` 的入口鈕根本沒被 addWidget 到工具列上）。
+    `layout(GDS)` 的入口鈕根本沒被 addWidget 到工具列上）。
+
+    ⚠ **2026-09-18（F114-2）起這一條不點名任何一個 key。** 它本來叫
+    `..._the_image_entry_...` 並寫死 `key == "image"`，而那一輪五顆入口併成
+    三顆（`folder`／`image`／`raw` → 一顆 `Open images…`）的時候它就紅了 ——
+    紅得沒道理：壞掉的不是「入口從一張表長出來」這個機制。這已經是這幾輪
+    第四次付同一筆錢（見 `test_ui_scope_profiles.py` 與這一份上面那條）。
     """
-    from d4t.ui import studio as studio_mod
-    src = [s for s in scope_mod.INPUT_SOURCES if s.key == "image"]
-    assert len(src) == 1, "Open image… 不在那張表上"
-    assert src[0].kinds == ("folder",)
-    assert src[0].has_klarf is False
-    assert hasattr(studio_mod.StudioWindow, "_on_open_image")
-    # 四顆 Open 的圖示要各不相同（F7-24）——「輪廓要分得出來」那一條
+    from d4t.ui import open_dialogs
+
+    assert scope_mod.INPUT_SOURCES, "一個入口都沒有的話這支測試問不出任何事"
+    for src in scope_mod.INPUT_SOURCES:
+        assert src.kinds, "%s 沒有說它開得出哪一種 kind" % src.key
+        for kind in src.kinds:
+            assert scope_mod.is_supported_kind(kind), (
+                "`%s` 開的是 `%s`，而那一種不在 SUPPORTED_KINDS 上" %
+                (src.key, kind))
+        assert src.title.strip() and src.what.strip(), src.key
+        # ⚠ 問的是機制，不是那一支方法：以前一種入口一支
+        # `StudioWindow._on_open_<key>`，而那正好讓上面那句話（「改一張表就好」）
+        # **在程式碼裡是假的**。現在全部共用 `open_dialogs.open_source`。
+        assert src.key in open_dialogs.OPENABLE, (
+            "`%s` 在 INPUT_SOURCES 上，但 open_source 不認得它 —— "
+            "那顆鈕按下去只會講一句「還沒有辦法開」。" % src.key)
+    # 每顆 Open 的圖示要各不相同（F7-24）——「輪廓要分得出來」那一條
     icons = [s.icon for s in scope_mod.INPUT_SOURCES]
     assert len(set(icons)) == len(icons)
+
+
+def test_the_one_button_that_takes_a_file_or_a_folder_routes_like_the_cli(
+        tmp_path):
+    """**`Open images…` 與命令列要對同一份資料給同一個答案。**
+
+    F114-2 把 `folder`／`image`／`raw` 併成一顆，而併得起來的唯一理由是
+    「是哪一種**看那條路徑就知道**」。那條規則於是有了**兩份實作** ——
+    UI 的 `open_dialogs.raw_folder_for` 與 CLI 的 `d4t.__main__._open_input`
+    —— 而兩份實作一定會漂（`CLAUDE.md` §0 的第一句話）。這一條把它們釘在一起。
+
+    釘的是最容易漂的那一格：**`.raw` 認不認得**。`.raw` 解不開，所以它
+    **不在** `dataset._IMAGE_EXTS` 裡，兩邊都得自己多問一次 —— 少問的那一邊
+    會把 `.raw` 當成「沒有影像的資料夾」而給出一個空的 lot。
+    """
+    import numpy as np
+
+    from d4t import __main__ as cli
+    from d4t.core.ingest import imageio
+    from d4t.ui import open_dialogs
+
+    raw_dir = tmp_path / "raws"
+    raw_dir.mkdir()
+    (raw_dir / "a.raw").write_bytes(np.zeros((8, 8), "<u2").tobytes())
+
+    png_dir = tmp_path / "pngs"
+    png_dir.mkdir()
+    imageio.save_gray(str(png_dir / "a.png"), np.full((8, 8), 20, np.uint8))
+
+    # UI：資料夾與裡面那個檔案都要指到同一個 lot 資料夾
+    assert open_dialogs.raw_folder_for(str(raw_dir)) == str(raw_dir)
+    assert open_dialogs.raw_folder_for(str(raw_dir / "a.raw")) == str(raw_dir)
+    # ……而不是 raw 的那條路上，它要說「不是我」
+    assert open_dialogs.raw_folder_for(str(png_dir)) is None
+    assert open_dialogs.raw_folder_for(str(png_dir / "a.png")) is None
+
+    # CLI：同一個資料夾也要走 raw 那條（8x8 的 16-bit 只有一組正方形解）
+    ds = cli._open_input(str(raw_dir), raw="8x8@16")
+    assert ds.kind == "folder" and len(ds.items) == 1
+    assert cli._open_input(str(png_dir)).kind == "folder"
 
 
 def test_the_two_kinds_without_a_klarf_say_so_where_it_stays(window, tmp_path):
@@ -219,20 +292,38 @@ def test_an_unknown_kind_is_still_refused_with_a_reason(window, patch_lot,
     assert window.dataset is before, "被擋下來時不該動到使用者手上的資料集"
 
 
-def test_align_is_hidden_but_still_runs(window):
-    """使用者 2026-08-18：「我不喜歡 align 卡……拉 align 反而會飄掉 shift」。
+def test_hiding_a_card_only_takes_it_out_of_the_library(window):
+    """**收起來、不刪掉**（`CLAUDE.md` §5 的判斷）：卡片庫看不到它，但已經在用它
+    的 recipe 照跑、CLI 照跑、黃金值一個字不動。
 
-    **收起來、不刪掉**（CLAUDE.md §5 的判斷）：卡片庫看不到它，但已經在用它的
-    recipe 照跑、CLI 照跑、黃金值一個字不動 —— 而
-    `tests/fixtures/recipes/dual_route_basic.json` 正好用了它，撐著三組黃金值裡
-    的兩組。刪掉的話那兩組要重新定錨，而使用者說的是「之後真需要我再回來」。
+    ⚠ **這一條 2026-09-17（F109）從「align 是收起來的」改寫成「收起來這件事是
+    怎麼運作的」。** 使用者 2026-08-18 說的是「我不喜歡 align 卡……拉 align 反而
+    會飄掉 shift……**之後真需要我再回來**」，而 DOE 就是那個「之後」—— align 回到
+    卡片庫了，`HIDDEN_STEPS` 現在是空的。
+
+    寫死那張卡的那一版在這一輪只會紅一次然後被改掉，而**壞掉的不是這條測試在問
+    的東西**：收起來只過濾卡片庫這件事一個字都沒變。所以這裡當場塞一張卡進
+    `HIDDEN_STEPS` 試給它看 —— 空的清單過濾不掉任何東西，那正是這種測試最危險
+    的時候。
     """
     from d4t.core.pipeline import get_step
 
-    assert "align" in scope_mod.HIDDEN_STEPS
-    assert window.library.entry("align") is None      # 卡片庫看不到
-    assert get_step("align") is not None              # 但引擎照樣認得
-    assert window.model.add_step("align")             # 舊 recipe 也放得進來
+    assert window.library.entry("align") is not None, \
+        "align 2026-09-17 拿回卡片庫了（F109）"
+
+    victim = "align"
+    before = scope_mod.HIDDEN_STEPS
+    try:
+        scope_mod.HIDDEN_STEPS = (victim,)
+        # 卡片庫是在建構時吃 `visible_steps()` 的；這一支會重吃一次
+        # （不另開一扇窗：Qt 物件在測試行程裡不會消失，時間是超線性的）。
+        window._repaint_for_theme()
+        assert window.library.entry(victim) is None       # 卡片庫看不到
+        assert get_step(victim) is not None               # 但引擎照樣認得
+        assert window.model.add_step(victim)              # 舊 recipe 也放得進來
+    finally:
+        scope_mod.HIDDEN_STEPS = before
+        window._repaint_for_theme()
 
 
 def test_pattern_ref_is_gone_and_nothing_quietly_replaced_it(window):

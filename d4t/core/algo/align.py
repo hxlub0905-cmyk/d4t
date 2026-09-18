@@ -57,7 +57,7 @@ the overlay right) and y follows the image-down direction. See its docstring.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -123,6 +123,62 @@ def alignment_overlap_slices(shape: Tuple[int, int], dx: int, dy: int) -> Tuple[
         target_y = slice(0, h + dy)
 
     return base_y, base_x, target_y, target_x
+
+
+def common_crop(shape: Tuple[int, int],
+                shifts: Dict[str, Tuple[int, int]]) -> Dict[str, Tuple[int, int, int, int]]:
+    """一組整數位移 → 每一條流各自的裁切視窗（**內容對齊、尺寸相同、零重採樣**）。
+
+    ``shifts`` 是 ``{流名: (dx, dy)}``，基準那一條填 ``(0, 0)``；符號沿用本模組
+    的慣例（流的內容若在基準的右下方 (dx, dy) px，就回報正的 (dx, dy)）。
+    回 ``{流名: (y0, y1, x0, x1)}``，直接拿去切片即可。
+
+    **為什麼是裁切而不是平移**（F109，2026-09-17）
+    ---------------------------------------------
+    :func:`apply_alignment` 走 ``warpAffine`` + ``INTER_LINEAR``，也就是**重採樣**。
+    重採樣等於對那一條流過一次低通 —— 而只有被移動的那一條被過，基準那條沒有。
+    2026-08-18 使用者回報的「拉 align 反而會飄掉 shift」，機制之一就是這個：
+    ``diff`` 上多出一層跟缺陷無關的材質差。
+
+    而 DOE（同一顆 defect、不同 E-beam condition、比 SNR）讓它從副作用變成致命傷：
+    **量的是灰階，卻先把每一張各過一次不一樣的低通**，那個比較是假的。
+
+    ``align_to``（H2H）早就解出正解 —— 它整數裁切、次像素的那一點點留在數字裡。
+    這一支把同一條紀律給 align：**位移只取整數，灰階一個位元都不動**，
+    次像素仍然寫進 ``align_dx`` / ``align_dy``，資訊沒有丟。
+
+    **邊界**：移出去的那一條邊沒有真資料。這裡的處置是**裁成共同重疊區** ——
+    所有流一起裁成「它們都有真資料」的那一塊。零假像素、零新概念；
+    代價是影像小了幾 px，而那對「defect 在 FOV 正中間」的情境幾乎沒有成本。
+    （曾經考慮過填 NaN 讓量測跳過，但 ``algo/glv`` 的統計不是 nan-aware，
+    NaN 會讓整個框的統計變成 NaN 而不是「跳過那幾個像素」。）
+
+    ⚠ **裁切會改變正規化座標的意義**，所以 ROI 卡要跑在對位**之後**。
+    """
+    h, w = int(shape[0]), int(shape[1])
+    dxs = [0] + [int(dx) for dx, _dy in shifts.values()]
+    dys = [0] + [int(dy) for _dx, dy in shifts.values()]
+    # 共同視窗（基準座標系）：左上被最負的位移推開，右下被最正的位移切掉。
+    x0, x1 = -min(dxs), w - max(dxs)
+    y0, y1 = -min(dys), h - max(dys)
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError(
+            "the shifts leave no overlap at all (x %d..%d, y %d..%d of %dx%d)"
+            % (x0, x1, y0, y1, w, h))
+    out: Dict[str, Tuple[int, int, int, int]] = {}
+    for name, (dx, dy) in shifts.items():
+        out[str(name)] = (y0 + int(dy), y1 + int(dy), x0 + int(dx), x1 + int(dx))
+    return out
+
+
+def crop(image: np.ndarray, window: Tuple[int, int, int, int]) -> np.ndarray:
+    """照 :func:`common_crop` 給的視窗切一塊出來。
+
+    刻意 ``ascontiguousarray`` —— 切片是 view，而下游會把它當獨立影像傳進
+    ProcessPool；同 ``align_to`` 裁切那一段的寫法。
+    """
+    y0, y1, x0, x1 = window
+    return np.ascontiguousarray(image[y0:y1, x0:x1])
 
 
 def ncc_score(a: np.ndarray, b: np.ndarray) -> float:

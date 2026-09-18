@@ -32,7 +32,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from d4t.core.ingest.dataset import load_dataset             # noqa: E402
+from d4t.core.ingest.dataset import load_dataset              # noqa: E402
 from d4t.core.pipeline import Recipe, run_batch, validate    # noqa: E402
 from d4t.core.pipeline.batch import run_batch_steps          # noqa: E402
 
@@ -371,7 +371,8 @@ def test_the_ebi_recipe_wires_the_pair_so_the_two_stay_comparable():
     assert ("load", "test", "norm", "streams") in wires
     assert ("norm", "test", "sub", "a") in wires and ("norm_ref", "ref", "sub", "b") in wires
     assert ("sub", "diff", "dn", "streams") in wires and ("dn", "diff", "glv", "source") in wires
-    assert recipe.nodes["sub"].params["absolute"] is True, "暗缺陷也要留下來"
+    # F110：`absolute`（bool）換成 `sign`（三選一），`True` → `"abs"`。
+    assert recipe.nodes["sub"].params["sign"] == "abs", "暗缺陷也要留下來"
 
 
 def test_the_ebi_recipe_gives_an_unmeasurable_defect_its_own_bin():

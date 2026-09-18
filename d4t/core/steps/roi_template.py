@@ -159,7 +159,7 @@ _MATCH_FEATURES = ["match_score", "match_margin", "match_structure",
 
 # ⚠ **這個類別不再自己註冊**（F30，2026-08-25）。使用者：「把 Profile /
 # Template 也折進 roi_reference」—— 四張 Region 卡回答的是同一句話（「哪些地方
-# 應該長得一樣」），所以它們是一張卡的四個 method，不是四張卡。
+# 應該長得一樣」），所以它們折成了一張卡的幾個 method，不是好幾張卡。
 #
 # 留在這個檔案裡而不是搬進 `roi_reference.py`：把 1100 行演算法搬過去只會讓那
 # 個檔案變成 1700 行，而「哪一支怎麼算」本來就各自看得懂 —— 要合的是**使用者

@@ -67,10 +67,12 @@ def _batch(points, extra=None):
 def test_selecting_a_card_swaps_in_its_own_panel(window):
     src = first_source(window)
     a = window.add_card_after(src, "align")
-    # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
-    # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
-    # 預設值）。
-    window._on_edge_added(src, a, "ref", "moving")
+    # F10：Align 的輸入要拉線 —— 那正是使用者現在在畫布上做的事（以前一條都
+    # 不用拉也照跑，因為每一格都有預設值）。
+    # ⚠ F109 起是 `streams`（要對齊的那幾條，**含基準**）＋ `fixed`（哪一條是
+    # 基準），不再是「要對的那張／對齊到哪張」兩格 —— 一張卡對 N 條流。
+    window._on_edge_added(src, a, "test", "streams")
+    window._on_edge_added(src, a, "ref", "streams")
     window._on_edge_added(src, a, "test", "fixed")
     assert isinstance(window.inspector(), insp_mod.AlignInspector)
     assert window.bottom_page() == 0
@@ -81,10 +83,12 @@ def test_a_card_without_a_panel_falls_back_to_the_feature_table(window):
     """沒註冊儀表的卡**不能**變成一片空白 —— 那比原本的特徵表還糟。"""
     src = first_source(window)
     a = window.add_card_after(src, "align")
-    # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
-    # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
-    # 預設值）。
-    window._on_edge_added(src, a, "ref", "moving")
+    # F10：Align 的輸入要拉線 —— 那正是使用者現在在畫布上做的事（以前一條都
+    # 不用拉也照跑，因為每一格都有預設值）。
+    # ⚠ F109 起是 `streams`（要對齊的那幾條，**含基準**）＋ `fixed`（哪一條是
+    # 基準），不再是「要對的那張／對齊到哪張」兩格 —— 一張卡對 N 條流。
+    window._on_edge_added(src, a, "test", "streams")
+    window._on_edge_added(src, a, "ref", "streams")
     window._on_edge_added(src, a, "test", "fixed")
     # ⚠ 證人以前是 ``roi_mask``，而它 2026-09-02 刪掉了。換成 ``load_sidecar``
     # —— 另一張**明文不補**儀表的卡（PR-2 的工作單）。證人要是真的在 registry
@@ -192,6 +196,27 @@ def test_sub_pixel_shifts_still_count_as_at_the_limit(qapp):
     assert insp.at_the_limit() == 1
 
 
+def test_n_conditions_are_all_on_the_scatter(qapp):
+    """**DOE 一次餵 N 個 condition 進來，而那正是這張圖最有用的時候。**
+
+    三條以上的流時特徵名帶著流名前綴（F109），所以寫死 `align_dx` 的那一版
+    在這裡會畫出一張**空圖** —— 而空圖上寫的是「跑一次試跑就看得到」，
+    那句話是假的，而且使用者照做之後還是空的。
+
+    名字由卡片自己說（`align.shift_feature_names`），UI 不拼字串。
+    """
+    insp = insp_mod.AlignInspector()
+    batch = [{"defect_id": i, "ok": True, "features": {
+        "c2_align_dx": 1.0 + i, "c2_align_dy": 0.0,
+        "c3_align_dx": -2.0, "c3_align_dy": 7.9}} for i in range(3)]
+    insp.set_context("align", params={"search_radius": 8,
+                                      "streams": "c1,c2,c3", "fixed": "c1"},
+                     batch=batch)
+    assert insp.has_data() is True
+    assert len(insp.points()) == 6, "兩條被移動的流 × 三顆 = 六個點"
+    assert insp.at_the_limit() == 3, "c3 那一條貼在搜尋框的邊上，三顆都要算到"
+
+
 def test_broken_values_do_not_break_the_panel(qapp):
     """單顆失敗不會殺整批（引擎的契約），所以這裡一定會遇到缺值。"""
     insp = insp_mod.AlignInspector()
@@ -211,10 +236,12 @@ def test_it_reads_the_engine_numbers_not_its_own(window, tmp_path):
     window.load_dataset_path(out["klarf"], sync=True)
     src = first_source(window)
     a = window.add_card_after(src, "align")
-    # F10：Align 有**兩格**輸入（要對的那張、對齊到哪張），所以要拉兩條線 ——
-    # 那正是使用者現在在畫布上做的事（以前一條都不用拉也照跑，因為兩格都有
-    # 預設值）。
-    window._on_edge_added(src, a, "ref", "moving")
+    # F10：Align 的輸入要拉線 —— 那正是使用者現在在畫布上做的事（以前一條都
+    # 不用拉也照跑，因為每一格都有預設值）。
+    # ⚠ F109 起是 `streams`（要對齊的那幾條，**含基準**）＋ `fixed`（哪一條是
+    # 基準），不再是「要對的那張／對齊到哪張」兩格 —— 一張卡對 N 條流。
+    window._on_edge_added(src, a, "test", "streams")
+    window._on_edge_added(src, a, "ref", "streams")
     window._on_edge_added(src, a, "test", "fixed")
     window.model.set_param(a, "search_radius", 6)
     assert window.run_trial(n=8, sync=True) is True

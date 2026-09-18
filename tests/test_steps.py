@@ -115,7 +115,11 @@ def test_load_single_refuses_data_with_several_images(patch_tiff):
     ctx = Context(meta={"_defect_item": item, "_dataset_kind": "ebi_patch"})
     with pytest.raises(StepError) as e:
         run_step("load_single", ctx)
-    assert "Load images" in str(e.value)          # 講得出該用哪一張卡
+    # ⚠ **卡片名不寫死在這裡**：2026-09-18 使用者把它從「Load images」改成
+    # 「Patch」，而這一條當場紅了 —— 紅得沒道理，壞掉的不是「講得出該用
+    # 哪一張卡」這件事。問的改成：那句話裡**真的有那張卡現在的名字**。
+    from d4t.core.pipeline.step import get_step
+    assert get_step("load_patch").label in str(e.value)
 
 
 def test_load_patch_explicit_and_errors(patch_tiff):
@@ -222,6 +226,12 @@ def test_denoise_median_removes_salt_and_leaves_other_streams_alone():
 # ---------------------------------------------------------------- align
 
 def test_align_recovers_planted_shift():
+    """F109：位移量得到，而且**對齊之後兩條流逐位元組相同**。
+
+    後半是這張卡的核心承諾 —— 整數平移 + 裁共同重疊區，所以灰階一個位元都沒動。
+    以前它走次像素 ``warpAffine``，只有 ref 被重採樣，這一條只能寫成「平均誤差
+    小於 3」；現在它可以寫成相等。
+    """
     base = _smooth_pattern(128)
     dx, dy = 3, -2
     ref = np.roll(np.roll(base, dy, axis=0), dx, axis=1)  # ref(x,y)=base(x-dx,y-dy)
@@ -230,11 +240,14 @@ def test_align_recovers_planted_shift():
     assert ctx.features["align_dx"] == pytest.approx(dx, abs=0.6)
     assert ctx.features["align_dy"] == pytest.approx(dy, abs=0.6)
     assert ctx.features["align_score"] > 50
-    assert "ref_aligned" in ctx.images
-    inner = np.s_[16:-16, 16:-16]
-    err = np.abs(ctx.images["ref_aligned"][inner].astype(np.float32)
-                 - base[inner].astype(np.float32))
-    assert float(err.mean()) < 3.0
+    # 寫回原名（F109：一張卡、N 條流就地對齊）
+    assert sorted(ctx.images) == ["ref", "test"]
+    assert ctx.images["test"].shape == ctx.images["ref"].shape
+    np.testing.assert_array_equal(ctx.images["test"], ctx.images["ref"])
+    # 裁掉的正好是位移那幾 px
+    assert ctx.images["test"].shape == (128 - abs(dy), 128 - abs(dx))
+    assert ctx.features["align_valid_frac"] == pytest.approx(
+        (128 - abs(dy)) * (128 - abs(dx)) / (128 * 128), abs=1e-6)
 
 
 def test_align_flat_image_zero_shift_no_crash():
@@ -243,7 +256,8 @@ def test_align_flat_image_zero_shift_no_crash():
     run_step("align", ctx)
     assert ctx.features["align_dx"] == 0.0
     assert ctx.features["align_dy"] == 0.0
-    assert "ref_aligned" in ctx.images
+    assert sorted(ctx.images) == ["ref", "test"]
+    assert ctx.features["align_valid_frac"] == 1.0   # 沒位移就沒裁掉任何東西
     assert ctx.meta.get("warnings")
 
 

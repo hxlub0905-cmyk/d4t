@@ -1,6 +1,6 @@
 # 怎麼做 EBI ↔ API characterization
 
-> **d4t — defect**　·　`Pair with another source` ＋ `H2H` ＋ 判定樹 ＋
+> **d4t — defect**　·　`Pair source` ＋ `H2H` ＋ 判定樹 ＋
 > `Write comparison`
 > 這一份是**給使用者的操作手冊**：每一格填什麼、線接在哪、報表怎麼讀。
 > 設計上的來龍去脈在
@@ -31,7 +31,7 @@
 > 自己拉線。下面就是那份 recipe 當初的組法。
 
 1. **`Open KLARF…`** 載 **API（RSEM）那一份**當 main。⚠ 不是 EBI —— 理由見 §2。
-2. 卡片庫 → Input 段 → **`Pair with another source`** → 按 **`Open data…`** 選
+2. 卡片庫 → Input 段 → **`Pair source`** → 按 **`Open data…`** 選
    **EBI 那一份**。
 3. 卡片庫 → Compare 段 → **`H2H`**。
 4. **拉兩條線**（哪一條接哪個埠見 §3）。
@@ -56,7 +56,7 @@
 
 ### 1.1 卡片的順序（上面那幾步的摘要）
 
-1. 卡片庫 → Input 段 → **`Pair with another source`** → `Open data…`。
+1. 卡片庫 → Input 段 → **`Pair source`** → `Open data…`。
 2. 卡片庫 → Compare 段 → **`H2H`**。
 3. **拉兩條線**（見 §3）。
 4. 判定段畫那棵樹（見 §5）。
@@ -79,9 +79,9 @@ ground truth 是 API，所以要**走遍的是 API 的清單**。
 ## 3. 畫布怎麼接
 
 ```
-Load one image ──single──────────────┐
+SEM image ──single──────────────┐
    （API 空拍，main）                 ├──> H2H
-Pair with another source ──paired────┘
+Pair source ──paired────┘
 
          ┌ OUTPUT ────────────────────────────────┐
          │  Write comparison          │   ← 沒有線（見 §3.1）
@@ -91,13 +91,13 @@ Pair with another source ──paired────┘
 
 | 從哪 | 到哪 | 意思 |
 |---|---|---|
-| `Load one image` 的 `single` | **H2H 的 `Search inside`** | 大圖（要在裡面找） |
+| `SEM image` 的 `single` | **H2H 的 `Search inside`** | 大圖（要在裡面找） |
 | `Pair…` 的 `paired` | **H2H 的 `Small image`** | 小圖（拿去找的那一塊） |
 
 **小的當模板、大的當搜尋範圍** —— EBI 的 patch 是 128²、RSEM 是 1000²，
 反過來接會直接報「小圖放不進大圖」。
 
-> `Pair with another source` **沒有影像輸入** —— 它是 Input 段的卡，
+> `Pair source` **沒有影像輸入** —— 它是 Input 段的卡，
 > 圖是從第二份 lot 撈出來的，不是從上游接來的。所以它左邊沒有埠。
 
 ### 3.1 Output 段**不用接線**（副標寫 `(not connected)` 是正常的）
@@ -122,7 +122,7 @@ Output 段每一張卡都沒有輸入埠 —— 它們是終點，不吐流也�
 
 ## 4. 三張卡各填什麼
 
-### 4.1 `Pair with another source`
+### 4.1 `Pair source`
 
 | 格子 | 填什麼 |
 |---|---|

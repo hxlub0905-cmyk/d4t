@@ -22,7 +22,7 @@ def _ctx(a, b, track=True):
 
 
 def _run(ctx, **over):
-    p = {"a": "test", "b": "ref", "op": "subtract", "absolute": False,
+    p = {"a": "test", "b": "ref", "op": "subtract", "sign": "signed",
          "out": "diff"}
     p.update(over)
     get_step("subtract")().run(ctx, p)
@@ -35,7 +35,7 @@ def test_the_note_is_there_in_preview_and_absent_in_batch():
     b = rng.normal(100, 5, (64, 64))
     on = _run(_ctx(a, b, track=True))
     note = on.meta["subtract"]["diff"]
-    for key in ("a", "b", "op", "absolute", "bins", "hi", "clipped", "n",
+    for key in ("a", "b", "op", "sign", "bins", "hi", "clipped", "n",
                 "median", "mad", "beyond3", "rows", "cols", "rows_n",
                 "cols_n"):
         assert key in note, key

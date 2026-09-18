@@ -240,6 +240,76 @@ def test_snr_is_by_box_and_never_negative():
     assert np.isnan(algo_glv.compare_pixels(t, r, reference_boxes=[100.0])["snr"])
 
 
+def test_snr_px_answers_the_question_snr_cannot():
+    """**`snr_px` 存在的唯一理由**：參照只有一個框的時候 `snr` 沒有答案。
+
+    DOE 就是那個情況 —— 同一顆 defect、不同 E-beam condition 各拍一張，一個
+    target box、一個 ref box，要比的就是它們的 SNR。`snr` 的分母是格與格之間
+    的散布（使用者 2026-08-21 定調的 by-box），而一格沒有「之間」。
+
+    ⚠ 兩個是**兩個定義，誰都不准退回誰**：`snr` 在一格時仍然是 nan（不是偷偷
+    改用 per-pixel），`snr_px` 在多格時也仍然用像素（不是偷偷改用 by-box）。
+    同一個名字在不同情況下算出不同的東西，是這個 repo 最怕的那種錯。
+    """
+    rng = np.random.default_rng(11)
+    r = rng.normal(100.0, 10.0, 4000)
+    t = r + 25.0
+    one = algo_glv.compare_pixels(t, r, reference_boxes=[])
+
+    assert np.isnan(one["snr"]), "一個框：by-box 仍然沒有答案"
+    assert one["snr_px"] == pytest.approx(abs(t.mean() - r.mean()) / r.std())
+    assert one["snr_px"] > 0.0, "而這一個答得出來 —— 那就是它的用途"
+
+    # 多格的時候兩個**各算各的**，不互相靠近
+    boxes = [98.0, 100.0, 102.0, 99.0, 101.0, 100.0]
+    many = algo_glv.compare_pixels(t, r, reference_boxes=boxes)
+    assert many["snr_px"] == pytest.approx(one["snr_px"]), "它不看格子"
+    assert not np.isnan(many["snr"])
+    assert abs(many["snr"] - many["snr_px"]) > 1.0, (
+        "兩個分母不一樣，值本來就該差得開：%.3f vs %.3f"
+        % (many["snr"], many["snr_px"]))
+
+
+def test_snr_px_never_goes_negative_either():
+    """跟 `snr` 同一條慣例：方向是 `delta` 的事（使用者 2026-08-21）。"""
+    rng = np.random.default_rng(12)
+    r = rng.normal(100.0, 8.0, 2000)
+    bright = algo_glv.compare_pixels(r + 20.0, r, reference_boxes=[])
+    dark = algo_glv.compare_pixels(r - 20.0, r, reference_boxes=[])
+    assert bright["snr_px"] == pytest.approx(dark["snr_px"]), "亮暗一樣大"
+    assert bright["snr_px"] > 0 and dark["snr_px"] > 0
+    assert dark["delta"] < 0 < bright["delta"], "方向由 delta 講"
+
+
+def test_adding_snr_px_did_not_move_snr_one_bit():
+    """**反向**：現有 `snr` 的值一個位元組都不准變。
+
+    同一個名字兩種算法是這個 repo 最明文反對的事，而「加了一個新的順手把舊的
+    改對一點」正是它最常見的長相。
+    """
+    ref_boxes = [98.0, 100.0, 102.0, 99.0, 101.0, 100.0]
+    t, r = np.full(400, 140.0), np.full(400, 100.0)
+    got = algo_glv.compare_pixels(t, r, reference_boxes=ref_boxes)
+    assert got["snr"] == pytest.approx(40.0 / np.std(ref_boxes, ddof=1))
+    assert np.isnan(algo_glv.compare_pixels(t, r)["snr"])
+
+
+def test_snr_px_is_computed_once_not_once_per_statistic():
+    """它的定義裡**沒有 stat 這個維度**（`|μT − μR| / σR`，平均與標準差寫死）。
+
+    跟著 stat 跑的話，勾五個統計量會得到五個一模一樣的數字配五個不同的名字。
+    """
+    assert "snr_px" in algo_glv.STAT_FREE_METRICS
+    assert "snr_px" not in algo_glv.BOX_METRICS
+    a = algo_glv.compare_pixels(np.full(80, 130.0) + np.arange(80) * 0.1,
+                                np.full(80, 100.0) + np.arange(80) * 0.1,
+                                "glv_mean", reference_boxes=[])
+    b = algo_glv.compare_pixels(np.full(80, 130.0) + np.arange(80) * 0.1,
+                                np.full(80, 100.0) + np.arange(80) * 0.1,
+                                "glv_q90", reference_boxes=[])
+    assert a["snr_px"] == pytest.approx(b["snr_px"])
+
+
 def test_a_denominator_of_zero_is_nan_not_zero():
     """0 的意思是「沒有差異」，而這裡的事實是「這個問題答不出來」。"""
     got = algo_glv.compare_pixels(np.full(50, 120.0), np.full(50, 100.0))

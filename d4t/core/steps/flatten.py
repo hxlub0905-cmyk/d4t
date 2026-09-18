@@ -39,7 +39,11 @@ class FlattenStep(MultiStreamStep):
     """移除大尺度的假訊號：亮度梯度、掃描線條紋、不平的背景。"""
 
     key = "flatten"
-    label = "Remove background / stripes"
+    # F110：27 字元是卡片庫裡最長的那一個，而「移除背景／條紋」是
+    # **這張卡的 method 在做的事**，不是它的身分 —— 身分是「把不該有的
+    # 大尺度東西壓平」。掉出去的字去了 `help`（名字回答「這張卡做什麼」，
+    # 前提與細節回答「我能不能用它」）。
+    label = "Flatten"
     category = CATEGORY_IMAGE
     group = GROUP_ENHANCE
     help = ("Remove large-scale artifacts that are not defects - charging "

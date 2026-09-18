@@ -8,9 +8,11 @@ from ..algo import iqi as algo_iqi
 from ..algo import quality as algo_quality
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_ALGO, ParamSpec, StepError, register_step, GROUP_MEASURE,
+    CATEGORY_ALGO, MEASURE, ParamSpec, StepError, register_step, GROUP_MEASURE,
 )
-from ._util import MultiSourceStep, output_prefix_spec, parse_key_list
+from ._util import (
+    MultiSourceStep, crop_to_roi, output_prefix_spec, parse_key_list,
+)
 
 #: 這張卡量得出來的四個銳利度數字。**前三個是預設**（既有 recipe 一個位元組
 #: 都不動）；``focus_iqi`` 是 F77 加的 OP-301 指標，勾了才算 —— 它一顆 defect
@@ -57,8 +59,21 @@ class FocusQualityStep(MultiSourceStep):
             "Useful for screening out defocused images.")
     params = [
         ParamSpec(name="source", type="image_keys", direction="in", default="test",
-                  section="1 · What to measure",
+                  section="1 · What to measure", role=MEASURE,
                   help="Image stream to measure sharpness on."),
+        # F110：三張 Measure 卡裡它是**唯一**沒有這一格的，而「整張圖夠不夠
+        # 清楚」跟「我在意的那一塊夠不夠清楚」不是同一個問題 —— 一張大圖上
+        # 空白的角落會把整張的銳利度拉低，而那不是失焦。
+        # 迴圈、前綴、`resolve_regions_in` 全部由 `MultiSourceStep` 給
+        # （它的 `REGION` 本來就是 "roi"），這裡只是把那一格接出來。
+        ParamSpec(name="roi", type="region_keys", direction="in", default="",
+                  label="Region", role=MEASURE,
+                  section="1 · What to measure",
+                  help=("Which region(s) to measure sharpness in - drag a line "
+                        "from the Region card that defines each one. Two "
+                        "regions here means the same numbers measured in both, "
+                        "and every number gets its region's name in front of "
+                        "it. No line means the whole image.")),
         ParamSpec(name="metrics", type="metric_chips", default=DEFAULT_METRICS,
                   label="Sharpness numbers", section="1 · What to measure",
                   choices=list(METRIC_CHOICES),
@@ -150,6 +165,15 @@ class FocusQualityStep(MultiSourceStep):
         return [(str(n), str(n), "", "", "") for n in names]
 
     def measure(self, ctx: Context, img, p: Dict[str, Any]):
+        # ⚠ **裁出二維的一塊，不是拿 `roi_pixels`**（F110）：Laplacian、
+        # Tenengrad、FFT、IQI 量的都是**相鄰像素之間**的變化，而 `roi_pixels`
+        # 回的是一串攤平的像素 —— 攤平之後「相鄰」是假的，四個數字照樣算得出來
+        # 而且看起來正常。
+        #
+        # 多框區域在這裡會由 `crop_to_roi` 拋錯並指名 `<name>_center` ——
+        # 那是這個 repo 對「要幾何的卡」既有的答案（CD 卡走同一條），
+        # 不是這張卡自己新發明的規矩。
+        img = crop_to_roi(ctx, self.key, img, p.get(self.REGION, ""))
         q = algo_quality.compute_quality(img)
         if q.get("error"):
             raise StepError(self.key, f"image quality computation failed: {q['error']}")

@@ -32,14 +32,14 @@ d4t 的第一原則是：
 
 | | |
 |---|---|
-| **輸入** | 四種 source，各有各的入口：`ebi_patch`（KLARF ＋ 多頁 patch TIFF，`.tif` 或 `.I01`）、`rsem`（KLARF ＋ 每顆一個影像檔）、`tiff_stack`（多頁 TIFF，無 KLARF）、`folder`（單張影像資料夾，無 KLARF） |
-| **組裝** | 19 張步驟卡片（卡片庫現行可見 18 張 —— `align` 收在 `ui/scope.py` 的 `HIDDEN_STEPS`）；節點畫布拉線接卡，recipe 即 DAG |
+| **輸入** | 四種 source：`ebi_patch`（KLARF ＋ 多頁 patch TIFF，`.tif` 或 `.I01`）、`rsem`（KLARF ＋ 每顆一個影像檔）、`folder`（一個資料夾的影像、或單獨一張，無 KLARF；`.raw` 也在這條）、`doe_folder`（一個子目錄一顆、裡面每個檔案一個 imaging condition，無 KLARF）。⚠ `tiff_stack` 2026-09-18 從產品面拿掉（使用者「我們用不到」），`ingest` 那一支還在 |
+| **組裝** | 20 張步驟卡片（卡片庫現行可見 20 張 —— `HIDDEN_STEPS` 目前是空的）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | GLV 統計與區域對比（含 SNR）、逐框比較找出最異常的那一格（`worst_*`，框即 ROI 自己）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標 |
-| **輸出** | 三張 Output 卡（跑完先看 Results，按 `Write outputs` 才寫、只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）|
+| **輸出** | 四張 Output 卡（跑完先看 Results，按 `Write outputs` 才寫、只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）、**均勻度圖**（`Write charts` —— 一顆一頁、一個點是一格量測框，見 [`docs/USING-UNIFORMITY.md`](docs/USING-UNIFORMITY.md)）|
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化）。Results 視窗：縮圖與表格同一份排序／篩選、點一顆主畫面跟著跳、`Re-run` 改了判定樹只重判（秒級）、`Write outputs` 看過了才寫 |
 | **執行** | 多行程批次、影像段快取；設計目標為單批 10,000 顆 defect 仍流暢 |
 
-無 KLARF 的兩種 source（`tiff_stack`、`folder`）沒有座標，因此**無法寫回 KLARF**。
+無 KLARF 的兩種 source（`folder`、`doe_folder`）沒有座標，因此**無法寫回 KLARF**。
 這句話常駐在資料集標籤上，不是等使用者按下 Export 才告知。
 
 ---
@@ -76,19 +76,15 @@ ADC 判定不是一張卡片，而是 recipe 頂層的 `decide` 區塊 —— �
 
 Phase 1（讓數字可信）已於 2026-08-16 收斂，現階段依
 [`docs/ROADMAP.md`](docs/ROADMAP.md) 推進 Phase 2。使用者定調的順序是
-**先把引擎做對，再回頭做產品化**，因此以下這件事**目前刻意不支援**，
-不是遺漏：
+**先把引擎做對，再回頭做產品化**。
 
-- ~~**Studio 的「用範例資料試一次」與「Templates…」入口收起來**~~ —— 兩個都
-  回來了（2026-09-08／09-09）。出貨的 recipe 在 [`recipes/`](recipes/)，
-  `Templates…` 與 `Open recipe…` 都到得了；「用範例資料試一次」載的是
-  `ebi-die-to-die.json`。
+**這一段曾經列著三件「刻意不支援」，現在一件都不剩了** —— 三件都做回來了：
+存檔 recipe（2026-08-26，F34：`Save recipe…`／`Ctrl+S`／`Ctrl+Shift+S`）、
+`Templates…`（2026-09-08）、「用範例資料試一次」（2026-09-09，載的是
+`ebi-die-to-die.json`）。留著這一段是因為那個**機制**還在用：
 
-開關集中在 `d4t/ui/scope.py`，這也是「暫時不給看」的唯一去處。
-
-> 這一段以前列的是**兩**件，另一件是「不提供存檔 recipe」——
-> **2026-08-26 做回來了**（F34）：工具列的「Save recipe…」、`Ctrl+S`（存回原檔）、
-> `Ctrl+Shift+S`（另存）。
+**「暫時不給看」的唯一去處是 `d4t/ui/scope.py`。** 哪些入口開著、哪些卡片收起來，
+**去讀那一支**，不要相信任何一份文件裡的複本（這一段自己就漂過一個月）。
 
 ---
 
@@ -97,6 +93,7 @@ Phase 1（讓數字可信）已於 2026-08-16 收斂，現階段依
 ```bash
 python -m venv .venv && .venv\Scripts\activate     # Windows
 pip install -r requirements.txt                    # 含 PySide6
+pip install -e .[dev]                              # pytest / ruff / pyright
 
 python -m d4t gui                                  # 開啟 Studio
 ```
@@ -115,8 +112,10 @@ python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx
 ```
 
-> **repo 內附一份出貨的 recipe**（[`recipes/`](recipes/)，有測試真的跑一次）：
-> RSEM 逐框挑最異常的那一格。收起來的是**範本庫那個入口**，不是 recipe 本身。
+> **出貨的 recipe 在 [`recipes/`](recipes/)，目前三份**（每一份都有測試真的跑
+> 一次）：EBI die-to-die、RSEM 逐框挑最異常的那一格、一張影像的均勻度。
+> 三份都到得了：工具列的 `Templates…`、`Open recipe…`、以及空白狀態那顆
+> 「用範例資料試一次」（載的是 `ebi-die-to-die.json`）。
 > 若僅需確認引擎可運作，`python tools/doctor.py` 會以內建的最小 pipeline
 > 端到端跑完一顆並自檢環境。
 
@@ -130,15 +129,21 @@ python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
 ## 開發
 
 ```bash
-pip install pytest
-QT_QPA_PLATFORM=offscreen python -m pytest -q tests --ignore-glob="*test_ui_*"   # 核心，約 25 秒
+pip install -e .[dev]
+QT_QPA_PLATFORM=offscreen python -m pytest -q tests --ignore-glob="*test_ui_*"   # 核心批
 ```
 
-UI 測試**逐檔各起一個行程**（整套塞進同一個行程會因 Qt 記憶體累積而慢到跑不完）：
+UI 測試**逐檔各起一個行程**（整套塞進同一個行程會因 Qt 記憶體累積而慢到跑不完
+—— 實測 1:39:09 對 7 分鐘）。跑的是這一支，**兩台機器都跑得動**
+（`for f in …; do …; done` 是 bash，而開發機是 Windows）：
 
 ```bash
-for f in tests/test_ui_*.py; do QT_QPA_PLATFORM=offscreen python -m pytest -q "$f"; done
+python tools/run_tests.py            # 逐檔一個行程，外加計時與「最慢的幾支」
+python tools/run_tests.py --fast     # 略過 UI
 ```
+
+各批大約多久、什麼時候該跑哪一批，見 [`CLAUDE.md`](CLAUDE.md) §4 ——
+**這裡不抄第二份**。
 
 每次改動之後（於具備 git 的機器）：
 
@@ -193,7 +198,9 @@ git add -A && python tools/release.py && git add -A
 | 進度與 phase 計畫 | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 給使用者的操作手冊：CD 那張卡每一格什麼時候動 | [`docs/USING-CD.md`](docs/USING-CD.md) |
 | 給使用者的操作手冊：EBI ↔ API characterization 怎麼做 | [`docs/USING-CHARACTERIZATION.md`](docs/USING-CHARACTERIZATION.md) |
-| 已知的坑（80 條以上，只增不減） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
+| 給使用者的操作手冊：一群框之間差多少、有沒有斜掉 | [`docs/USING-UNIFORMITY.md`](docs/USING-UNIFORMITY.md) |
+| 給使用者的操作手冊：貼一張 Golden Cell 產一整批模擬資料 | [`docs/USING-SIMGEN.md`](docs/USING-SIMGEN.md) |
+| 已知的坑（**只增不減**） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
 | 設計緣由：需求訪談結論、名稱由來、六個來源專案 | [`docs/HANDOVER.md`](docs/HANDOVER.md) |
 | **授權與來源**：d4t 的授權狀態、vendoring 來源、第三方相依 | [`docs/LICENSING.md`](docs/LICENSING.md) |
 | 廠內待驗證假設、受限機器部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) |

@@ -7,6 +7,7 @@
         "align_dx": "0.060792902716713115",
         "align_dy": "0.070316220435842069",
         "align_score": "78.427553381770849",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.79188194661692712",
@@ -20,23 +21,24 @@
         "glv_max": "19",
         "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "2.17590643627056",
+        "glv_std": "2.1315717747540623",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.0124664452641592",
-        "score": "3.7370514396374443"
+        "removed_over_noise": "0.99654674422586453",
+        "score": "3.8000103572833637"
       },
       "ok": true,
-      "score": "3.7370514396374443"
+      "score": "3.8000103572833637"
     },
     "2": {
-      "bin": 1,
+      "bin": 0,
       "error": null,
       "features": {
         "align_dx": "0.054544232771995382",
         "align_dy": "-0.11477865269397114",
         "align_score": "81.836504852399244",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.78795410247265196",
@@ -47,26 +49,27 @@
         "cd_n": "80",
         "cd_std": "0.86805051197340188",
         "clip_frac": "0",
-        "glv_max": "23",
+        "glv_max": "20",
         "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "2.2293990479579406",
+        "glv_std": "2.1296651056431863",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.0651019005839975",
-        "score": "5.1293342431823605"
+        "removed_over_noise": "0.99484976396673808",
+        "score": "4.183042158636213"
       },
       "ok": true,
-      "score": "5.1293342431823605"
+      "score": "4.183042158636213"
     },
     "3": {
-      "bin": 1,
+      "bin": 0,
       "error": null,
       "features": {
         "align_dx": "0.25068319562763008",
         "align_dy": "0.063315559200006533",
         "align_score": "81.051698308438063",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.78550631691127815",
@@ -77,18 +80,18 @@
         "cd_n": "80",
         "cd_std": "0.83455739125104578",
         "clip_frac": "0",
-        "glv_max": "22",
+        "glv_max": "19",
         "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "2.4723142226142993",
+        "glv_std": "2.154519502786322",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.4210087743174253",
-        "score": "4.3736963949140772"
+        "removed_over_noise": "0.98436321215478984",
+        "score": "3.7671601167380686"
       },
       "ok": true,
-      "score": "4.3736963949140772"
+      "score": "3.7671601167380686"
     },
     "4": {
       "bin": 1,
@@ -97,6 +100,7 @@
         "align_dx": "0.010417736287386958",
         "align_dy": "0.32409901630747129",
         "align_score": "75.27518805116415",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.79123596839665489",
@@ -107,18 +111,18 @@
         "cd_n": "86",
         "cd_std": "5.4298259626973762",
         "clip_frac": "0",
-        "glv_max": "67",
-        "glv_median": "10",
+        "glv_max": "78",
+        "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "3.6798463349776473",
+        "glv_std": "3.4721393989049569",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.6824962451857959",
-        "score": "13.636864954344027"
+        "removed_over_noise": "1.0204234139563575",
+        "score": "17.37099156666606"
       },
       "ok": true,
-      "score": "13.636864954344027"
+      "score": "17.37099156666606"
     },
     "5": {
       "bin": 1,
@@ -127,6 +131,7 @@
         "align_dx": "-0.11492677317743016",
         "align_dy": "0.054415207484836969",
         "align_score": "74.670728798955679",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.77706676231013638",
@@ -137,26 +142,27 @@
         "cd_n": "80",
         "cd_std": "5.5669099791116654",
         "clip_frac": "0",
-        "glv_max": "79",
+        "glv_max": "81",
         "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "5.3820555532601384",
+        "glv_std": "5.618481376939588",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.0804820216200819",
-        "score": "11.90060164617153"
+        "removed_over_noise": "1.0252762232450221",
+        "score": "11.767625913084625"
       },
       "ok": true,
-      "score": "11.90060164617153"
+      "score": "11.767625913084625"
     },
     "6": {
-      "bin": 1,
+      "bin": 0,
       "error": null,
       "features": {
         "align_dx": "-0.08891715790315402",
         "align_dy": "-0.10374489404735243",
         "align_score": "79.855030365288243",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.79200450651084964",
@@ -167,18 +173,18 @@
         "cd_n": "80",
         "cd_std": "5.6084978261813561",
         "clip_frac": "0",
-        "glv_max": "24",
+        "glv_max": "19",
         "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "2.3226659604564714",
+        "glv_std": "2.1579487922601261",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.0880295098449866",
-        "score": "5.3141250895923422"
+        "removed_over_noise": "1.01944654712704",
+        "score": "3.7622997211683407"
       },
       "ok": true,
-      "score": "5.3141250895923422"
+      "score": "3.7622997211683407"
     },
     "7": {
       "bin": 1,
@@ -187,6 +193,7 @@
         "align_dx": "0.11494645525771574",
         "align_dy": "0.17864654771316424",
         "align_score": "74.19999023899436",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.78796432058064236",
@@ -197,18 +204,18 @@
         "cd_n": "80",
         "cd_std": "0.84850778563008145",
         "clip_frac": "0",
-        "glv_max": "91",
-        "glv_median": "10",
+        "glv_max": "92",
+        "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "4.1839035727097764",
+        "glv_std": "4.0570076490355209",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.2450578810371677",
-        "score": "17.293268049311937"
+        "removed_over_noise": "1.0055336794153633",
+        "score": "18.21370653559617"
       },
       "ok": true,
-      "score": "17.293268049311937"
+      "score": "18.21370653559617"
     },
     "8": {
       "bin": 1,
@@ -217,6 +224,7 @@
         "align_dx": "0.30877977724925643",
         "align_dy": "0.024710030801664118",
         "align_score": "68.928172127343714",
+        "align_valid_frac": "1",
         "cd_axis_deg": "0",
         "cd_bright": "1",
         "cd_edge_score": "0.78994461088120027",
@@ -230,15 +238,15 @@
         "glv_max": "128",
         "glv_median": "9",
         "glv_pixels": "16384",
-        "glv_std": "4.4886261398299956",
+        "glv_std": "4.6748450890893647",
         "n_channels": "2",
         "norm_clip_frac": "0",
         "ref_clip_frac": "0",
-        "removed_over_noise": "1.6599315407784681",
-        "score": "23.854263010387733"
+        "removed_over_noise": "1.0932489977492303",
+        "score": "22.995857451056732"
       },
       "ok": true,
-      "score": "23.854263010387733"
+      "score": "22.995857451056732"
     }
   },
   "generator": "make_sample",

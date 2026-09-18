@@ -8,7 +8,6 @@ Context 快照（images + features + meta 子集）存成 npz，之後同一顆�
 
 儲存格式：``dir/<key[:2]>/<key>.npz``
   - ``img__<name>``：各影像流 ndarray（savez_compressed，無損）
-  - ``__labels__``：ROI label map（若有）
   - ``__payload__``：0 維字串陣列，內容是 JSON
     ``{"version": N, "image_names": [...], "features": {...}, "meta": {...},
        "rois": [[name, nx, ny, nw, nh], ...], "dtypes": {...}, "shapes": {...}}``
@@ -16,7 +15,8 @@ Context 快照（images + features + meta 子集）存成 npz，之後同一顆�
 回 None（呼叫端退回重算，永不 crash）。
 
 **快照必須涵蓋 Context 的每一個欄位。**（F7-9 修）v1 只存了
-images/features/meta，漏了 ``rois`` 與 ``labels``。checkpoint 是執行順序上的
+images/features/meta，漏了 ``rois``（當時還有一個 ``labels``，F110 刪掉了 ——
+見 `Context` 那裡的說明）。checkpoint 是執行順序上的
 **位置**（最後一張影像段卡的下一格），不是「所有影像段的卡」—— 所以放在中間
 的 Region 卡（``roi_cross`` / ``roi_template``，都是 algo）會落在快取段裡。
 於是：第一次跑（miss）正常，**第二次跑（hit）ROI 不見了**，量測卡報
@@ -70,7 +70,12 @@ class StageCache:
     #: ``images``（名字 → **最後一個**寫它的人）。分支之後同一個名字有好幾張
     #: 圖，快照只留得下最後那張，於是熱跑時指向快取段內某個節點的線查不到，
     #: 退回最後寫者＝**隔壁那一支**：冷跑 3.0、熱跑 5.0，兩邊都跑得完。
-    FORMAT_VERSION = 4
+    #:
+    #: 5（F110，2026-09-18）：少了 ``__labels__``。`Context.labels` 刪掉了
+    #: （沒有任何一張卡寫過它，見那裡的說明），而快照的欄位集合一改就要換版本
+    #: —— 舊目錄裡的快照少一個欄位不會爆，但**多一個沒有人讀的欄位**會讓
+    #: 「快照涵蓋 Context 的每一個欄位」這句話下次沒辦法被檢查。
+    FORMAT_VERSION = 5
 
     def __init__(self, dir: str) -> None:
         self.dir = str(dir)
@@ -96,7 +101,7 @@ class StageCache:
 
     # ---- get / put ---------------------------------------------------------
     def get(self, key: str) -> Optional[Dict[str, Any]]:
-        """回 ``{"images", "features", "meta", "rois", "labels", "produced"}``
+        """回 ``{"images", "features", "meta", "rois", "produced"}``
         或 None（不存在 / 壞檔 / 舊格式；壞檔會盡力刪掉）。
 
         ``produced`` 是 ``{(節點, 埠): 陣列}`` —— 只存**跨過 checkpoint 被用到
@@ -120,7 +125,6 @@ class StageCache:
                 meta = dict(payload.get("meta") or {})
                 rois = [(str(r[0]), tuple(float(v) for v in r[1:5]))
                         for r in (payload.get("rois") or [])]
-                labels = z["__labels__"] if "__labels__" in z.files else None
                 produced = {}
                 for i, (nid, port) in enumerate(payload.get("produced") or []):
                     produced[(str(nid), str(port))] = z["prod__%d" % i]
@@ -133,11 +137,11 @@ class StageCache:
             return None
         self.hits += 1
         return {"images": images, "features": features, "meta": meta,
-                "rois": rois, "labels": labels, "produced": produced}
+                "rois": rois, "produced": produced}
 
     def put(self, key: str, images: Dict[str, np.ndarray],
             features: Dict[str, float], meta: Dict[str, Any],
-            rois: Any = None, labels: Any = None,
+            rois: Any = None,
             produced: Any = None) -> None:
         """寫入一筆快照（atomic：先 ``.tmp`` 再 ``os.replace``）。
 
@@ -175,8 +179,6 @@ class StageCache:
         arrays: Dict[str, np.ndarray] = {"img__" + n: a for n, a in imgs.items()}
         for i, k in enumerate(prod_keys):
             arrays["prod__%d" % i] = np.asarray(prod_src[k])
-        if labels is not None:
-            arrays["__labels__"] = np.asarray(labels)
         arrays["__payload__"] = np.array(
             json.dumps(payload, ensure_ascii=False, sort_keys=True))
 

@@ -222,7 +222,9 @@ class PairSourceStep(Step):
     """另一份資料的對應那一顆 → 一條影像流。"""
 
     key = "pair_source"
-    label = "Pair with another source"
+    # F110：24 → 11。「with another」在卡片庫那一列上不帶資訊 ——
+    # 配對本來就是跟別的東西配。
+    label = "Pair source"
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
     help = ("Bring in the matching defect from a second lot - the RSEM ground "

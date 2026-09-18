@@ -82,6 +82,8 @@
 > | 2026-08-24 | **1,712 KB** | git（**八天內接近翻倍**）|
 > | 2026-09-02 | 2,354 KB | git（再九天又多 642 KB）|
 > | 2026-09-02（封存後）| **2,172 KB** | 把 `SESSION_LOG` 的 08-19～08-28 段與 18 份做完的計畫書搬進 `docs/history/`（那個目錄不進包）—— **一次省 182 KB，而一行內容都沒有刪** |
+> | 2026-09-17 | **4,243 KB** | git（**又翻了一倍**。這張表本來就是為了盯這件事而存在，而它自己停在兩週前 —— 所以 `tests/test_docs_match_registry.py` 現在守著最後一列：實際大小超過它 1.25 倍就叫，要有人回來補一列）|
+> | 2026-09-17（封存後）| **4,164 KB** | 把 `SESSION_LOG` 的 09-01 ～ 09-08 段（F67 ～ F100，2,472 行 / 158 KB）搬進 `docs/history/2026-09.md` —— **省 79 KB，而一行內容都沒有刪**。⚠ 這次沒有計畫書可以一起搬（`docs/plans/` 只剩 F11 一份活的），所以省得比 2026-09-02 那次少一半 |
 >
 > 連帶的第二個數字：這個檔案每次 commit 都重產，而它是 lzma + base64 ——
 > 內容整份改變，git 沒有辦法 delta 壓縮。當時量到的是**328 個版本佔掉 pack
@@ -247,7 +249,7 @@ git add -A && python tools/release.py && git add -A
 一行做完兩件事，**順序不能顛倒**（包裡面含著那份清單）：
 
 1. `tools/FILELIST.txt` —— 公司機用它判斷「哪幾個檔案要重新複製」
-2. `bundle/d4t_bundle.py` —— 整包壓成一個 `.py`（2026-09-02 是 2,172 KB，水位表見 §2），
+2. `bundle/d4t_bundle.py` —— 整包壓成一個 `.py`（多大、漲多快看 §2 的水位表），
    按複製鈕就搬得走。產完會報一行水位，見上面 §2 的警告
 
 `git add` 要在前面：兩者都是從 `git ls-files` 產的，**還沒 add 的新檔案會安靜地
@@ -276,6 +278,7 @@ python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 | `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
 | `make_lot_from_gc.py`（CLI）／`python -m d4t simgen`（UI）| **家用機** | ❌ | **拿一張 Golden Cell 鋪成整批擬真資料**：RSEM 大圖（1000²）＋ 從大圖切下來的 patch（81²，test/ref 成對）＋ 兩份 KLARF ＋ ground truth。跟其他產生器的差別是**它不畫圖案，它鋪你給的那一張** —— 圖案是輸入不是參數，所以換 layer 換世代都不用改程式（最高指導原則）。週期用次像素量、缺陷落點從 GC 量出來。⚠ GC 可能是廠內圖案，**吃的跟吐的都不進版控**（鐵則 8）。UI 版（F60）多的只有「貼上就能用」：剪貼簿 `Ctrl+V`／影像檔／recipe／`gc2:` 字串四條路，週期看得到也改得動 |
+| `make_doe_sample.py` | **家用機** | ❌ | 合成一份 **DOE lot**：一個子目錄一顆 defect、裡面每個檔案是一個 imaging condition（不同的 Landing energy／電流），三個 condition 只差在雜訊 σ。⚠ **刻意不沿用 `make_sample.py`** —— 那一份的 patch 整張都是高對比晶格（實測任何 16×16 的框標準差都 > 62），而 DOE 量的 `snr_px` 的分母正是**參照那一塊自己的像素標準差**：拿一塊全是圖案的地方當參照，「哪個 condition 訊噪比比較好」這個問題根本問不出來。要 numpy |
 | `make_glas_export.py` | **家用機** | ❌ | 合成一份 **GLAS 匯出**（`<id>_label.png` + v4 manifest）掛在 RSEM lot 上 —— Region-3 在家用機唯一的資料來源（要 numpy/cv2）|
 | `run_tests.py` | **兩台都可以** | ❌ | **每個測試檔各自一個行程**跑完全套，外加逐檔計時、「最慢的幾個」、失敗全部收集到最後一起印。`--fast` 略過 UI。stdlib-only，所以**Windows 上也跑得動** —— 那正是它存在的理由：`CLAUDE.md` 以前教的 `for f in …; do …; done` 是 bash，而家用機是 Windows |
 | `freeze_golden.py` | **家用機** | ❌ | 把現在算出來的 feature 表凍成黃金值（重構的安全網，見 `docs/history/plans/F9-dag-streams.md`）|

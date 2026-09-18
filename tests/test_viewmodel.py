@@ -49,7 +49,8 @@ def test_available_streams_and_features():
     sub = m.add_step("subtract")
     glv = m.add_step("glv_stats")
     streams = m.available_streams(before_node=sub)
-    assert "test" in streams and "ref" in streams and "ref_aligned" in streams
+    # F109：align 就地對齊（寫回原名），所以這裡不再多一條 `ref_aligned`。
+    assert "test" in streams and "ref" in streams
     feats = m.available_features()
     assert "glv_median" in feats and "align_dx" in feats
     assert "glv_median" not in m.available_features(upto_node=sub)

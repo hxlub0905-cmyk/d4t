@@ -293,6 +293,10 @@ COMPARE_METRICS: Dict[str, str] = {
     "contrast": ("the difference over the sum of the two - between -1 and 1, "
                  "and it still means something when the reference is nearly "
                  "black"),
+    # -- 跟參照那一塊的像素比（一個框就夠）---------------------------------
+    "snr_px": ("how far apart they are, in standard deviations of the "
+               "reference's own pixels - the one that still works when the "
+               "reference is a single box (never negative)"),
     # -- 跟參照的那些格子比（需要 reference_boxes）------------------------
     "snr": ("how far apart they are, in standard deviations of the "
             "reference's own box-to-box variation (never negative - the "
@@ -311,9 +315,14 @@ COMPARE_METRICS: Dict[str, str] = {
 BOX_METRICS = ("snr", "tstat", "pct_rank")
 
 #: 這幾個**不看 `stat`**：它們比的是整條分布，不是壓成一個數字之後的差。
-#: 「Compare their」可以一次勾好幾個統計量（2026-08-21），而這兩個對每一個
+#: 「Compare their」可以一次勾好幾個統計量（2026-08-21），而這幾個對每一個
 #: 統計量都會算出同一個值 —— 所以它們的特徵名不帶統計量後綴，也只寫一次。
-STAT_FREE_METRICS = ("overlap", "spread_ratio")
+#:
+#: ``snr_px``（F110）在這裡是因為**它的定義裡沒有 stat 這個維度**：它是
+#: ``|μT − μR| / σR``，平均與標準差都是寫死的（`algo/snr.snr_signed` ——
+#: 這個 repo 帶正負號慣例的規範出處）。讓它跟著 stat 跑的話，勾五個統計量會
+#: 得到五個**一模一樣**的數字配五個不同的名字。
+STAT_FREE_METRICS = ("overlap", "spread_ratio", "snr_px")
 
 
 def compare_pixels(target: np.ndarray, reference: np.ndarray,
@@ -383,6 +392,20 @@ def compare_pixels(target: np.ndarray, reference: np.ndarray,
                                if mad_r > _EPS else float("nan"))
     if "overlap" in todo:
         out["overlap"] = _hist_overlap(t, r)
+    if "snr_px" in todo:
+        # ⚠ **要算在下面那個提前返回的上面。** `snr_px` 存在的唯一理由就是
+        # 「參照只有一個框」那個情況（DOE：一個 target box、一個 ref box），
+        # 而下面那一段在框少於兩個時就 return 了 —— 放在它後面等於在唯一需要
+        # 它的時候被安靜地丟掉。
+        #
+        # 它跟 `snr` **不是同一個東西，也不互相取代**：`snr` 的分母是格與格
+        # 之間的散布（使用者 2026-08-21 定調的 by-box），而那個定義在只有一格
+        # 的時候沒有答案。這一個的分母是參照**自己的像素**，所以一格就算得出來
+        # —— 代價正是使用者當時說的「by pixel 會太小」（per-pixel σ 裡有 shot
+        # noise）。兩個名字、兩個定義、兩個門檻，誰都不准退回誰。
+        from .snr import snr_signed        # 模組層不 import（見檔頭）
+
+        out["snr_px"] = abs(float(snr_signed(t, r)))
 
     boxes = [float(v) for v in (reference_boxes or [])
              if v is not None and np.isfinite(v)]

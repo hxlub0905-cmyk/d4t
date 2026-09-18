@@ -6,7 +6,9 @@
 > d4t 是在一個 Claude Cowork session 裡從零做到 v1 的，那個 session 同時讀過
 > 六個既有專案的原始碼 —— **那份跨專案的脈絡不在程式碼裡，只在這份文件裡。**
 
-版本：2026-07-28 · 對應 commit `M6: offline install toolchain…` · 588 tests
+版本：2026-07-28 起筆，之後逐輪補（對應 commit `M6: offline install toolchain…`）。
+⚠ **這一份講的是「為什麼長成這樣」，不是「現在有多少」** —— 會變的數字
+（幾支測試、跑多久、幾張卡）一律去它們自己的家看，這裡不抄。
 
 ---
 
@@ -154,7 +156,7 @@ vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub09
 
 ### 已驗證的
 
-- 588 個測試全綠，全部跑在**合成資料**上，約 30 秒跑完。
+- 測試全綠，全部跑在**合成資料**上（怎麼跑、哪一批多久見 [`../CLAUDE.md`](../CLAUDE.md) §4）。
 - 效能：2 核容器、2000 顆合成 patch，cold 17.5 ms/顆、暖快取 2.2 ms/顆、rescore 0.17 s。
 - 分類效果：`dual_route_basic.json` 跨 3 seeds × 2 種輸入共 144 顆合成 defect，正確率 95.1%。
 - KLARF 無損寫回：inplace 模式沒改東西時輸出逐位元組相同（有測試鎖）。
@@ -163,8 +165,9 @@ vendoring 過來的。那六個專案在使用者的桌面上（`Desktop\hxlub09
 
 ### 還是假設的（docs/FAB-VALIDATION.md 有完整版）
 
-真實資料不能出廠，所以原本有三件事從頭到尾沒有用真實資料驗證過。
-**2026-07-30 使用者結掉了前兩條**，剩一條：
+真實資料不能出廠，所以有些事從頭到尾沒有用真實資料驗證過。下面三條是**起初**
+那三件（2026-07-30 結掉了前兩條）；那之後又加了幾條，**還沒結的到底有哪些，
+唯一出處是 [`FAB-VALIDATION.md`](FAB-VALIDATION.md)** —— 這裡不抄一份會漂的清單。
 
 1. ~~**EBI patch 的 page→channel 對應**~~ —— ✅ **已確認**：第一張 = test、第二張 = ref。
 2. ~~**`nm_per_px` 從哪來**~~ —— ✅ **用設計繞開**：不再需要這個值。
@@ -239,6 +242,7 @@ RSEM 沒有機台給的參考圖，Golden Cell 疊一張出來後命名為 `ref`
 - `CLAUDE.md` 會自動載入，是操作手冊；這份 `HANDOVER.md` 要自己開。
 - **每次 session 結束請更新 `SESSION_LOG.md`**（沿用 GLAS/MMH 的慣例）。
   那份是逐次的決策紀錄，比 commit message 詳細。
-- 這個 repo 的測試全部用合成資料、~30 秒跑完，所以**改任何東西都應該先跑一次全套**：
-  `QT_QPA_PLATFORM=offscreen python -m pytest -q`（Windows 不用設環境變數）。
-- 新增卡片的完整範例在 `CLAUDE.md` §5。新算法 = 新 class + decorator，UI 與引擎零修改。
+- 這個 repo 的測試全部用合成資料，但**已經不是「30 秒跑完、改什麼都先跑全套」那個
+  規模了** —— 開發迴圈只跑改到的檔，整套走 `python tools/run_tests.py`
+  （逐檔一個行程；`--fast` 略過 UI）。**唯一出處是 [`../CLAUDE.md`](../CLAUDE.md) §4。**
+- 新增卡片的完整範例在 `CLAUDE.md` §3。新算法 = 新 class + decorator，UI 與引擎零修改。

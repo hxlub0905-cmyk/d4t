@@ -253,12 +253,12 @@ def _local_view(master: Context, visible: Dict[str, Any]) -> Context:
     「到目前為止的所有流」—— 那正是分支做不到的原因，也是「卡片偷讀一條沒宣告
     的流」不會被發現的原因（畫布上不會有那條線，使用者於是看不出兩張卡有關係）。
 
-    **只有 ``images`` 是這張卡自己的**；``rois`` / ``labels`` / ``features`` /
-    ``meta`` 仍然共用同一份（F9-3 才處理 feature 的歸屬）。dict 是直接共用參考，
-    所以卡片往 features/meta 寫的東西會直接落到 master 上；``rois`` / ``labels``
+    **只有 ``images`` 是這張卡自己的**；``rois`` / ``features`` / ``meta``
+    仍然共用同一份（F9-3 才處理 feature 的歸屬）。dict 是直接共用參考，
+    所以卡片往 features/meta 寫的東西會直接落到 master 上；``rois``
     是**可能被整個換掉**的欄位（``set_roi`` 會 rebind），所以跑完要抄回去。
     """
-    return Context(images=dict(visible), rois=master.rois, labels=master.labels,
+    return Context(images=dict(visible), rois=master.rois,
                    features=master.features, meta=master.meta,
                    track_changes=master.track_changes,
                    current_node=master.current_node)
@@ -530,10 +530,9 @@ def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
             # 影像流下拉、trace 的 images_after 都吃它，全部不變。
             for name, arr in local.images.items():
                 ctx.images[name] = arr
-            # rois / labels 是可能被整個換掉的欄位，抄回去（features/meta 共用
-            # 同一個 dict，卡片寫進去的已經在 master 上了）。
+            # rois 是可能被整個換掉的欄位，抄回去（features/meta 共用同一個
+            # dict，卡片寫進去的已經在 master 上了）。
             ctx.rois = local.rois
-            ctx.labels = local.labels
         except Exception as e:  # StepError / ContextError / ParamError / 其他
             ms = (time.perf_counter() - t0) * 1000.0
             traces.append(StepTrace(
@@ -1011,9 +1010,6 @@ def _restore_context(item: Any, kind: str, defect_id: str,
         grouped.setdefault(str(name), []).append(rect)
     for name, rects in grouped.items():
         ctx.set_roi_boxes(name, rects)
-    labels = snap.get("labels")
-    if labels is not None:
-        ctx.labels = labels
     # F9-10：把「哪個節點的哪顆埠產出了這張圖」也接回去。少了它，指向快取段內
     # 某個節點的線在熱跑時查不到，會退回「最後一個寫這個名字的人」＝隔壁那支。
     prod = dict(snap.get("produced") or {})
@@ -1106,7 +1102,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
                 produced = dict(getattr(ctx, "_produced", None) or {})
                 cache.put(key, dict(ctx.images), dict(ctx.features),
                           _meta_snapshot(ctx.meta),
-                          rois=_roi_snapshot(ctx), labels=ctx.labels,
+                          rois=_roi_snapshot(ctx),
                           produced={k: produced[k] for k in (need or ())
                                     if k in produced})
             except Exception:

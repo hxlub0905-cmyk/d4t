@@ -135,9 +135,9 @@ def test_align_gets_the_same_check():
     """對位也是「拿兩張圖互相比」—— 灰階尺度不一樣，相關性就找錯位置。"""
     r = _recipe(
         [LOAD, ("n1", "normalize", {"streams": "ref"}),
-         ("al", "align", {"moving": "ref", "fixed": "test",
+         ("al", "align", {"streams": "test,ref", "fixed": "test",
                           "search_radius": 6})],
-        [("load", "n1", "ref", "streams"), ("n1", "al", "ref", "moving"),
+        [("load", "n1", "ref", "streams"), ("n1", "al", "ref", "streams"),
          ("load", "al", "test", "fixed")])
     assert "uneven-treatment" in _codes(r)
 
