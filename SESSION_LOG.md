@@ -28,6 +28,83 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F116 第 1 步：拆 `studio.py` 的第一刀 —— 右下角那一塊與預覽區（2026-09-19）
+
+計畫書 [`docs/plans/F116-split-studio.md`](docs/plans/F116-split-studio.md) 的六步
+裡的第一步，一個 PR 三個 commit（1a／1b／1c）。`CLAUDE.md` §4 早就寫著
+「`studio.py` 留給接線，不留給內容」，而 `HARD_CAPS` 讓那一格只准往下 ——
+這一輪是**有計畫地**把它走完的開始。
+
+| | 之前 | 之後 |
+|---|---|---|
+| `d4t/ui/studio.py` | 7,686 行 | **6,782**（−904）|
+| `StudioWindow` 方法 | 293 | **256**（−37）|
+| `StudioWindow` 的 `self.*` | 433 | **389**（−44）|
+
+三個去處，而**只有兩個是新模組**：
+
+* `d4t/ui/gauge_panel.py` —— `bottom_stack` 的**兩頁**（卡片儀表 ＋ 特徵表）。
+  它們是同一塊畫面、同一個狀態機（`show_bottom_page` 管誰在前面），拆成兩個
+  controller 的話那一支會變成跨物件呼叫。
+* `d4t/ui/preview_overlays.py` —— 影像流選擇與畫在圖上的東西（區域框、量測標記、
+  熱色磚、並排比對、兩張圖互跟）。
+* 區域跨顆檢視那四支進了**既有的** `d4t/ui/region_check.py`。計畫書原本寫可能
+  開一個 `ui/feature_pane.py`，判準是「>600 行就分」；搬之前量是 609 行，剛好
+  踩線，於是回頭問 `CLAUDE.md` §4 那一句「先問那一塊該不該是一塊」——
+  答案是**照畫面上的位置分，不是照行數分**：那顆「跨顆檢視」的按鈕住在預覽區，
+  而它用的每一個東西本來就在 `region_check.py` 裡。所以少開了一個模組。
+
+新工具 `tools/studio_surface.py`（計畫書 §6）：量 `StudioWindow` 的表面與**測試裡
+用到的名字**，`--save` / `--check` 一對。這種搬家最危險的失敗是搬走一個測試正在
+用的名字，而測試大量用屬性存取、`grep import` 答不出誰在用。
+
+### 四件「跑得完但是錯的」
+
+搬家這種事沒有新邏輯，所以它的 bug 全部長成同一個樣子：**import 過、開得起來、
+然後在某一條路上才爆**。第 1 步踩到四個，每一個都寫回計畫書 §6 的清單：
+
+1. **單獨當參數傳出去的 `self`**。`self.x → self.w.x` 的機械式取代抓不到
+   `UniformityWindow(self)` —— 而 controller 是 `QObject`，那個位置要的是 QWidget。
+2. **`@property` 掉在原地**。`ast` 的 `lineno` 指著 `def` 不是裝飾器，照它切出來的
+   區間會把 `@property` 留下，而症狀是門面回一個 **bound method**。
+3. **門面的簽章憑印象寫**。`heat_tiles` 實際吃一個 `stream` 參數。改成用 ast 把
+   十支門面跟 controller 的簽章逐一比對。
+4. **`F401` 答不出「別人有沒有透過這個檔案用到」**（`CLAUDE.md` §4 的警告逐字命中）。
+   `tests/` 是用 `studio_mod.FEATURE_OWNER_KEY` **別名**拿的，grep
+   `studio.FEATURE_OWNER_KEY` 掃不到。修的是測試 —— 那個鍵的家在引擎，
+   `ui.studio` 只是剛好 import 過它。
+
+### ⚠ 家用機上的黃金值：`align_score` 那一格
+
+計畫書 §6 的前置檢查第一條是「三份全綠」，而動手前跑出來**第三份是紅的**。
+查清楚了，**不是這個 repo 的行為變了**：
+
+* 差的只有 `align_score`，而且差在第 4 位；
+* `align_dx`／`align_dy`（`%.17g`）與**每一個下游特徵**逐位元組相同 ——
+  也就是對齊的結果一模一樣，只有那個信心分數不同；
+* `d4t/core/algo/align.py`（`final_score` 的出處）自從黃金值凍結（F109）以來
+  **一個位元都沒動**，`steps/align.py` 那 8 行是 F114 加的 `label=`。
+
+同樣的程式碼配同樣的輸入吐不同的數字，剩下的變數只有這台機器的 OpenCV build
+（那個分數吃 `cv2.warpAffine` 的殘差，而 dx/dy 來自 FFT —— 一個會跟著 SIMD 路徑
+漂，一個不會）。`freeze_golden.py` 自己的說明本來就寫著「用途是**同一台機器上**、
+重構前後的比較」。2026-08-19 那次「跨機器也逐位元組相同」的實測是在 align 卡
+還沒回到卡片庫之前做的，沒有涵蓋這個特徵。
+
+所以：**repo 裡那三份沒有動**（它們帶著跨環境的歷史），第 1 步的基準凍在
+scratchpad，三個 commit 每一個都對過、逐項相同。
+
+### 順手修掉的一個（獨立 commit）
+
+`tools/doctor.py` 的子行程沒設 `QT_ASSUME_STDERR_HAS_CONSOLE` —— Qt 開不了
+platform plugin 是 fatal，而 **Windows 上的 fatal 預設是一個跳出來的對話框**。
+`test_doctor_says_the_cli_still_works_when_qt_cannot_open_a_window` 故意用一個
+不存在的 platform 逼它失敗，於是每跑一次測試就在家用機上留一個按不完的視窗，
+而那一項還要等滿 timeout 才有結論（修完 7 秒）。這正是 `CLAUDE.md` §4 F91
+那條「會跳 modal 對話框的東西要有一個關得掉的旗標」的子行程版。
+
+---
+
 ## F115：OP-301 廠外驗證的結果 —— noise、區域型態、以及 16→8 bit（2026-09-18）
 
 使用者在一個隔離環境裡拿**兩批真實機台檔**（23 張，每張帶著機台自己算的 F.I.
