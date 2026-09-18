@@ -28,6 +28,50 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F111：更正 —— DOE 的 recipe 不缺卡，是我把 `template` 讀錯了（2026-09-18）
+
+F110 收尾我寫了一句「還差第四種 ROI method（或一張新卡）才出得了 DOE 的 recipe」，
+**而那是錯的**。使用者一句話就戳破：
+
+> 「其實固定位置的框在 ROI 內就有現成的，因為 defect 都會置中阿，ROI card 內就有
+> 一個這選項」
+> 「ROI reference 方法請用 a cell I mark myself」
+> 「就丟其中一張的 template 給他讓他算，然後在上面框 ROI(Bbox)」
+
+### 錯在哪 —— 前提，不是推論
+
+那一段的每一步推論都對：三種 method 確實都要有東西可以鎖、DOE 的 defect 確實置中、
+`pick="centre"` 確實只是從既有的框裡挑一個而不是造一個。**錯的是前提**：
+我把「要有東西可以鎖」當成**卡片要自己去找一個可重複的 pattern**，於是
+「DOE 的影像未必有 pattern」就變成一道過不去的牆。
+
+但 `a cell I mark myself` 的 `template` **不是卡片要去猜的東西，是使用者自己挑的
+那一張圖**。使用者裁一塊當 template、在上面把 target 與 ref 的 bbox 框出來
+（`regions`，型別 `cell_rois`，存的就是那幾個矩形）—— 那正是 imageY 的動作：
+**設一組 box**，不是叫軟體去找什麼。我讀過那一格的 help（「Draw them on the cell
+in Studio」），卻沒有把「誰提供 template」這件事想清楚。
+
+⚠ 第二條路我也讀到了卻沒認出來：`pick` 那一格**預設就是 `centre`**，吐
+`<name>_center` / `<name>_others`，而它的說明逐字寫著「Patches are cut around the
+defect, so the middle one is usually it」—— 那句話講的正是 DOE 的事實。
+
+### 這一輪只改文件
+
+`docs/ROADMAP.md` 的 Compare 那一列與 `SESSION_LOG.md` 的 F110 那一段。
+F110 那一段**逐字留著並標成已更正** —— 它是紀錄，不能假裝沒發生過，而更正一句
+錯話的前提是看得到錯的那一句。
+
+**一行程式碼都沒有改**，那正是「判斷錯了」的意思：DOE 的出貨 recipe 還沒寫，
+但它不缺任何卡。
+
+### 留給下一個人的那一課
+
+**「做不到」是一個比「還沒做」貴很多的結論**，因為下一個人會照著它去開一張新卡。
+這一次的教訓很具體：**下這種結論之前，先問「這個輸入是誰給的」** ——
+我把一個使用者提供的東西當成程式要自己產生的東西，整條推論就往錯的方向走完了。
+
+---
+
 ## F110：Compare 段收斂 —— 拆卡、第五種 kind、流的內容型別（2026-09-18）
 
 使用者說「**全部**」：F109 之後定案但沒做的六件一次做完。Compare 是 Phase 2 七段裡
@@ -143,17 +187,21 @@ label：`Remove background / stripes` → `Flatten`、`Pair with another source`
 | `subtract` 拆卡 | 舊的**值**（`op` 是不是 max/min/mean）| 鐵則 9 正牌 |
 | `absolute` → `sign` | 舊**鍵**在不在 | 同上，而且預設值的意思沒變 |
 
-### 沒做完的那一件（誠實回報）
+### 沒做完的那一件 —— ⚠ **而這個判斷是錯的（F111 更正）**
 
-**`recipes/doe-conditions.json` 出不了貨**，而理由不是時間：三種找 ROI 的方法
-（條紋／我標的 cell ＋ 模板比對／GDS label map）**都要有東西可以鎖**，而 DOE
-**不需要找** —— defect 本來就固定在 FOV 正中間，要的是「把框放在這個固定位置」。
-那是第四種 method（或一張新卡），是**卡片層的決定**，不是一份 recipe 寫得出來的。
-硬用 `roi_template` 的話要在 recipe 裡塞一張模板圖，而 DOE 的影像未必有可重複的
-pattern 給它鎖 —— 那份 recipe 會在 `test_shipped_recipes` 裡真的跑，然後真的失敗。
+> 下面這一段是當時寫的，**逐字留著**：它是「我當時怎麼想的」，而更正一句錯話的
+> 前提是看得到錯的那一句。正確的版本在下一段。
 
-寫進 `docs/ROADMAP.md` 的 Compare 那一列了。DOE 的其他每一塊都通了
-（輸入、對齊、`snr_px`、contrast、報表）。
+> **`recipes/doe-conditions.json` 出不了貨**，而理由不是時間：三種找 ROI 的方法
+> （條紋／我標的 cell ＋ 模板比對／GDS label map）**都要有東西可以鎖**，而 DOE
+> **不需要找** —— defect 本來就固定在 FOV 正中間，要的是「把框放在這個固定位置」。
+> 那是第四種 method（或一張新卡），是**卡片層的決定**，不是一份 recipe 寫得出來的。
+> 硬用 `roi_template` 的話要在 recipe 裡塞一張模板圖，而 DOE 的影像未必有可重複的
+> pattern 給它鎖 —— 那份 recipe 會在 `test_shipped_recipes` 裡真的跑，然後真的失敗。
+
+**更正見下一輪（F111）**：那一段的每一句推論都對，只有**前提**是錯的 ——
+「要有東西可以鎖」不是卡片要去猜，那一張 template 本來就是使用者自己挑的。
+DOE 的出貨 recipe **不缺任何卡**。
 
 ### 天花板
 
