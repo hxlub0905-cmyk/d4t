@@ -4,13 +4,13 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 05c93bfe4f450929664975133d72d2034d07a8fa .github/workflows/ci.yml
 68a59c98883d1b448c8bbe84dc129883207a341f .gitignore
 b7bc7218ace1c6375673d570c543f0208cfa1007 AGENTS.md
-fa9c06f26dc4864c85e0261492e45acea276d73f CLAUDE.md
+46834aca041a6a61d774b76b12cda6d81e5abdab CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
-d5dcea5a0110611048a79f78348273537aa9125d README.md
-fd147b92752bcde8b1bb52a03b3afdb6d1b26855 SESSION_LOG.md
+95482397ce4e082b67ccde258c7ec33de2f0fec3 README.md
+c56c48892fff86c81ce8544411d7d966da7e06c0 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
-a4d07ffae749c896999b2c95a78244fb2514490f d4t/__main__.py
+d05be13e4ff5c1797fb9bfa15fa88ec796fb4985 d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 dbcf7ddc11affd20145254f192259784aa3b8789 d4t/core/algo/__init__.py
 4831e63cce346047c2bb15032d3ad47e7a2cb847 d4t/core/algo/align.py
@@ -124,7 +124,7 @@ e7df3d112338385785cce94e375e27cee62c7127 d4t/ui/gc_paint.py
 9e4e9e135a209ee1ccf0282ff52e838a237f73ee d4t/ui/glyphs.py
 480e6660f5b9015be5047282146bc37c80ec2eb1 d4t/ui/graph_builder.py
 0d8522f971e608eb3f97e659741419f648fdba86 d4t/ui/histogram.py
-36390d4471355193efdd3c334e0c7251588e55ca d4t/ui/icons.py
+ca30c29322165e11582d2696336da9deb1c5918f d4t/ui/icons.py
 5c366f8c72112db19328032d72efbed756463190 d4t/ui/image_view.py
 3833f00c4a3474be2c3533c7844b830b98cf9706 d4t/ui/inspectors.py
 844b61583e97db2c8dd1efa03ffc2d0dd9765ded d4t/ui/lattice_dialog.py
@@ -132,7 +132,7 @@ e7df3d112338385785cce94e375e27cee62c7127 d4t/ui/gc_paint.py
 d577ffb1139dedd58a91b63dc21ad922108098c9 d4t/ui/locales/zh_TW.json
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
 99b8d619c884e776014c33948df97d22e6579ef8 d4t/ui/numbers.py
-50e25252b421bd77827b7d99b2bf34966b4fb210 d4t/ui/open_dialogs.py
+427fa61993f882dfe0ceacbf25c342fb8dd597ca d4t/ui/open_dialogs.py
 f833c92e7f7d4e409ac777ab681db38434d619e1 d4t/ui/param_form.py
 e616caa001fd10329bab227ae0ed1cf39e2b4d16 d4t/ui/problems_bar.py
 6edc128652aba74b98fd89830698c2176e5d672e d4t/ui/region_check.py
@@ -141,7 +141,7 @@ c2a8983fa3fb3c815ce1bd9a3b89baa7d67f1392 d4t/ui/results.py
 c545669041d13871dea2377a3282a2a3e7ca5c01 d4t/ui/results_table.py
 fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
-a76e33c02c081725a0f7e89dfcf401a47856882e d4t/ui/scope.py
+422748fb443b883e0e95438956c07c0885663d5a d4t/ui/scope.py
 290e9af828021e66a1b944acd1e46ddb52aeb578 d4t/ui/splitters.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
@@ -182,7 +182,7 @@ bc67ec7dcc7beceed4d9abbe36d63743886ed39e docs/ROADMAP.md
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
 423779b0e360f0cac1a139ed2ed87c70d5cfd327 fab_probe/probe_tiff.py
 c889d0bf48b7646fa62e37453312a3cedb598e2a pyproject.toml
-63454542a6e8ee14b5a68ebd1718dae05e5310f8 recipes/README.md
+41b7cd4bba45d1eff1c98e6782af2fd56ce217fa recipes/README.md
 bf7243f7ef415cb3286d01c5e443ff9a1513f690 recipes/ebi-die-to-die.json
 0521f541baee7491540517376b13911b09183570 recipes/one-image-uniformity.json
 d0cb0a1aa941f98713a8a9146115935aff79c3bd recipes/rsem-worst-box.json
@@ -402,7 +402,7 @@ cc37ade648230ebefea39f78b15dee064a14c832 tests/test_ui_grid_toggle.py
 f480eedce6d10f8e192050bdbe65d03676911df0 tests/test_ui_ground_truth.py
 d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_ui_guided_condition.py
 46b4c2bc498be5f3641b2d66d44117424d375bed tests/test_ui_info_level.py
-02ee09c60dc81c9fb0fbc761e55e1c25251c6ef1 tests/test_ui_input_kinds.py
+f670fa32fdff73493ecca6d0639a2b4dc3f3bee3 tests/test_ui_input_kinds.py
 71fe38a1e64897daf4b818ceba10750f48efd4f6 tests/test_ui_inspectors.py
 e080d7615bf2f2b8df2c17b6bd0d9b4e4c1b9107 tests/test_ui_layout_follows_the_wires.py
 455ea8223907af8aa3a9a5516bdb09c2fdc0eced tests/test_ui_layout_modes.py

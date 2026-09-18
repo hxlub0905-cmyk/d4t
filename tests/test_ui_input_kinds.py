@@ -195,32 +195,78 @@ def test_a_multipage_tiff_opened_as_one_image_says_where_to_go(tmp_path):
     assert same.warnings == ds.warnings
 
 
-def test_the_image_entry_is_on_the_one_table_that_grows_the_buttons():
+def test_every_entry_is_on_the_one_table_that_grows_the_buttons():
     """加一個入口＝改 `INPUT_SOURCES`，不動 UI（`CLAUDE.md` §5）。
 
     工具列那顆鈕、空白狀態那一列、以及它的處理函式全部從這張表長出來，
     所以這一條同時守住三個地方 —— 少接一個的下場實測過（F11 Input-5：
-    `Load layout` 的入口鈕根本沒被 addWidget 到工具列上）。
+    `layout(GDS)` 的入口鈕根本沒被 addWidget 到工具列上）。
+
+    ⚠ **2026-09-18（F114-2）起這一條不點名任何一個 key。** 它本來叫
+    `..._the_image_entry_...` 並寫死 `key == "image"`，而那一輪五顆入口併成
+    三顆（`folder`／`image`／`raw` → 一顆 `Open images…`）的時候它就紅了 ——
+    紅得沒道理：壞掉的不是「入口從一張表長出來」這個機制。這已經是這幾輪
+    第四次付同一筆錢（見 `test_ui_scope_profiles.py` 與這一份上面那條）。
     """
-    from d4t.ui import studio as studio_mod
-    src = [s for s in scope_mod.INPUT_SOURCES if s.key == "image"]
-    assert len(src) == 1, "Open image… 不在那張表上"
-    assert src[0].kinds == ("folder",)
-    assert src[0].has_klarf is False
-    # ⚠ **2026-09-18（F110）起問的是機制，不是那一支方法。** 以前一種入口一支
-    # `StudioWindow._on_open_<key>`，而那正好讓這條測試上面那句話（「改一張表
-    # 就好」）**在程式碼裡是假的**：加一列要同時長一支方法出來。現在五種共用
-    # `open_dialogs.open_source`，所以這裡驗的是「表上每一個 key 這一支都答得
-    # 出來」—— 加一列真的只要加一列。
     from d4t.ui import open_dialogs
 
+    assert scope_mod.INPUT_SOURCES, "一個入口都沒有的話這支測試問不出任何事"
     for src in scope_mod.INPUT_SOURCES:
+        assert src.kinds, "%s 沒有說它開得出哪一種 kind" % src.key
+        for kind in src.kinds:
+            assert scope_mod.is_supported_kind(kind), (
+                "`%s` 開的是 `%s`，而那一種不在 SUPPORTED_KINDS 上" %
+                (src.key, kind))
+        assert src.title.strip() and src.what.strip(), src.key
+        # ⚠ 問的是機制，不是那一支方法：以前一種入口一支
+        # `StudioWindow._on_open_<key>`，而那正好讓上面那句話（「改一張表就好」）
+        # **在程式碼裡是假的**。現在全部共用 `open_dialogs.open_source`。
         assert src.key in open_dialogs.OPENABLE, (
             "`%s` 在 INPUT_SOURCES 上，但 open_source 不認得它 —— "
             "那顆鈕按下去只會講一句「還沒有辦法開」。" % src.key)
-    # 四顆 Open 的圖示要各不相同（F7-24）——「輪廓要分得出來」那一條
+    # 每顆 Open 的圖示要各不相同（F7-24）——「輪廓要分得出來」那一條
     icons = [s.icon for s in scope_mod.INPUT_SOURCES]
     assert len(set(icons)) == len(icons)
+
+
+def test_the_one_button_that_takes_a_file_or_a_folder_routes_like_the_cli(
+        tmp_path):
+    """**`Open images…` 與命令列要對同一份資料給同一個答案。**
+
+    F114-2 把 `folder`／`image`／`raw` 併成一顆，而併得起來的唯一理由是
+    「是哪一種**看那條路徑就知道**」。那條規則於是有了**兩份實作** ——
+    UI 的 `open_dialogs.raw_folder_for` 與 CLI 的 `d4t.__main__._open_input`
+    —— 而兩份實作一定會漂（`CLAUDE.md` §0 的第一句話）。這一條把它們釘在一起。
+
+    釘的是最容易漂的那一格：**`.raw` 認不認得**。`.raw` 解不開，所以它
+    **不在** `dataset._IMAGE_EXTS` 裡，兩邊都得自己多問一次 —— 少問的那一邊
+    會把 `.raw` 當成「沒有影像的資料夾」而給出一個空的 lot。
+    """
+    import numpy as np
+
+    from d4t import __main__ as cli
+    from d4t.core.ingest import imageio
+    from d4t.ui import open_dialogs
+
+    raw_dir = tmp_path / "raws"
+    raw_dir.mkdir()
+    (raw_dir / "a.raw").write_bytes(np.zeros((8, 8), "<u2").tobytes())
+
+    png_dir = tmp_path / "pngs"
+    png_dir.mkdir()
+    imageio.save_gray(str(png_dir / "a.png"), np.full((8, 8), 20, np.uint8))
+
+    # UI：資料夾與裡面那個檔案都要指到同一個 lot 資料夾
+    assert open_dialogs.raw_folder_for(str(raw_dir)) == str(raw_dir)
+    assert open_dialogs.raw_folder_for(str(raw_dir / "a.raw")) == str(raw_dir)
+    # ……而不是 raw 的那條路上，它要說「不是我」
+    assert open_dialogs.raw_folder_for(str(png_dir)) is None
+    assert open_dialogs.raw_folder_for(str(png_dir / "a.png")) is None
+
+    # CLI：同一個資料夾也要走 raw 那條（8x8 的 16-bit 只有一組正方形解）
+    ds = cli._open_input(str(raw_dir), raw="8x8@16")
+    assert ds.kind == "folder" and len(ds.items) == 1
+    assert cli._open_input(str(png_dir)).kind == "folder"
 
 
 def test_the_two_kinds_without_a_klarf_say_so_where_it_stays(window, tmp_path):

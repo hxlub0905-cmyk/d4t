@@ -9,7 +9,7 @@
 |---|---|---|
 | ``ebi_patch`` | KLARF + patch TIFF（每顆連續幾頁）| ``Open KLARF…`` |
 | ``rsem`` | KLARF + 每顆一個影像檔 | ``Open KLARF…``（自動判別）|
-| ``folder`` | 一個資料夾的單張影像、沒有 KLARF | ``Open folder…`` |
+| ``folder`` | 一個資料夾的影像、或單獨一張、沒有 KLARF（`.raw` 也走這裡）| ``Open images…`` |
 
 後兩者沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那件事在載入的當下就講
 （資料集標籤上常駐 ``· no KLARF``，見 :func:`no_klarf_message`）。
@@ -316,11 +316,21 @@ class InputSource(NamedTuple):
     short: str = ""
 
 
-#: Studio 的四種資料入口（順序就是畫面上的順序）。
+#: Studio 的**三個**資料入口（順序就是畫面上的順序）。
 #:
-#: KLARF 那一條服務兩種 kind，而那**不是**「一個入口服務兩種 source」的例外：
-#: patch 與一顆一張的差別寫在 KLARF 裡（`Images N { … }`），ingest 判得出來。
-#: 拆成兩顆鈕等於要使用者回答一個檔案已經回答了的問題，而答錯就是一個錯誤訊息。
+#: **2026-09-18（F114-2）：五顆併成三顆。** 使用者：「目前的 input 入口搞得我
+#: 很亂（user 可能會被嚇掉）」→「入口整合成 3 顆」。判準是**使用者答不答得出來**：
+#:
+#: * 併掉的 ``folder`` / ``image`` / ``raw`` 是**同一種 kind**（``folder``），
+#:   只差在「一個檔還是一疊檔」與「byte 要怎麼變成像素」—— 而那兩件事
+#:   **看一眼那條路徑就知道**。看得出來的事不該拿去問人（推廣鐵則），所以
+#:   `Open images…` 吃「一個資料夾**或**一個檔案」，分岔在
+#:   `open_dialogs._open_picked`。
+#: * 沒併的兩顆是因為**看不出來**：KLARF 那顆服務兩種 kind，而 patch 與一顆
+#:   一張的差別寫在 KLARF 裡（`Images N { … }`）—— 拆成兩顆等於要使用者回答
+#:   一個檔案已經回答了的問題。DOE 那顆與 `Open images…` 都可以指向一個目錄，
+#:   而**選錯不會報錯**：`folder` 會把每一個 condition 當成一顆 defect，
+#:   得到一批看起來完全正常的錯資料。那種時候多一顆鈕是便宜的。
 INPUT_SOURCES: Tuple[InputSource, ...] = (
     InputSource(
         key="klarf", kinds=("ebi_patch", "rsem"), title="Open KLARF…",
@@ -330,38 +340,18 @@ INPUT_SOURCES: Tuple[InputSource, ...] = (
               "is comes from the KLARF, you do not have to say."),
         icon="folder", has_klarf=True),
     InputSource(
-        key="folder", kinds=("folder",), title="Open folder…",
-        short="Folder…",
-        what="A folder of single images: every image file becomes one defect.",
+        key="images", kinds=("folder",), title="Open images…",
+        short="Images…",
+        what=("A folder of images, or one image on its own - every image "
+              "becomes one defect. Headerless .raw works too: it asks how "
+              "they are laid out, because a .raw file does not say."),
         icon="folder_open", has_klarf=False),
-    # ⚠ `kind` 是 **folder**，不是第六種：`.raw` 跟 PNG／TIFF 的差別只在「怎麼
-    # 把 byte 變成像素」，而那件事 ingest 就做完了 —— 一顆一張、沒有 KLARF、
-    # 寫不回 KLARF，形狀跟 `folder` 一模一樣。**新的是入口，不是 kind**
-    # （`folder` 與 `image` 早就是兩個入口共用一個 kind 的先例）。
-    InputSource(
-        key="raw", kinds=("folder",), title="Open raw…",
-        short="Raw…",
-        what=("A folder of headerless .raw images: it asks how they are laid "
-              "out, because a .raw file does not say."),
-        icon="raw", has_klarf=False),
     InputSource(
         key="doe_folder", kinds=("doe_folder",), title="Open conditions…",
         short="Conditions…",
         what=("A folder of folders: every sub-folder is one defect, and the "
               "images inside it are that defect's imaging conditions."),
         icon="folder_stack", has_klarf=False),
-    # F85（2026-09-07）：**一張大圖**那條路。使用者要的是 PEAR 的用法
-    # （一張圖、鋪一組 ROI、看均勻度），而在這之前唯一的入口是上面那一顆
-    # —— 也就是得先把那張圖放進一個資料夾，而那一步沒有換到任何東西。
-    #
-    # ⚠ ``kinds`` 仍然是 ``folder``：資料形狀跟上面那條逐項相同
-    # （`ingest.load_image_file` 的 docstring 有理由）。所以資料集標籤上
-    # 會寫 ``folder`` —— 使用者看過並接受（kind 講的是資料形狀，不是入口）。
-    InputSource(
-        key="image", kinds=("folder",), title="Open image\u2026",
-        short="Image\u2026",
-        what="One image file on its own - it becomes a single defect.",
-        icon="image", has_klarf=False),
 )
 
 

@@ -262,7 +262,7 @@ git add -A && python tools/release.py && git add -A
 |---|---|---|
 | `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁；檔名 `.tif` 或 `.I01`，**內容都是 TIFF**，副檔名只住在 `klarf_core.PATCH_IMAGE_EXTS`）| `Open KLARF…` |
 | `rsem` | KLARF + 每顆一個影像檔 | `Open KLARF…`（自動判別）|
-| `folder` | 一個資料夾的單張影像、沒有 KLARF | `Open folder…`；**headerless `.raw` 走 `Open raw…`**（同一種 kind，第二個入口 —— `.raw` 裡沒有寬高與位元深度，所以那顆會問，或從檔案大小推）|
+| `folder` | 一個資料夾的影像、或單獨一張、沒有 KLARF | `Open images…`（**資料夾或單一檔案都吃**；headerless `.raw` 也在這裡 —— 它沒有寬高與位元深度，所以那顆會問，或從檔案大小推）|
 | `doe_folder` | **一個子目錄一顆、裡面每個檔案一個 imaging condition**（DOE）、沒有 KLARF | `Open conditions…` |
 
 後三種**寫不回 KLARF**，那句話**常駐在資料集標籤上**。第二份 lot 走 `pair_source`
@@ -279,9 +279,7 @@ SUPPORTED_KINDS = ("ebi_patch", "rsem", "folder", "doe_folder")
 HIDDEN_STEPS = ()                # 目前沒有收起來的卡（`align` F109 拿回來了）
 SHOW_TEMPLATE_LIBRARY = True     # 工具列的 Templates…（2026-09-08 打開）
 SHOW_SAMPLE_DATA = True          # 「用範例資料試一次」（2026-09-09 隨 ebi-die-to-die.json 打開）
-INPUT_SOURCES = (...)            # 五顆 Open 的字、圖示、一句白話說明
-                                 # （`tiff_stack` F114 拿掉 —— 使用者「我們用不到」；
-                                 #   `ingest.load_tiff_stack` 還在，CLI 讀得動）
+INPUT_SOURCES = (...)            # **三顆** Open 的字、圖示、一句白話說明
                                  # （加一列就好 —— 分岔在 ui/open_dialogs.open_source）
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）
 ```

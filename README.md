@@ -32,7 +32,7 @@ d4t 的第一原則是：
 
 | | |
 |---|---|
-| **輸入** | 四種 source：`ebi_patch`（KLARF ＋ 多頁 patch TIFF，`.tif` 或 `.I01`）、`rsem`（KLARF ＋ 每顆一個影像檔）、`folder`（單張影像資料夾，無 KLARF —— `.raw` 走自己的入口）、`doe_folder`（一個子目錄一顆、裡面每個檔案一個 imaging condition，無 KLARF）。⚠ `tiff_stack` 2026-09-18 從產品面拿掉（使用者「我們用不到」），`ingest` 那一支還在 |
+| **輸入** | 四種 source：`ebi_patch`（KLARF ＋ 多頁 patch TIFF，`.tif` 或 `.I01`）、`rsem`（KLARF ＋ 每顆一個影像檔）、`folder`（一個資料夾的影像、或單獨一張，無 KLARF；`.raw` 也在這條）、`doe_folder`（一個子目錄一顆、裡面每個檔案一個 imaging condition，無 KLARF）。⚠ `tiff_stack` 2026-09-18 從產品面拿掉（使用者「我們用不到」），`ingest` 那一支還在 |
 | **組裝** | 20 張步驟卡片（卡片庫現行可見 20 張 —— `HIDDEN_STEPS` 目前是空的）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | GLV 統計與區域對比（含 SNR）、逐框比較找出最異常的那一格（`worst_*`，框即 ROI 自己）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標 |
 | **輸出** | 四張 Output 卡（跑完先看 Results，按 `Write outputs` 才寫、只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）、**均勻度圖**（`Write charts` —— 一顆一頁、一個點是一格量測框，見 [`docs/USING-UNIFORMITY.md`](docs/USING-UNIFORMITY.md)）|

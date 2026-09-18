@@ -28,6 +28,71 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F114-2：五顆入口併成三顆（2026-09-18）
+
+使用者：「目前的 input 入口搞得我很亂（**user 可能會被嚇掉**）…可否整合?」
+→ 看完我列的表之後定調：**「入口整合成 3 顆」**。
+
+### 判準：使用者答不答得出那個問題
+
+五顆變三顆，併掉的是 `folder` / `image` / `raw`。它們**本來就是同一種 kind**
+（`folder`）—— 只差在「一個檔還是一疊檔」與「byte 要怎麼變成像素」，而那兩件事
+**看一眼那條路徑就知道**。**看得出來的事不該拿去問人**（推廣鐵則），而在這之前
+使用者得在**還沒看到資料之前**先回答它。
+
+沒併的兩顆是因為**看不出來**：
+
+* `Open KLARF…` 服務兩種 kind，而 patch 與一顆一張的差別寫在 KLARF 裡
+  （`Images N { … }`）—— 拆成兩顆等於要使用者回答一個檔案已經回答了的問題。
+* `Open conditions…` 與 `Open images…` 都可以指向一個目錄，而**選錯不會報錯**：
+  `folder` 會把每一個 condition 當成一顆 defect，得到一批看起來完全正常的
+  錯資料。那種時候多一顆鈕是便宜的。
+
+```
+Open KLARF…      ebi_patch / rsem     形狀由 KLARF 自己講
+Open images…     folder               資料夾**或**單一檔案，.raw 也在這裡
+Open conditions… doe_folder           資料夾裡還有資料夾
+```
+
+### 併得起來的關鍵：Qt 的一個組合
+
+本來以為「選檔案」與「選資料夾」在 Qt 是兩個對話框（`getOpenFileName` /
+`getExistingDirectory`），所以一顆鈕吃兩種形狀做不到。**實際量過**：
+`FileMode.Directory` **加上 `ShowDirsOnly` 關掉**（再配 `DontUseNativeDialog`）
+的組合裡，`selectedFiles()` **檔案與目錄都回得出來**。所以 `ask_images` 是
+一個對話框、回一條路徑，分岔在 `_open_picked` 看那條路徑。
+
+⚠ **原生對話框不行**：各平台的原生目錄選擇器只給目錄，那正是要擺脫的限制。
+
+### 那條規則現在有兩份實作，所以釘了一條測試
+
+「是哪一種看路徑就知道」這件事，CLI 的 `__main__._open_input` 早就在做了 ——
+於是同一條規則有了 UI 與 CLI 兩份實作，而兩份實作一定會漂（§0 第一句話）。
+`test_the_one_button_that_takes_a_file_or_a_folder_routes_like_the_cli` 把兩邊
+釘在一起，釘的是最容易漂的那一格：**`.raw` 認不認得**（它解不開，所以不在
+`dataset._IMAGE_EXTS` 裡，兩邊都得自己多問一次；少問的那一邊會把 `.raw` 當成
+「沒有影像的資料夾」而給出一個空的 lot）。**咬合驗過**：把「指到一個 `.raw`
+檔」那一行改成 `return None`，它當場紅。
+
+### 又一次：把具體對象抄進測試裡
+
+`test_the_image_entry_is_on_the_one_table_that_grows_the_buttons` 寫死
+`key == "image"`，併完當場紅 —— 而壞掉的不是「入口從一張表長出來」這個機制。
+改成 `test_every_entry_is_on_the_one_table_...`：表上**每一個** entry 都要
+kinds 被支援、有標題與說明、`open_source` 認得、圖示各不相同。
+**這是這幾輪第四次付同一筆錢**（F109 `test_ui_scope_profiles`、F114 的
+`test_all_four_kinds_are_supported` 與 `test_steps` 那一條）。
+
+### 兩個字形變成沒人用的
+
+`stack`（F114 拿掉入口）與 `raw`（這一輪併掉入口）現在沒有任何 `icon=` 指到
+它們。**留著並在旁邊寫清楚為什麼**：畫一個字形的成本在「想清楚它跟隔壁那顆
+怎麼分辨」，不在那幾行 —— 而 `folder_stack` 的說明正是拿這兩個當對照。
+順手修掉那一帶**數字已經不對**的註解（「六顆 Open 並排」「五顆 Open 並排」）。
+
+⚠ `CLAUDE.md` 的行數天花板擋了一次（324 > 323）。**這一輪是在拿掉東西，
+那一份不該變長** —— 所以是把我加的註解縮回去，不是把上限調高。
+
 ## F114：Align 的格子變成人話、DOE 的 recipe 刪掉、stack 拿掉、載入卡改名（2026-09-18）
 
 使用者四句話，四件事。

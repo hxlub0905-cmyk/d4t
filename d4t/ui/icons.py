@@ -43,16 +43,19 @@ __all__ = [
 GLYPH_ICONS = (
     "undo", "redo", "theme", "prev", "next", "play", "chevron_down",
     "zoom_in", "zoom_out", "fit", "tidy", "up", "down", "close",
-    # 工具列那五顆（F7-24）＋ 兩個沒有 KLARF 的入口（F11 Input-2／Input-3）
+    # 工具列那五顆（F7-24）＋ 沒有 KLARF 的入口（F11 Input-2／Input-3）
     "folder", "document", "save", "templates", "export", "stack",
     "folder_open", "layers",
-    # F113：`.raw` 那個入口 —— **一格一格的裸資料**（沒有檔頭可以看）。
+    # ⚠ ``stack``（F11）與 ``raw``（F113）**目前沒有人用**：2026-09-18 那一輪
+    # `Open stack…` 拿掉、`Open raw…` 併進 `Open images…`。留著是因為畫一個
+    # 字形的成本在「想清楚它跟隔壁那顆怎麼分辨」，不在那幾行 —— 而底下
+    # ``folder_stack`` 的說明正是拿這兩個當對照。要再開一個入口時它們就在。
     "raw",
     # F110：DOE 那個入口（`Open conditions…`）—— **資料夾裡還有資料夾**。
-    # 五顆 Open 並排，所以它的輪廓要跟另外四顆都不一樣：它是唯一畫成
+    # 三顆 Open 並排，所以它的輪廓要跟另外兩顆都不一樣：它是唯一畫成
     # 「一個資料夾裝著兩個小資料夾」的。
     "folder_stack",
-    # F85：**一張大圖**那個入口（`Open image…`）。四顆 Open 並排，所以它是
+    # F85：**一張大圖**。現在是 `welcome.py` 在用（入口那邊 2026-09-18 併掉了）。
     # 唯一內部有東西的那一個 —— 外框空的話它跟 `stack` 的最上層一樣。
     "image",
     # F85：`Write charts` 的「profile 沿哪一個軸」。兩顆並排，差別是
@@ -372,7 +375,7 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawRect(QRectF(m, h * 0.42, w - 2 * m, h * 0.42))
     elif n == "folder_open":
         # 打開的資料夾：後片是方的、前片往外斜。跟 ``folder``（關著的）並排時
-        # 差別在**前片的斜邊** —— 三顆 Open 鈕的輪廓要各不相同（F7-24）。
+        # 差別在**前片的斜邊** —— 每顆 Open 鈕的輪廓要各不相同（F7-24）。
         p.drawLine(QPointF(m, h * 0.32), QPointF(w * 0.44, h * 0.32))
         p.drawLine(QPointF(w * 0.44, h * 0.32), QPointF(w * 0.54, h * 0.44))
         p.drawLine(QPointF(m, h * 0.32), QPointF(m, h * 0.80))
@@ -381,8 +384,7 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawLine(QPointF(m, h * 0.80), QPointF(w - m * 0.6, h * 0.80))
         p.drawLine(QPointF(w - m, h * 0.44), QPointF(w - m * 0.6, h * 0.80))
     elif n == "raw":
-        # 一格一格的裸資料：外框 + 裡面一片棋盤格。六顆 Open 並排，所以它的
-        # 輪廓要跟另外五顆都不一樣 —— 它是唯一畫成「格子」的。
+        # 一格一格的裸資料：外框 + 裡面一片棋盤格 —— 唯一畫成「格子」的那一個。
         p.drawRect(QRectF(m, h * 0.20, w - 2 * m, h * 0.60))
         cw = (w - 2 * m) / 4.0
         ch = h * 0.60 / 3.0
