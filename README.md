@@ -112,9 +112,9 @@ python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx
 ```
 
-> **出貨的 recipe 在 [`recipes/`](recipes/)，目前三份**（每一份都有測試真的跑
+> **出貨的 recipe 在 [`recipes/`](recipes/)，目前四份**（每一份都有測試真的跑
 > 一次）：EBI die-to-die、RSEM 逐框挑最異常的那一格、一張影像的均勻度。
-> 三份都到得了：工具列的 `Templates…`、`Open recipe…`、以及空白狀態那顆
+> 四份都到得了：工具列的 `Templates…`、`Open recipe…`、以及空白狀態那顆
 > 「用範例資料試一次」（載的是 `ebi-die-to-die.json`）。
 > 若僅需確認引擎可運作，`python tools/doctor.py` 會以內建的最小 pipeline
 > 端到端跑完一顆並自檢環境。

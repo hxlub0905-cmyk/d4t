@@ -42,6 +42,7 @@ NEEDS_THIRD_PARTY = frozenset({
     "make_sample.py", "make_sample_rsem.py",      # 合成 lot（numpy/tifffile）
     "make_mgepi_real.py", "make_mgext.py",        # 擬真 MG×EPI（cv2/numpy）
     "make_lot_from_gc.py", "make_glas_export.py",  # GC 鋪圖／GLAS 匯出替身
+    "make_doe_sample.py",                         # 合成 DOE lot（numpy）
     "validate_mgepi.py",                          # 可分性驗證
 })
 

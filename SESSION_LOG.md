@@ -28,6 +28,76 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F112：DOE 的出貨 recipe —— `recipes/doe-conditions.json`（2026-09-18）
+
+F111 更正完「DOE 缺一張卡」那句錯話，這一輪把那份 recipe 真的寫出來。
+**出貨的 recipe 從三份變四份。**
+
+```
+Load images ─┬─le300─┐
+             ├─le500─┼──> Align ─┬─le800──> ROI (a cell I mark myself) ┄target┄┐
+             └─le800─┘  （整數平移） └─三條全部──────────────────────> GLV <┄ref┄┘
+                                                                        └─> Write report
+```
+
+一張 GLV 卡吃**全部**的 condition，同一組 target／ref box 套在每一條流上，
+每個 condition 各出一份 `<condition>_cmp_snr_px` 與 `<condition>_cmp_contrast_mean`。
+那就是 imageY 的動作。**一行產品程式碼都沒改** —— 卡片本來就夠了（F111 的結論）。
+
+### 三個實測才知道的東西
+
+**① ROI 與 Align 都要接**最安靜的那個 condition**。**
+相關性是拿訊號去找的，而雜訊最大的那一張訊號最少。實測拿 `le300`（σ=18）定位：
+模板比對的 `structure` 只有 3.89（門檻 5）、分數 0.304（門檻 0.3），**兩道閘都在
+邊緣** → 區域退回整張圖 → target 與 ref 變成同一塊 → `snr_px` 整批是 0
+**而且每一顆都 `ok=True`**。接 `le800`（σ=2）之後分數 1.000、structure 11.74。
+
+⚠ 那個失敗形狀正是這個 repo 最怕的那一種，所以它有自己一條測試
+（`test_the_doe_recipe_really_places_its_two_boxes`）：盯 `locate_ok` 與兩個框的
+**面積**，不是只看有沒有數字。驗它有沒有牙齒的時候看得很清楚 —— 把 ROI 接回
+`le300`，「順序排得對嗎」那一條**照樣綠**（`sorted([0,0,0]) == [0,0,0]`），
+只有這一條紅。
+
+**② 範例資料不能沿用 `make_sample.py`，而那是量出來的。**
+那一份的 patch **整張都是高對比晶格**：實測任何一個 16×16 的框標準差都在 62 以上、
+整張圖 63.7。而 `snr_px = |μT − μR| / σR` 的分母正是**參照那一塊自己的像素標準差**
+—— 拿一塊全是圖案的地方當參照，σR 由圖案決定而不是由雜訊決定，於是「哪一個
+condition 訊噪比比較好」**在那份資料上根本問不出來**（三個 condition 的 σR 差不到 3%）。
+
+所以新增 `tools/make_doe_sample.py`：低對比週期背景（有結構讓模板比對得到峰，
+但不淹掉雜訊）＋**正中央**一顆缺陷 ＋ 每個 condition 各自的雜訊 σ（18／8／2）。
+換過來之後 `snr_px` 是 0.37 / 0.83 / 1.25 —— 順序乾淨、而且最好的那個 > 1。
+
+**③ 判定段要用 `decide` 不是 `score`。**
+`score.expr` 空著會讓每一顆 `ok=False`（「the expression is empty」）。
+量測型的 recipe 沒有門檻可言，所以照 `one-image-uniformity.json` 的形狀走判定樹：
+`best_snr = max(每個 condition 的 snr_px)`，`< 0`（一個都沒量到，`fill` 補 −1）
+→ bin 9「nothing to measure」，其餘 → bin 0「measured」。
+
+### 一個自己咬到自己的錯
+
+改 ROI 的來源時我只改了**節點的參數**，沒改**線**。而**資料從哪來由線決定**
+（鐵則 10）—— 參數上寫著 `le800`、線上接的還是 `le300`，跑出來的仍然是壞的那一版。
+那條鐵則在 `CLAUDE.md` 上讀過很多次，真的踩到才知道它擋的就是這個。
+
+### 守門
+
+`tests/test_shipped_recipes.py` 四條（那支測試的結構檢查 glob 到就自動跑，
+這四條是**真的跑一批**的）：
+* 每個 condition 都有自己的 `snr_px`，而且**雜訊越小的排越前面** —— 那是這份
+  recipe 存在的理由，「跑得完、有數字」不算通過；
+* 兩個框**真的放下去了**（`locate_ok` ＋ 面積，見上面 ①）；
+* **一張 GLV 卡**吃全部的 condition，不是一個 condition 一張卡；
+* **沒有 `normalize`** —— N 張之間的亮度差異正是要量的東西，一正規化就抹掉了。
+  這一條守的不只是那份檔案：沒有它，下一個人會「順手加一張 Normalize 讓圖好看
+  一點」，然後每一個 `snr_px` 都變小而沒有人知道為什麼。
+
+`recipes/README.md` 加一節（含「拿去用在自己的資料上先做這兩件」：重畫那兩個框、
+改 condition 的名字）。`tools/make_doe_sample.py` 進 `AGENTS.md` 的機器對照表與
+`NEEDS_THIRD_PARTY`（它要 numpy，所以是家用機那一組）。
+
+---
+
 ## F111：更正 —— DOE 的 recipe 不缺卡，是我把 `template` 讀錯了（2026-09-18）
 
 F110 收尾我寫了一句「還差第四種 ROI method（或一張新卡）才出得了 DOE 的 recipe」，
