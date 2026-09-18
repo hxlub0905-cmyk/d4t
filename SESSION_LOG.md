@@ -28,6 +28,44 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F116 第 3 步：Gallery／Results／回溯搬出 `studio.py`（2026-09-19）
+
+第三刀。15 支方法加上**縮圖那一條鏈**（`THUMB_CHANNEL_PRIORITY` →
+`thumb_channel` → `load_thumb` → `ThumbWorker`，本來散在 `studio.py` 的模組層，
+而唯一的使用者是 Gallery）整族進
+[`d4t/ui/gallery_controller.py`](d4t/ui/gallery_controller.py)。
+
+| | 第 2 步之後 | 第 3 步之後 | 從頭算 |
+|---|---|---|---|
+| `d4t/ui/studio.py` | 5,792 行 | **5,434**（−358）| 7,686 → 5,434（**−2,252**）|
+| `StudioWindow` 方法 | 248 | **235** | 293 → 235（−58）|
+| `self.*` | 323 | **308** | 433 → 308 |
+
+`_items_by_id` **沒有**跟著搬（計畫書原本寫要搬）：它是 `_on_dataset_loaded`
+寫的，而那一段不在這一族裡 —— §3-1 說被別段也寫的留在視窗。
+
+### ⚠ 這六步裡目前最危險的一種漏法
+
+**`d4t/ui/` 裡別的模組也在叫搬走的名字。** `region_check.py` 兩處、
+`studio_layout.py` 一處的 `win._on_defect_activated` / `win._on_why_item`
+—— 它們是**接線**，所以 import 過、視窗開得起來、`import ok` 印得出來，
+只有**使用者真的按下**「跨顆檢視裡的一張圖」或「Results 裡的一列」那一刻才會
+AttributeError。
+
+全套測試抓到了（`test_ui_region_check` 3 條、`test_ui_template_dialog` 1 條），
+但那是運氣 —— 前兩步我只掃 `studio.py` 與 `tests/`，而那三行不在裡面。
+
+`tools/studio_surface.py --check` 因此多一關：**這一輪從視窗上消失的名字，
+`d4t/ui/` 裡還有沒有人在 `win.<名字>` 上叫它**。判準刻意是「搬走的名字」而不是
+「視窗上沒有的名字」—— 後者會把繼承來的 Qt 方法、類別層常數、以及每一個剛好
+也叫 `win` 的區域變數全部報紅（實測 26 個全是誤報）。拿修之前的檔案回放，
+那一關**正好列出那三行**。
+
+手動走一遍也加長到 **31 條**（多了 Gallery／縮圖／回溯／點長條），而且是
+**跟起點 commit 的樹跑同一支、`diff` 空的**那種驗收。
+
+---
+
 ## F116 第 2 步：介面組裝搬出 `studio.py`（2026-09-19）
 
 接著第 1 步。這一輪搬的是**擺東西**那一族 —— 工具列、主體三欄、預覽區、進度列、
