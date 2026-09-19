@@ -1,9 +1,13 @@
 # F118 — 使用者面的字：訊息不准講開發者的話（F117 J1／I11／J5／J6）
 
-狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1～4 步做完**
-（`ui/wording.py`、`Issue` 的選配欄位、六條 lint 交結構、問題清單兩行＋
-「帶我去」）。**J1／I11／J5／J6 四條都關掉了。** 只剩第 5 步（另外 41 條
-lint 逐步填，不急）。§5 那 84 條文字斷言實際只動到 **4 條** —— 見 §5。
+狀態：**做完（2026-09-19）** —— 五步都做完，**F117 的 J1／I11／J5／J6
+四條都關掉了**。48 個產地裡 **34 個交結構、14 個量出來本來就乾淨**（見
+§4「第 5 步」）。§5 那 84 條文字斷言實際動到 **8 條**，八條都變成更好的斷言。
+
+⚠ **這一輪真正買到的不是那 34 條，是一條不准回頭的關**：
+`tests/test_ui_wording.py::test_no_lint_writes_an_internal_id_into_its_sentence`
+—— 它掃 `recipe.py` 每一個 `Issue(...)`，把 node id 插進句子就紅。沒有它的話
+下一條新 lint 又會長出一個 `step 'dn'` 來，而**沒有人會發現**。
 
 > F117 走查把這件事記成四條（J1 P1、I11、J5、J6）。它們是**同一個病根**，
 > 所以收成一輪：[`F117-ui-review.md`](F117-ui-review.md)。
@@ -178,7 +182,7 @@ Results 的 warning 四個地方都要用**，而那正是 F52（`numbers.py`）
 | **2** ✅ | **做完**。`Issue` 加那四個選配欄位（預設空）＋ `wording.issue_line()`（有結構就用、沒有就退回 `detail`、`detail` 空了退回 `title`），接進 Problems 列、畫布警示點、判定徽章、兩句「不能跑」。§5 那條便利貼也做了：`issue_line()` 對**每一個** `code` 都給得出一句話 | — | 低 —— 48 個產地一個都還沒改 |
 | **3** ✅ | **做完**。搬了七個產地／六條 lint（`unknown-feature` ×2、`not-connected`、`unknown-step`、`ambiguous-input`、`duplicate-region`、`wrong-content`），＋ core 的 `card_name()`／`closest()` | **J1** 主體、J5 | 中 —— 實際只動到 4 條斷言 |
 | **4** ✅ | **做完**。`problems_bar.row_text()`（結論一行、細節縮排在第二行）、清單換行不橫捲、常駐一句「點一列會跳到那張卡」（以前只在按鈕的 tooltip 上），清單高度 132 → 168 | **J5**、**J6** | 低 |
-| **5** | 剩下 41 條 lint 逐步填（可以分好幾輪，**不急**）| 尾巴 | 低 |
+| **5** ✅ | **做完**。掃完剩下的 41 個產地：27 個填了、**14 個量出來不需要填**。＋ 一條擋回頭的測試 | 尾巴 | 低 |
 
 **第 1 步就會讓畫面明顯變好，而且它不動 core** —— 如果這一輪只做得完一步，
 就做那一步。
@@ -228,9 +232,50 @@ engine 把它們串成句子）。要變成「Measure on」只有兩條路：UI 
 「這條 lint 判對了嗎」。84 這個數字之所以嚇人，是因為絕大多數落在第 1 類
 （`detail` 照舊是一句完整的話，只是裡面不再有 node id 與 Python 的 repr）。
 
+第 5 步又動到 4 條（`test_feature_collision_speaks_up` ×1 群、
+`test_port_not_produced`、`test_scale`、`test_ui_f7_9_feedback`），形狀一模一樣
+—— 斷言 node id 在句子裡，改成斷言卡片名。**整輪合計 8 條。**
+
 ---
 
-## 6. 檢查清單（每一步）
+## 6. 第 5 步量出來的：沒填的那 14 條不是待辦
+
+掃完 48 個產地之後的分佈：
+
+```
+交結構的   34
+本來就乾淨 14   ← 判定段的語法錯、卡片自己的「還沒設定完」、分數表達式 parse 不過…
+```
+
+那 14 條的 `detail` **沒有 route 前綴、沒有 node id、沒有 list repr**，
+而且句子是完整的一句白話（例：``it has both a 'score' expression and a
+'decide' block. Keep one of them…``）。對它們填欄位**買不到任何東西** ——
+`issue_line()` 退回 `detail` 就是對的答案。
+
+所以這一輪沒有把 48 填滿，而那是刻意的。兩條測試把這件事釘住：
+
+* `test_no_lint_writes_an_internal_id_into_its_sentence` —— **不准回頭**。
+  擋的是「把 node id 插進一句 f-string」那個動作；白名單是空的。真有一條
+  非印 node id 不可（`unknown-node`：那張卡根本不在 `recipe.nodes` 裡），
+  寫成 `"…'%s'" % (k, nid)` 並留一句為什麼 —— **多打幾個字正是重點**，
+  它讓「我是故意的」在 review 的時候看得見。
+* `test_the_lints_that_carry_no_structure_are_the_plain_ones` —— 守另一半：
+  **至少還有那麼一批**沒有結構。哪天有人機械地把欄位填滿，這一條會紅。
+
+### 第 5 步順手修掉的三個真 bug
+
+1. **`decide.let[3]`** —— 那是**程式裡的路徑**，而判定面板上那幾行是從 1 數
+   的。四條 `bad-let` 一起改成「let line 4」（分開改就會有兩種數法）。
+2. **「“GLV” first, then “GLV”」** —— 兩張同型別的卡是這條 lint 最常見的形狀
+   （量兩個 ROI 的 `glv_stats`），而那時候兩個名字一模一樣，等於沒講。改成
+   「another “GLV” card first, then this one」。⚠ **只有句子裡改口，`title`
+   不改**：標題要回答「是哪一張卡」，而 `this one overwrites…` 在狀態列上是
+   一句沒有主詞的話（真的跑出來過）。
+3. **`%s take input from it`** —— 一張卡的時候要是 `takes`。
+
+---
+
+## 7. 檢查清單（每一步）
 
 - [ ] `ruff check`、`python tools/run_tests.py`（紅的要跟既有那 10 個檔案一樣）
 - [ ] 三份黃金值（本機基準）逐項相同 —— 這一輪**不該**動到任何數字
@@ -243,7 +288,7 @@ engine 把它們串成句子）。要變成「Measure on」只有兩條路：UI 
 
 ---
 
-## 7. 風險
+## 8. 風險
 
 1. **對散文做正則的誘惑**（選項 A）。它一開始最快，而且**失效時是安靜的**。
    §3 選 C 就是為了這一條。
@@ -257,7 +302,7 @@ engine 把它們串成句子）。要變成「Measure on」只有兩條路：UI 
 
 ---
 
-## 8. 什麼叫做完
+## 9. 什麼叫做完
 
 * J1／I11／J5／J6 四條在走查文件上標成做完，而且**有一句話寫著新的句子長什麼樣**。
 * `d4t/ui/wording.py` 是全 UI 唯一在做「node id / step key / param 名 → 使用者

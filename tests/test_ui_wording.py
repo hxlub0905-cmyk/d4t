@@ -262,3 +262,79 @@ def test_the_route_is_only_mentioned_when_there_is_more_than_one():
                   title="t", detail="d", names=("x",), route="ebi_patch")
     assert "ebi_patch" not in wording.issue_line(issue, _R(1, g="glv_stats"))
     assert "ebi_patch" in wording.issue_line(issue, _R(2, g="glv_stats"))
+
+
+#: **不准出現在一條 lint 的句子裡的形狀**（F118 第 5 步）。每一個都真的在畫面
+#: 上出現過，而且都是同一件事：內部識別碼漏到使用者面。
+#:
+#: ⚠ 這是**原始碼**的檢查不是執行期的 —— 執行期要看得到全部 48 條就得先造出
+#: 48 份壞掉的 recipe，而那份清單自己就會漂。原始碼這一側問的是「有沒有人又
+#: 把 node id 寫進句子裡」，那正是會回頭的那件事。
+BANNED = {
+    "step '{": "「step 'dn'」—— node id，而且前面那個字是開發者的詞",
+    "'{nid}": "node id 進句子了（用 `card_name()`）",
+    "{nid}'": "node id 進句子了（用 `card_name()`）",
+    "'{owner}": "node id 進句子了（用 `card_name()`）",
+    "'{prev}": "node id 進句子了（用 `card_name()`）",
+    "'{e.src}": "node id 進句子了（用 `card_name()`）",
+    "'{e.dst}": "node id 進句子了（用 `card_name()`）",
+    "{sorted(": "Python 的 list repr（用 `\", \".join(...)`）",
+    "decide.let[": "程式裡的路徑 —— 畫面上那幾行是從 1 數的",
+}
+
+
+def test_no_lint_writes_an_internal_id_into_its_sentence():
+    """**F118 真正買到的東西**：這件事回不來了。
+
+    第 1～4 步把六條最常出現的搬乾淨，第 5 步掃完剩下的 —— 而掃完那一刻
+    這條 lint 有沒有再長出一個 ``step 'dn'`` 來，只有測試看得住。走查
+    （J1）抓到的四種內部識別碼裡，node id 與 list repr 是**產地**的事
+    （`recipe.py`），step key 與參數名是**畫面**的事（`wording.py` 上面
+    那幾條在守）。
+
+    ⚠ **白名單是空的，而且應該一直是空的。** 擋的是「把 node id **插進一句
+    f-string**」那個動作 —— `card_name()` 一行就答得出卡片叫什麼，所以那個
+    動作沒有正當理由。真有一條非印 node id 不可（`unknown-node`：那張卡根本
+    不在 `recipe.nodes` 裡，所以沒有名字可以翻，而使用者要拿那個字去 JSON
+    裡找），那一條寫成 ``"…'%s'" % (k, nid)`` 並在上面留一句為什麼 ——
+    **多打幾個字正是重點**：它讓「我是故意的」在 review 的時候看得見。
+    """
+    src = RECIPE_PY.read_text(encoding="utf-8")
+    lines = src.splitlines()
+    bad = []
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "Issue"):
+            continue
+        body = "\n".join(lines[node.lineno - 1:
+                                getattr(node, "end_lineno", node.lineno)])
+        for shape, why in BANNED.items():
+            if shape in body:
+                bad.append("recipe.py:%d  %s  —— %s"
+                           % (node.lineno, shape, why))
+    assert not bad, "lint 的句子裡有內部識別碼：\n  " + "\n  ".join(bad)
+
+
+def test_the_lints_that_carry_no_structure_are_the_plain_ones():
+    """**沒搬的那些不是待辦，是不需要搬的** —— 而這一條把它釘住。
+
+    第 5 步量出來：48 個產地裡有一批的 `detail` 本來就是一句白話（判定段的
+    語法錯、卡片自己的「還沒設定完」、分數表達式 parse 不過……）。它們沒有
+    route 前綴、沒有 node id、沒有 list repr —— **填欄位對它們買不到任何
+    東西**，`issue_line()` 退回 `detail` 就是對的。
+
+    所以這一條問的不是「還剩幾條」（那是一個會漂的數字），而是
+    **「沒有結構的那些，是不是真的乾淨」**。哪天有人加一條又長又髒又沒有
+    結構的 lint，紅的是上面那一條；哪天有人把一條乾淨的弄髒，紅的也是它。
+    這一條守的是另一半：**至少還有那麼一批**，不是全部都得填。
+    """
+    plain = []
+    src = RECIPE_PY.read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "Issue"):
+            continue
+        kw = {k.arg for k in node.keywords}
+        if not (kw & {"advice", "names", "suggest", "route", "param"}):
+            plain.append(node.lineno)
+    assert plain, "一條沒有結構的 lint 都不剩了 —— 那多半是有人機械地填滿了"

@@ -241,7 +241,7 @@ def test_a_warning_does_not_block_the_run_but_is_reported_afterwards(window):
 
     assert window.run_trial(6, workers=1, sync=True) is True
     assert "Run finished" in window.status_text()
-    assert "overwrites the feature" in window.status_text()
+    assert "overwrites the number" in window.status_text()
 
 
 def test_a_broken_combination_refuses_to_run_instead_of_failing_every_defect(window):

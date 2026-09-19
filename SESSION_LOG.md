@@ -41,8 +41,9 @@ this route produces (['cd_axis_deg', 'cd_bright', … 還有 20 幾個 …])
 現在是 `“nosuch_feature” — Check the spelling, or add the card that
 measures it - the score may not be computable at run time.`
 
-設計與四個步驟在 [`docs/plans/F118-user-facing-wording.md`](docs/plans/F118-user-facing-wording.md)。
-**四條都關掉了**，只剩第 5 步（另外 41 條 lint 逐步填，不急）。
+設計與五個步驟在
+[`docs/history/plans/F118-user-facing-wording.md`](docs/history/plans/F118-user-facing-wording.md)
+（做完了，所以搬進 history）。**四條都關掉了。**
 
 | 步 | 做了什麼 |
 |---|---|
@@ -50,6 +51,7 @@ measures it - the score may not be computable at run time.`
 | 2 | `Issue` 加**選配**欄位（預設空）＋ `issue_line()`：有結構就用、沒有就退回 `detail`。接上 Problems 列、畫布警示點、判定徽章、兩句「不能跑」 |
 | 3 | 最常出現的六條 lint 交結構；core 多 `card_name()` 與 `closest()` |
 | 4 | 問題清單兩行（結論／細節）、換行不橫捲、常駐一句「點一列會跳到那張卡」 |
+| 5 | 掃完剩下的 41 個產地：**27 個填了、14 個量出來不需要填** ＋ 一條擋回頭的測試 |
 
 ### 這一輪學到的三件事
 
@@ -69,14 +71,33 @@ measures it - the score may not be computable at run time.`
 nosuch_feature are not among…」。所以多一個 `advice`（那句「所以你該怎麼
 辦」），**兩邊共用同一個字串**，話只寫一次。
 
-§5 估的「84 條文字斷言」**實際只動到 4 條**，而且四條都變成更好的斷言：
+§5 估的「84 條文字斷言」**實際只動到 8 條**，而且四條都變成更好的斷言：
 從句子裡剖字（`i.title.split("'")[1]`）改成讀 `i.names[0]`、從斷言 node id
 在句子裡改成斷言卡片名 ＋ `node_id` 指著哪一張。剩下的落在第 1 類 ——
 `detail` 照舊是一句完整的話，只是裡面不再有 node id 與 Python 的 repr。
 
+**四、48 條不是都要填 —— 而「不填」要有測試說出來。** 第 5 步掃完：
+**34 個交結構、14 個量出來本來就乾淨**（判定段的語法錯、卡片自己的「還沒設定
+完」、分數表達式 parse 不過）。對它們填欄位買不到任何東西，`issue_line()` 退回
+`detail` 就是對的答案。所以這一輪**沒有把 48 填滿，而那是刻意的**。
+
+### 真正買到的是一條不准回頭的關
+
+`test_no_lint_writes_an_internal_id_into_its_sentence` 掃 `recipe.py` 每一個
+`Issue(...)`，把 node id 插進句子就紅。**白名單是空的**：`card_name()` 一行就
+答得出卡片叫什麼，所以那個動作沒有正當理由。唯一非印 node id 不可的那一條
+（`unknown-node`：那張卡根本不在 `recipe.nodes` 裡）寫成 `"…'%s'" % (k, nid)`
+並留一句為什麼 —— **多打幾個字正是重點**，它讓「我是故意的」在 review 看得見。
+配一條反向的（`test_the_lints_that_carry_no_structure_are_the_plain_ones`）：
+哪天有人機械地把欄位填滿，那一條會紅。
+
+順手修掉的三個真 bug：`decide.let[3]`（程式裡的路徑，面板上那幾行是從 1 數
+的）、「“GLV” first, then “GLV”」（兩張同型別的卡等於沒講）、
+`%s take input from it`（一張卡要是 `takes`）。
+
 守門：`tests/test_ui_wording.py`（`issue_line()` 對**每一個** `code` 都給得出
 一句話，名冊是 ast 從 `recipe.py` 數出來的；唯一一個轉手 `Step.kind_issues`
-的地方寫死成 1，第二個出現時會紅）。天花板：`recipe.py` 4,101 → 4,214，
+的地方寫死成 1，第二個出現時會紅）。天花板：`recipe.py` 4,101 → 4,342，
 `studio.py` **沒變**（4,347，`HARD_CAPS` 只准往下 —— 三處都一行換一行）。
 
 ---

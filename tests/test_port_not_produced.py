@@ -77,7 +77,10 @@ def test_a_wire_from_a_stream_the_card_never_sees_is_a_warning():
     assert got[0].level == "warning"          # 結果是對的 → 不擋
     assert got[0].node_id == "glv"            # 徽章掛在**收到**那條線的卡上
     detail = got[0].detail
-    assert "ref" in detail and "focus" in detail
+    # ⚠ 流名（`ref`）原樣，**卡片講的是它在畫面上的名字**（F118）：
+    # `focus` 是自動產的 node id，使用者在畫布上看到的是「Focus index」。
+    assert "“ref”" in detail and "“Focus index”" in detail
+    assert "'focus'" not in detail
     assert "still runs" in detail             # 要講「它還是會跑」
     assert "“test”" in detail                 # 也要講它**真的有**哪一顆
 
