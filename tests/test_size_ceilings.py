@@ -209,7 +209,11 @@ FILE_CEILINGS = {
     # 怎麼把結果寫出去」那一族（含鐵則 11 的三道關）進 `ui/run_controller.py`。
     # ⚠ `_apply_trial_results` **留在這裡**：它叫的那一串 `_refresh_*` 跟訊息、
     # 跟「要不要寫」是交織的，而且順序有守門的註解 —— 見那一支上面那一段。
-    "d4t/ui/studio.py": 4785,
+    # 2026-09-19（F116 第 6 步）：4,785 → **4,347**（−438）。畫布上拉一條線／
+    # 剪一條線在 model 上是什麼意思（鐵則 10 的主場）進 `ui/canvas_edges.py`。
+    # 計畫書把這一塊猜成「本質上就是接線」，量出來不是：437 行裡六支規則型的
+    # 方法就佔 284 行，真正的 handler 只有 67 行。
+    "d4t/ui/studio.py": 4347,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -400,7 +404,11 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        210,
+        197,
+        # 2026-09-19（F116 第 6 步）：210 → 197。搬走 16 支，回來三支門面
+        # （`_on_edge_added` **191 處／21 個測試檔**、`_connect` 17／3、
+        # `_on_edge_removed` 16／5）——門面留**舊名字**，所以那 191 處一個字
+        # 都不用改。
         # 2026-09-19（F116 第 5 步）：221 → 210。搬走 15 支，回來四支門面
         # （`run_trial` 44 處／13 檔、`run_all` 12／4、`write_outputs` 10／2、
         # `rerun` 4／1 ＋ Results 那顆鈕）—— 它們是這個視窗的**公開動詞**。
@@ -466,7 +474,9 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        279,
+        266,
+        # 2026-09-19（F116 第 6 步）：279 → 266。這一族**沒有任何自己的狀態**
+        # （全部讀寫 `win.model`），掉的是那 437 行裡的 `self.*` 參照。
         # 2026-09-19（F116 第 5 步）：292 → 279。只有 `_trial_t0` 與
         # `_write_outputs_sync` 的家跟著走；`trial_worker` / `output_worker`
         # （`stop_run` 也在用）、`trial_results` / `trial_scores`、`_last_run`
@@ -593,9 +603,12 @@ HARD_CAPS = {
     # 2026-09-19（F116 第 5 步）：行 5,135 → 4,785、方法 221 → 210、
     # `self.*` 292 → 279。**前五步合計**：7,686 → 4,785（−2,901）、
     # 293 → 210（−83）、433 → 279（−154）。
-    "d4t/ui/studio.py": 4785,
-    "studio_window_methods": 210,
-    "studio_window_attributes": 279,
+    # 2026-09-19（F116 第 6 步）：行 4,785 → 4,347、方法 210 → 197、
+    # `self.*` 279 → 266。**六步全部做完**：7,686 → 4,347（−3,339，−43%）、
+    # 293 → 197（−96）、433 → 266（−167）。
+    "d4t/ui/studio.py": 4347,
+    "studio_window_methods": 197,
+    "studio_window_attributes": 266,
 }
 
 
