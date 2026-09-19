@@ -28,6 +28,47 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F116 第 4 步：掛第二份東西、recipe 的開存搬出 `studio.py`（2026-09-19）
+
+第四刀。兩個去處，**一支門面都沒留**：`ui/attach_sources.py`（新）收「把第二份
+東西掛到已載入的這一份上」—— 配對卡的第二份 lot 與 GLAS 匯出的 layer 標註；
+recipe 的開／存三支進**既有的** `ui/open_dialogs.py`。
+
+| | 第 3 步之後 | 第 4 步之後 | 從頭算 |
+|---|---|---|---|
+| `d4t/ui/studio.py` | 5,434 行 | **5,135**（−299）| 7,686 → 5,135（**−2,551**）|
+| `StudioWindow` 方法 | 235 | **221** | 293 → 221（−72）|
+| `self.*` | 308 | **292** | 433 → 292 |
+
+計畫書只點名了配對那一半（`ui/pair_source_ui.py`），但 GLAS 匯出那兩支的形狀
+**一字不差**：問一個路徑 → 交給 ingest 層 → 把結果講成一句話 → 把量到的名字填回
+卡片。只搬一半的話，模組名會比內容窄，而 `對話框` 那一段會剩下兩支名字對不上
+段名的東西。
+
+### 兩種「掃不到」的漏法，這一輪各遇到一次
+
+**第一種（第 3 步加的那一關抓到）**：`studio_layout.py` 那 5 行還在叫
+`win._on_open_recipe` / `win._on_save_recipe`。那是「按工具列那顆存檔鈕就
+AttributeError」，而**一條測試都不會紅**。這次在跑任何測試之前就看到了 ——
+那一關第一次派上用場就賺回它自己。
+
+**第二種（那一關也抓不到）**：`_on_source_requested` 用
+`getattr(self, "_on_open_%s" % att_key)()` 分派 —— 名字是 `"_on_open_"` 加上一張
+表裡的值**拼出來的**，沒有任何靜態掃描找得到。`ruff`、`--check`、`import` 全綠，
+只有「選到 layout(GDS) 卡再按那顆鈕」那一條路會炸。計畫書 §6 因此多一條：
+搬一族之前先 `grep 'getattr(self, "'`。
+
+### 測試裡兩種要跟著改的形狀
+
+* `monkeypatch.setattr(window, "_on_open_gds", …)` —— 字串形式，改打在
+  `window.attach_ctl` 上。
+* **打在方法上的存檔 stub**（`window._on_save_recipe_as = lambda: …`）——
+  那現在是模組層函式，改成打在 `open_dialogs` 模組上、用 try/finally 還原。
+  兩條守的事情（「已經有原檔就不要再問路徑」「取消另存不算可以關窗」）
+  一個字都沒變。
+
+---
+
 ## F116 第 3 步：Gallery／Results／回溯搬出 `studio.py`（2026-09-19）
 
 第三刀。15 支方法加上**縮圖那一條鏈**（`THUMB_CHANNEL_PRIORITY` →
