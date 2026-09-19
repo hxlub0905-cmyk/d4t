@@ -263,7 +263,12 @@ FILE_CEILINGS = {
     # 買不到任何東西。+91 裡有一半是那些句子本身（node id → 卡片名、list repr →
     # 讀得下去的一串字、`decide.let[3]` → 「let line 4」），另一半是理由。
     # 這一輪真正買到的是 `tests/test_ui_wording.py` 那條**不准回頭**的關。
-    "d4t/core/pipeline/recipe.py": 4342,
+    # 2026-09-20（F119 第 1 步）：4,342 → **4,427**（+85）。`OUTCOMES` ＋ 三個
+    # `outcome` 欄位 ＋ `bin_outcomes()` ＋ serde（有才寫）。判定膠囊的紅綠以前
+    # 是看 bin 的**號碼**決定的，而三份出貨的 recipe 全反了（F117 D2）。+85 裡
+    # 有一半是 `OUTCOMES` 上面那一段**為什麼不准猜**：`rsem-worst-box` 的
+    # bin 2 比 bin 1 更嚴重，任何按號碼排的規則都答不出來。
+    "d4t/core/pipeline/recipe.py": 4427,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右
