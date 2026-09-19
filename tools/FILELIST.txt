@@ -7,7 +7,7 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 77c58b2d57df83b95d1a036603466bfa7659c05b README.md
-5e24b941f81a236d7b3af4fdebe785a32382f295 SESSION_LOG.md
+d39fb202b083e0f1c4e322f465921e944041c4e9 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
 e0a81454e663372c631cdfc7079e92346a92e124 d4t/__main__.py
@@ -186,8 +186,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-5b2b1e417ebb5d27c773c895e468dfff736bb5e7 docs/plans/F117-ui-review.md
-cb149f2084edfc5e6968887e61ab6cc75cde14e8 docs/plans/F119-which-bin-is-good-news.md
+2ba8d7707c4d467679157aa7eb8efa1d45fb044b docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py

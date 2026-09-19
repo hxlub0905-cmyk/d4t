@@ -1,8 +1,9 @@
 # F119 — 哪一個 bin 是好消息（F117 D2 的根因）
 
-狀態：**只有設計，還沒開工（2026-09-20）**。使用者同意走「甲：寫 recipe 的人
-自己標」。⚠ 走查把 D2 記成「均勻度那一條」，**實測是三份出貨的 recipe 全反**
-—— 範圍比原本寫的大，見 §1。
+狀態：**做完（2026-09-20）** —— 五步都做完，F117 的 D2 關掉了。
+⚠ 走查把 D2 記成「均勻度那一條」，**實測是三份出貨的 recipe 全反** —— 範圍比
+原本寫的大，見 §1。⚠ **§6 那條「還沒說要有一條 info」做的時候撤回了**，理由
+量出來寫在 §4 第 5 步那一列。
 
 ---
 
@@ -10,7 +11,7 @@
 
 判定完，畫面右邊那顆**彩色膠囊**（`VerdictChip`）是使用者對「這一顆到底怎麼
 樣」唯一的一眼答案。而它的顏色是**看 bin 的號碼**決定的，寫死在
-[`feature_text.py:355`](../../d4t/ui/feature_text.py)：
+[`feature_text.py:355`](../../../d4t/ui/feature_text.py)：
 
 ```python
 elif b == 1:   tone = "bad" if is_real_style else "good"
@@ -54,7 +55,7 @@ recipe 在畫布上會變成三個一模一樣的綠色，而使用者就分不�
 ### 順手查出來的：`is_real_style` 是一條死路
 
 `VerdictChip.set_verdict(..., is_real_style=False)` 的那個反轉模式
-**沒有任何呼叫端** —— [`studio.py:3567`](../../d4t/ui/studio.py) 只傳
+**沒有任何呼叫端** —— [`studio.py:3567`](../../../d4t/ui/studio.py) 只傳
 `verdict_bin` 與 `label`。所以今天的對應是無條件的「bin 1 綠、bin 0 紅」。
 
 它當初（U13）買到的東西**不能跟著刪**：顏色翻面的時候**字要跟著翻面**
@@ -155,11 +156,24 @@ class Rule:
 
 | 步 | 做什麼 | 買到什麼 | 風險 |
 |---|---|---|---|
-| **1** | core：三個 `outcome` 欄位 ＋ `DecideSpec.bin_outcomes()` ＋ serde（空字串不寫）| 資料存得下來 | 低 —— 沒有人讀它 |
-| **2** | `VerdictChip` 改吃 `outcome`（三個通道：顏色／字／框線都同一個來源），刪掉 `is_real_style`；`studio.py` 的呼叫端傳 `bin_outcomes()` | **D2 的畫面修好**（沒標的變灰）| 中 —— 動到 `studio.py`，⚠ `HARD_CAPS` 只准往下，要一行換一行 |
-| **3** | 三份出貨 recipe 標好 outcome | 三份的膠囊都對了 | 低 —— `test_shipped_recipes.py` 會跑 |
-| **4** | `tree_panel` 葉子上那一排膠囊 ＋ `viewmodel.set_tree_leaf(outcome=…)` | 使用者自己改得到 | 低 |
-| **5** | `conflicting-outcome` lint（照 F118 交結構）| 寫錯講得出來 | 低 |
+| **1** ✅ | core：三個 `outcome` 欄位 ＋ `DecideSpec.bin_outcomes()` ＋ serde（空字串不寫）| 資料存得下來 | 低 —— 沒有人讀它 |
+| **2** ✅ | `VerdictChip` 改吃 `outcome`（三個通道同一個來源），刪掉 `is_real_style`。`verdict_words()` 把兩張表**在同一個地方查**；`studio.py` 4,347 → **4,345**（−2）| **D2 的畫面修好** | 中 |
+| **3** ✅ | 三份出貨 recipe 標好 outcome ＋ 一條「一片葉子都不准沒標」的測試 | 三份的膠囊都對了 | 低 |
+| **4** ✅ | `tree_panel` 葉子上那一排膠囊 ＋ 三張**畫出來的**小圖（`news_good`／`news_review`／`news_none`）＋ `set_tree_leaf(outcome=…)` | 使用者自己改得到 | 低 |
+| **5** ✅ | `unknown-outcome` ＋ `conflicting-outcome`（照 F118 交結構）。⚠ **「還沒說」那條 info 撤回了** —— 見下 | 寫錯講得出來 | 低 |
+
+### 第 5 步撤回了 §6 的一條（量出來的）
+
+§6 寫著「Problems 列值得有一條 `info` 說這份 recipe 還沒說哪一類是好消息」。
+去做的時候量到它會踩壞 `test_the_reference_recipes_stay_completely_clean`
+—— **那兩份參考檔案就是沒標的**，而那條測試鎖的「每一份正常的 recipe 一條
+訊息都沒有」是一個**有人選過的不變量**。換成「每一份都多一行不痛不癢的話」
+就是把它丟掉，而同一件事 `_feature_collisions` 上面那段已經記過一次
+（`clip_frac` 想降成 `info` 而那是錯的）。
+
+所以「還沒說」講在它該講的地方：**判定樹的托盤上，就在那一排膠囊旁邊**
+（第 4 步的 `Not answered yet - the verdict chip stays grey.`）。那裡是使用者
+真的會去改它的地方，而 Problems 列不是。
 
 **第 1～3 步是一組**：做完那三步畫面就對了，第 4 步之前使用者只能用手改
 JSON（而三份出貨的已經標好了，所以那段日子不難過）。
@@ -198,9 +212,18 @@ JSON（而三份出貨的已經標好了，所以那段日子不難過）。
 
 ---
 
-## 7. 什麼叫做完
+## 7. 什麼叫做完（全部達成）
 
-* 三份出貨 recipe 的膠囊顏色，唸給一個不寫 code 的人聽，他點頭。
-* `is_real_style` 從 repo 裡消失，而 U13 買到的三個通道一個都沒少。
-* 一份沒標的 recipe 是**灰的**，而且畫面上有一句話說它為什麼是灰的。
-* F117 的 D2 可以標成關掉。
+* ✅ 三份出貨 recipe 的膠囊顏色 —— 實際跑出來的：
+
+  ```
+  ebi-die-to-die        good     nothing stands out · bin 0 · good
+                        bad      a spot stands out · bin 1 · review
+                        neutral  nothing to measure · bin 9
+  one-image-uniformity  good     measured · bin 0 · good
+  rsem-worst-box        bad      more than one box is off · bin 2 · review
+  ```
+* ✅ `is_real_style` 從 repo 裡消失，而 U13 買到的三個通道一個都沒少
+  （顏色／字／框線，三條吃同一個 `outcome`）。
+* ✅ 一份沒標的 recipe 是**灰的**，而且托盤上有一句話說它為什麼是灰的。
+* ✅ F117 的 D2 標成關掉。
