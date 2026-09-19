@@ -28,6 +28,50 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F116 第 5 步：跑與寫搬出 `studio.py`（2026-09-19）
+
+第五刀，也是六步裡唯一一步**沒有照計畫的形狀做**的。
+
+| | 第 4 步之後 | 第 5 步之後 | 從頭算 |
+|---|---|---|---|
+| `d4t/ui/studio.py` | 5,135 行 | **4,785**（−350）| 7,686 → 4,785（**−2,901**）|
+| `StudioWindow` 方法 | 221 | **210** | 293 → 210（−83）|
+| `self.*` | 292 | **279** | 433 → 279 |
+
+15 支進 [`d4t/ui/run_controller.py`](d4t/ui/run_controller.py)，**鐵則 11
+（跑不寫，寫是另一個動作）整條住在那裡**。門面四支（`run_trial` / `run_all` /
+`write_outputs` / `rerun`）—— 這個視窗的公開動詞，光 `run_trial` 就有 44 處／
+13 個測試檔。
+
+### ⚠ 計畫說發 signal，量完之後沒有發
+
+計畫書寫「controller 發 `trial_finished(results)`，`studio.py` 接到那一串
+refresh」。讀完 `_apply_trial_results` 那 115 行之後，**前提不成立**：那不是一串
+可以搬出來的 refresh —— 它跟「這批數字怎麼變成一句話」「要不要寫出去」是**交織**
+的，而且每一段前面都釘著一句「順序反過來就會畫出上一批的顏色」。
+
+所以刀切在另一個地方：**`_apply_trial_results` 留在視窗**，controller 只留
+「怎麼發動、怎麼寫」。這一族往外因此只剩**一個**呼叫 —— 那正是計畫想用 signal
+換到的東西，而且沒有把一個有順序的方法拆成三段。
+
+**連那一個也沒做成 signal**：Qt 的 direct connection 雖然同步，例外卻會被 Qt 的
+hook 吃掉。測試大量用 `run_trial(sync=True)`，那 115 行裡爆掉的東西現在會讓測試
+當場紅；包成 signal 之後只會印在 stderr 上。
+
+### ⚠ 建構順序的第一個實例
+
+`studio_layout` 跑在 controller **之前**，所以 `win.run_ctl._on_trial_clicked`
+這種寫法會在**建工具列的當下**查 `win.run_ctl` —— 建視窗就 AttributeError
+（15 條 error，不是 1 條）。指到 controller 的 slot **一律包一層 `lambda`**。
+
+### 計畫書 §5（`StudioState`）評估完了：不做
+
+五步下來因為 `self.w.<名字>` 出過的錯是 **0 次**；真正出錯的是「名字搬走之後沒人
+跟上」，那是**接線**，`StudioState` 一條都擋不到。而改「住哪」是搬家、改「怎麼
+通知」是重寫 —— 同一輪做兩件事正是這一份 §1 第一條禁的。
+
+---
+
 ## F116 第 4 步：掛第二份東西、recipe 的開存搬出 `studio.py`（2026-09-19）
 
 第四刀。兩個去處，**一支門面都沒留**：`ui/attach_sources.py`（新）收「把第二份
