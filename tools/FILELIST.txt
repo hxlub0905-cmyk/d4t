@@ -164,7 +164,7 @@ fc022de0bcc322683dec3c171b5f0f24dfde33b2 d4t/ui/tree_panel.py
 0c1c3333b76408b77cd3b5f461714145b363e961 d4t/ui/uniformity_window.py
 6da43c6279ecdf777612100e67613f482c269d33 d4t/ui/verdict_band.py
 6d5cbf0cb9fd5576400e040f614ea76a4bb0d736 d4t/ui/viewmodel.py
-ac550736794fc97ac62439d943e30565aab97b91 d4t/ui/welcome.py
+a4cb05e2efedb1d035357ce9a52e146c8bc17237 d4t/ui/welcome.py
 1eb8e9d6aebe6030949046333341c1a92f0822ff d4t/ui/why_panel.py
 08aad87a2b107a7f4b09501e3b52f76dbace25e6 d4t/ui/widgets.py
 177aee81e7bb41dfc5c83fdd0ebe469d84f0e6b2 d4t/ui/windows_menu.py
@@ -185,7 +185,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-44f5f7cb1de23d5d248fdbf13b5b8aee1031bae5 docs/plans/F117-ui-review.md
+5ae9595f30851bcfbf77084fda345af9e6d509e4 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -452,7 +452,7 @@ f300097e06459c1c41b3d1bcf8f29b253012b83f tests/test_ui_truth_marks.py
 9e53676195dd84bfc711240ec2fe867c3ec1ab7a tests/test_ui_undo_close_and_stop.py
 3ff2e7c8a9d2c87f730e7b733b9a1017bda4f23c tests/test_ui_verdict_band.py
 ce19c6162b1e129d5dfb7d1edf75f047f12d5c49 tests/test_ui_verdict_wording.py
-acd047b3d2e6f4b471f908938dd4818726de8057 tests/test_ui_welcome.py
+2a0e8bb77a38ef89989809fafed973ef7550aedf tests/test_ui_welcome.py
 4588fa4041e8b653c9edec8fe584b3e9e26d216d tests/test_ui_why_panel.py
 83f86389eec618b6c0f2a971d4be2772cc2247da tests/test_ui_widgets.py
 5a95816da2929463e8331744ae022e4559ac1e02 tests/test_ui_window_policy.py

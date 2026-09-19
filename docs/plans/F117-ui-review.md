@@ -24,7 +24,7 @@
 |---|---|---|---|
 | J1 | **錯誤訊息是給開發者看的**：問題清單印 `route 'ebi_patch': …` 與 Python list 原樣（`['glv_max']`、`['clip_frac', 'n_channels', 'score']`）；狀態列 `Removed "dn"`、`Preview problem: [glv_stats] no input connected: 'source' is empty` 用的是 node id、step key、參數名 | 使用者面一律用卡片名與參數 label（`GLV`、`Measure on`）；list 寫成逗號分隔；只有一條 route 時不印 route | ✅ 刪掉 Denoise 重現 |
 | F2 | `report.html` 沒有執行資訊：只有 recipe id 與 bin 計數，沒有日期、來源 KLARF、recipe 版本、d4t 版本／build id、取樣方式。檔案一離開電腦就追不回是哪一次跑的（`report.xlsx` 的摘要頁有 recipe 資訊，HTML 沒有） | HTML 報表頭加一塊 metadata，與 xlsx 摘要頁同源 | ✅ 讀過輸出檔全文 |
-| G1 | 歡迎視窗文字過期：`d4t reads … with a KLARF, or a multi-page TIFF, or just a folder` —— 獨立的多頁 TIFF（`tiff_stack`）2026-09-18 已拿掉 | 改字；加一條測試：歡迎頁提到的輸入種類要對得上 `scope.INPUT_SOURCES` | ✅ `ui/welcome.py:111` |
+| G1 | ✅ **做完** —— 而且不只一處：`welcome.py:111` 那一句、`btn_open` 的 tooltip（`the other three kinds`，也點名了 multi-page TIFF）、還有頁尾那句 **`the four kinds of data it reads`**（`INPUT_SOURCES` 是**三**條）| **改法不是「改字」**：`InputSource` 的說明寫著那張表存在的理由是「同一組入口被抄在三個地方…三份會漂」—— **導覽這一段就是那第三份**，從來沒被改成從表上長。所以導覽**不再列清單**（留給真的一種一列的空白狀態），數量一律數出來（`ways_in()`）。`_FOOTER_HINT` 常數改成函式 —— 它在 import 那一刻算，換 profile 之後會停在舊分支（U10 漏網的那一個）| ✅ 三條測試：不准再列清單、數字要用數的、以及一根釘死 `tiff_stack` 的回歸釘 |
 | A3 | ✅ **做完** —— 在 Tune 模式選取一張卡，畫布不會把它捲進視野 | 新增 `canvas.ensure_card_visible()`（**只捲，不亮** —— `reveal_cards` 那一套的 hover 高亮是給「指給我看」用的），`select_node` 叫它。⚠ **沒有接進 `set_selected`**：那一支在重建路徑上也會被叫到，接上去使用者每拖一次參數畫布就把他捲回去 | ✅ 附帶發現：`_on_problem_activated` 的說明從 U2 起就寫著「選中那張卡並捲到它」—— **那句話描述的行為一直不存在** |
 
 ## P2
