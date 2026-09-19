@@ -18,6 +18,12 @@
 不是例外。
 
 **行為零改動**（F116 §1）：本體逐字搬，只把 `self` 換成 `win`。
+
+⚠ **這一支跑在 controller 建出來之前**（F116 §7-2 的順序：介面組裝 → controller
+→ 接線）。所以指到 controller 的 slot **一律包一層 `lambda`** ——
+`win.run_ctl._on_trial_clicked` 這樣寫會在**建工具列的當下**去查
+`win.run_ctl`，而那一刻它還不存在（症狀是建視窗就 AttributeError）。
+包了之後查詢延到「使用者按下去」那一刻，那時一切都在了。
 """
 from __future__ import annotations
 
@@ -302,7 +308,7 @@ def build_toolbar(win: "StudioWindow") -> None:
     win.btn_trial = _tool_button(win,
         "Run trial", "Run the current pipeline over the first N defects "
                      "and show the score distribution",
-        win._on_trial_clicked, primary=True, icon="play")
+        lambda: win.run_ctl._on_trial_clicked(), primary=True, icon="play")
     # 「跑整批」是同一顆鈕的次要動作：點主體 = 試跑，點箭頭才看得到它。
     menu = QMenu(win.btn_trial)
     # ⚠ ``&&`` 不是筆誤：Qt 把單一個 ``&`` 當成助憶鍵的記號吃掉，畫出來
@@ -317,7 +323,7 @@ def build_toolbar(win: "StudioWindow") -> None:
     win.act_run_all.setToolTip(
         "Run every defect, not just the first N. Nothing is written - "
         "press “Write outputs” in Results when the numbers look right.")
-    win.act_run_all.triggered.connect(win._on_full_clicked)
+    win.act_run_all.triggered.connect(lambda: win.run_ctl._on_full_clicked())
     menu.addAction(win.act_run_all)
     win.trial_menu = menu
 
@@ -391,7 +397,7 @@ def build_shortcuts(win: "StudioWindow") -> None:
         "open_recipe": partial(open_dialogs.open_recipe, win),
         "save_recipe": partial(open_dialogs.save_recipe, win),
         "save_recipe_as": partial(open_dialogs.save_recipe_as, win),
-        "run": win._on_trial_clicked,
+        "run": lambda: win.run_ctl._on_trial_clicked(),
         "results": win.show_gallery,
         "undo": win.undo,
         "redo": win.redo,

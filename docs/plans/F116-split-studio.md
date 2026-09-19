@@ -1,9 +1,9 @@
 # F116 — 拆 `studio.py`：`StudioWindow` 只留組裝與接線，內容搬進 controller
 
-狀態：**進行中（2026-09-19）** —— **第 1～4 步做完**。
-`studio.py` 7,686 → **5,135**（−2,551）、方法 293 → **221**。
-下一步是第 5 步（試跑 ＋ Output → `ui/run_controller.py`，要改成 signal）。
-前四步量到的東西已經寫回 §3、§4、§6（見那幾節）。
+狀態：**進行中（2026-09-19）** —— **第 1～5 步做完**。
+`studio.py` 7,686 → **4,785**（−2,901）、方法 293 → **210**、`self.*` 433 → 279。
+只剩第 6 步（畫布連線 ＋ 區域線），而那一步本來就寫著「評估後再決定做不做」。
+前五步量到的東西已經寫回 §3、§4、§5、§6。
 
 > 起點 commit `3329659`。下面的數字都是那一刻量的；動手前用 §6 那支腳本重量一次，
 > 對不上就以重量的為準（這一份不是數字的家，`tests/test_size_ceilings.py` 才是）。
@@ -204,12 +204,36 @@ Gallery）。`studio.py` 用 `# noqa: F401` 把那三個名字轉出去 —— �
 —— 那是「按工具列那顆存檔鈕就 AttributeError」，而**一條測試都不會紅**
 （沒有人去按那顆鈕）。修完再跑就乾淨了。
 
-**第 5 步：試跑 ＋ Output** → `ui/run_controller.py`。
-這一塊往外叫 17 支 `_refresh_*`，直接搬會變成 controller 反過來操縱整個視窗。
-改成 controller 發 signal（`trial_started`／`trial_finished(results)`／
-`outputs_written(paths)`），`studio.py` 的 `_connect` 把它們接到那一串 refresh。
-**鐵則 11（跑不寫）不准因為搬家而鬆掉**：`tests/test_ui_write_only_on_run_all.py`、
-`tests/test_rerun_decision.py` 必跑。
+**第 5 步：試跑 ＋ Output** → `ui/run_controller.py`。✅ **做完**（2026-09-19）。
+
+第 5 步的結果：`studio.py` 5,135 → **4,785**（−350）、方法 221 → **210**。
+15 支搬走，門面四支（`run_trial` / `run_all` / `write_outputs` / `rerun` ——
+這個視窗的**公開動詞**，光 `run_trial` 就有 44 處／13 個測試檔）。
+鐵則 11 的三道關（沒有結果／部分結果／`inplace` 先問）整條住在新模組裡，
+`test_ui_write_only_on_run_all.py` 與 `test_rerun_decision.py` 15 條全綠。
+
+⚠ **signal 那一段沒有照做，而那是這一步最重要的決定。**
+這一份原本寫「改成 controller 發 `trial_finished(results)`，`studio.py` 把它接到
+那一串 refresh」。真的讀了 `_apply_trial_results` 那 115 行之後，**前提不成立**：
+那不是一串可以搬出來的 refresh —— `_refresh_verdict` / `_refresh_spread` /
+`_refresh_decide_counts` 跟「這批數字怎麼變成一句話」「要不要寫出去」是**交織**
+的，而且每一段前面都釘著一句 ⚠（「判定段要先算，順序反過來圖上染的是上一批的
+類別 —— 跑得完、有顏色、而且是錯的」）。要保住那個順序，signal 得在精確的點發
+好幾次，那只是把直接呼叫包一層。
+
+所以刀切在**另一個地方**：`_apply_trial_results`（＝「結果到了，畫面怎麼變」）
+**留在視窗**，跟它叫的那一串 `_refresh_*` 住在一起；controller 只留「怎麼發動、
+怎麼寫」。於是這一族往外就剩**一個**呼叫，而那正是這一份想用 signal 換到的東西。
+
+**連那一個也沒有做成 signal**：它有三個發射點，而 Qt 的 direct connection 雖然
+同步，例外卻會被 Qt 的 hook 吃掉、不往上傳。測試大量用 `run_trial(sync=True)`，
+`_apply_trial_results` 裡爆掉的東西現在會讓那條測試**當場紅**；包成 signal 之後
+只會印在 stderr 上。這個 repo 最怕「跑得完、有數字、而且是錯的」。
+
+⚠ **順序又咬了一次**（§7-2 的實例）：`studio_layout` 跑在 controller **之前**，
+所以它裡面 `win.run_ctl._on_trial_clicked` 這種寫法會在**建工具列的當下**查
+`win.run_ctl` —— 建視窗就 AttributeError。指到 controller 的 slot **一律包一層
+`lambda`**（查詢延到按下去那一刻）。那條規矩寫進 `studio_layout.py` 的檔頭。
 
 **第 6 步：畫布連線 ＋ 區域線**（評估後再決定做不做）。
 測試引用最重（`_on_edge_added` 191 處），而且是鐵則 10 的主場。
@@ -218,12 +242,21 @@ Gallery）。`studio.py` 用 `# noqa: F401` 把那三個名字轉出去 —— �
 
 ---
 
-## 5. 共用狀態（第 5 步之前才處理）
+## 5. 共用狀態 —— **評估完了：不做**（2026-09-19）
 
-37 個多方寫入的 `self.*` 是真正纏在一起的地方。第 5 步開始前另開一節評估：
-收進一個 `QObject` 的 `StudioState`（`selection_changed`、`dataset_changed`、
-`results_changed` signal），或併進現有 `ui/viewmodel.py`。
-**前四步不碰它** —— 同時改「住哪」和「怎麼通知」，出錯時分不出是哪一個。
+37 個多方寫入的 `self.*` 本來要在第 5 步之前評估「收進一個帶 signal 的
+`StudioState`」。五步走完，答案是**不做**，理由是量出來的：
+
+* **它沒有痛。** 五個 controller 一路用 `self.w.<名字>` 讀寫共用狀態，
+  五步下來因為它出過的錯是 **0 次**。真正出錯的是**名字搬走之後沒人跟上**
+  （§6 那三條新檢查守的），而 `StudioState` 一條都擋不到 —— 那些是接線。
+* **它會讓「誰在寫」變模糊。** 現在 `grep self.w._last_run` 就看得到全部的
+  讀寫點；收進一個帶 signal 的物件之後，寫的人變成「發了一個 signal」，
+  而讀的人變成「接了一個 slot」，查一條資料流要跳三個檔案。
+* **它跟「行為零改動」不相容。** 改「住哪」是搬家，改「怎麼通知」是重寫 ——
+  這一份 §1 的第一條就是不准在同一輪做第二件事。
+
+要做的話它是**自己一輪**（F118+），而且前提是先有一個它真的會修好的 bug。
 
 ---
 
