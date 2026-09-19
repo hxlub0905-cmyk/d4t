@@ -28,6 +28,59 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F118：使用者面的字 —— 訊息不准講開發者的話（2026-09-19）
+
+F117 走查的 **J1／I11／J5／J6 是同一個病根**：內部識別碼漏到使用者面。
+真的跑出來的那一句（把分數表達式寫成 `glv_max + nosuch_feature`）：
+
+```
+route 'ebi_patch': the variables ['nosuch_feature'] are not among the features
+this route produces (['cd_axis_deg', 'cd_bright', … 還有 20 幾個 …])
+```
+
+現在是 `“nosuch_feature” — Check the spelling, or add the card that
+measures it - the score may not be computable at run time.`
+
+設計與四個步驟在 [`docs/plans/F118-user-facing-wording.md`](docs/plans/F118-user-facing-wording.md)。
+**四條都關掉了**，只剩第 5 步（另外 41 條 lint 逐步填，不急）。
+
+| 步 | 做了什麼 |
+|---|---|
+| 1 | `d4t/ui/wording.py`（Qt-free）：`card` / `card_of_step` / `field` / `name_list` / `trace_error_text` / `step_error_text`，接四個呼叫端 |
+| 2 | `Issue` 加**選配**欄位（預設空）＋ `issue_line()`：有結構就用、沒有就退回 `detail`。接上 Problems 列、畫布警示點、判定徽章、兩句「不能跑」 |
+| 3 | 最常出現的六條 lint 交結構；core 多 `card_name()` 與 `closest()` |
+| 4 | 問題清單兩行（結論／細節）、換行不橫捲、常駐一句「點一列會跳到那張卡」 |
+
+### 這一輪學到的三件事
+
+**一、`Issue` 有兩個，不是一個。** 設計文件寫「63 個產地」，實際是 **48**
+—— `klarf_core.Issue` 是另一個 class（欄位不同、不經過 Problems 列），它那
+15 個是 KLARF 健檢的結果，不在這個題目裡。**數字要自己數一次**。
+
+**二、畫面只該拿它才答得出來的那幾件。** 第一版做了一個 `nodes` 欄位讓畫面
+把 node id 翻成卡片名，結果是 `“A” · “B”` 這種**沒有動詞**的句子：那兩張卡
+之間是什麼關係每一條 lint 都不一樣，通用的組句器造不出那個動詞。收回 core
+（`Step.label` 本來就住在那裡，而 CLI 的讀者一樣讀不懂 `'dn'`）。畫面留著的
+只有兩件：**這份 recipe 有幾條 route**（單 route 就不要講）、**一串名字列到
+第幾個就夠**（CLI 要全部）—— 跟 `numbers.py` 那條界線一模一樣。
+
+**三、`detail` 不能直接接在結構後面。** 它正是把同樣這些東西攤平成一句話的
+版本，接上去那一行會**同時**有「“nosuch_feature”」跟「the variables
+nosuch_feature are not among…」。所以多一個 `advice`（那句「所以你該怎麼
+辦」），**兩邊共用同一個字串**，話只寫一次。
+
+§5 估的「84 條文字斷言」**實際只動到 4 條**，而且四條都變成更好的斷言：
+從句子裡剖字（`i.title.split("'")[1]`）改成讀 `i.names[0]`、從斷言 node id
+在句子裡改成斷言卡片名 ＋ `node_id` 指著哪一張。剩下的落在第 1 類 ——
+`detail` 照舊是一句完整的話，只是裡面不再有 node id 與 Python 的 repr。
+
+守門：`tests/test_ui_wording.py`（`issue_line()` 對**每一個** `code` 都給得出
+一句話，名冊是 ast 從 `recipe.py` 數出來的；唯一一個轉手 `Step.kind_issues`
+的地方寫死成 1，第二個出現時會紅）。天花板：`recipe.py` 4,101 → 4,214，
+`studio.py` **沒變**（4,347，`HARD_CAPS` 只准往下 —— 三處都一行換一行）。
+
+---
+
 ## F117 第一批：UI 走查的「一改多條」那幾群（2026-09-19）
 
 走查文件 [`docs/plans/F117-ui-review.md`](docs/plans/F117-ui-review.md) 有 57 條
