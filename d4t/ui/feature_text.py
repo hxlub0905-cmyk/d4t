@@ -7,10 +7,10 @@
 
 U7 那一刀。這一份是**純搬移**：每一行都是原封搬過來的，一個字都沒有改。
 
-⚠ `VerdictChip` 的紅綠以前**會反轉**（``is_real_style``）而 chip 上沒有任何字
-說得出差別 —— 同一個綠色 chip 在兩份 recipe 裡意思相反。U13／X7（2026-09-08）
-把意思搬到**字**上：判定的名字（recipe 自己取的）排第一，``bin 1`` 退成後面
-的補充，顏色降為輔助，而 tone 另外帶一個**不靠顏色**的通道（框線的樣式）。
+⚠ `VerdictChip` 的意思走**三個通道**（U13／X7 2026-09-08，F119 2026-09-20）：
+判定的名字（recipe 自己取的）排第一、``bin N`` 退成後面的補充，好壞那個詞
+接在最後，顏色與框線樣式是另外兩條 —— 三條吃同一個 `outcome`，而那是**寫
+recipe 的人自己標的**（以前是看 bin 的號碼猜，三份出貨的 recipe 全反了）。
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QWidget
 
 from ..core.algo import glv as algo_glv
-from . import theme
+from . import strings, theme
 from .chips import metric_face
 from .numbers import format_feature_value
 from .theme import TOKENS
@@ -287,9 +287,34 @@ def _escape(text: str) -> str:
 #: 大小與 baseline 都不一樣，最壞是豆腐框。框線是 QSS 畫的，跟字型無關。
 _TONE_BORDER = {
     "good": ("solid", 1),
-    "bad": ("solid", 2),
+    "bad": ("solid", 3),
     "neutral": ("dashed", 1),
 }
+
+#: 好壞在**字**上叫什麼（U13 的第二個通道）。中性與「還沒說」不加字 ——
+#: 它們本來就沒有主張，硬塞一個詞會讓使用者以為系統說了什麼。
+#:
+#: 為什麼是 ``review`` 而不是 ``bad``：廠內對「這一顆要人看一眼」講的就是
+#: review（review SEM、人工複判），而 ``bad`` 讀起來像在罵那片晶圓。
+_TONE_WORD = {"good": "good", "bad": "review"}
+
+
+def verdict_words(decide: Any, bin_value: Any) -> Tuple[str, str]:
+    """``decide`` ＋ bin → ``(名字, 好壞)``。**兩張表在同一個地方查。**
+
+    `bin_labels()` 與 `bin_outcomes()` 是同一條路的兩半（那一行字，與那一行
+    字的顏色），分開查的那天它們會來自不同的葉子 —— 而畫面上看不出來。
+
+    ``decide`` 是 None（走舊的 `score` 路）就兩個都空。
+    """
+    if decide is None or bin_value is None:
+        return ("", "")
+    try:
+        key = int(bin_value)
+    except (TypeError, ValueError):
+        return ("", "")
+    return (str(decide.bin_labels().get(key, "") or ""),
+            str(decide.bin_outcomes().get(key, "") or ""))
 
 
 class VerdictChip(QLabel):
@@ -302,15 +327,27 @@ class VerdictChip(QLabel):
     從 F21-D／F24 起就在），只是沒有人拿去畫。所以這不是新功能，是把一條已經
     鋪好的路接上。
 
-    為什麼顏色不能是唯一的通道（U13，同日）
-    ---------------------------------------
-    ``is_real_style=True`` 時紅綠**對調**（bin 1 = 抓到真缺陷 = 壞消息）。
-    以前兩種模式的**文字一模一樣、只有顏色換邊** —— 於是同一個綠色 chip 在兩份
-    recipe 裡意思相反，而畫面上沒有任何東西講得出是哪一種。現在那個模式會讓
-    chip 自己說出 ``real`` / ``nuisance``：**顏色翻面的時候，字跟著翻面**。
+    為什麼顏色不能是唯一的通道（U13，2026-09-08）
+    ---------------------------------------------
+    紅綠對色覺缺陷者不可分辨（男性約 8%），所以「好消息還是壞消息」走**三個
+    通道**：顏色、**字**（:data:`_TONE_WORD`）、框線樣式
+    （:data:`_TONE_BORDER`）。三個吃同一個來源，所以不會各說各話。
 
-    加上紅綠對色覺缺陷者不可分辨（男性約 8%），所以 tone 還有第三個通道 ——
-    框線的樣式（:data:`_TONE_BORDER`）。
+    顏色從哪裡來（F119，2026-09-20）
+    --------------------------------
+    ⚠ **以前是看 bin 的號碼**（``bin 1`` 綠、``bin 0`` 紅），而號碼本身沒有
+    意義 —— 意義是寫 recipe 的人給的。量出來的下場：三份出貨的 recipe
+    **全部反了**（``nothing stands out`` 是紅的、``a spot stands out`` 是
+    綠的）。現在顏色來自 `DecideSpec.bin_outcomes()`，也就是**寫 recipe 的
+    人自己標的**（F117 D2）。
+
+    ⚠ **沒標就是中性灰，不猜。** 一個很有把握的錯顏色比沒有顏色糟得多 ——
+    使用者會相信它。
+
+    ⚠ 這一輪拿掉了 `is_real_style`（U13 當初那個紅綠對調的旗標）：它**從來
+    沒有呼叫端**，而它要解的「同一個綠色在兩份 recipe 裡意思相反」在
+    `outcome` 之後從根上不存在了 —— 綠色現在永遠是「寫這份 recipe 的人說
+    這是好消息」。三個通道一個都沒有少。
     """
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -322,43 +359,47 @@ class VerdictChip(QLabel):
         self.set_verdict(None)
 
     @staticmethod
-    def _wording(b: Optional[int], is_real_style: bool, label: str) -> str:
-        """chip 上那一行字。**名字 → 語意詞 → 門檻關係**，第一個有的贏。
+    def _wording(b: Optional[int], label: str, outcome: str = "") -> str:
+        """chip 上那一行字：``<名字> · bin N`` ＋ 好壞那個詞（有標才加）。
 
-        三層各自的理由：recipe 取了名字就用那個名字（使用者自己的字彙）；
-        沒取名但知道 bin 1 是真缺陷，就講 real / nuisance（那是顏色翻面時
-        唯一講得出差別的東西）；兩個都沒有才退回門檻關係 —— 那時候
-        ``≥ threshold`` 是**真的**唯一知道的事，不該假裝知道更多。
+        名字排第一是 X7：recipe 取了名字就用那個名字（使用者自己的字彙），
+        沒取名才退回門檻關係 —— 那時候 ``≥ threshold`` 是**真的**唯一知道的
+        事，不該假裝知道更多。
+
+        ⚠ **好壞那個詞是 U13 的第二個通道，所以它跟著 `outcome` 走而不是跟著
+        名字走**：``a spot stands out`` 這個名字本身沒有說那是好事還是壞事，
+        而顏色說了 —— 顏色說了什麼，字就要說得出同一件事，不然色覺缺陷者手上
+        只剩一條看不見的通道。中性與「還沒說」不加字（它們本來就沒有主張）。
         """
         if b is None:
             return "—"
         named = str(label or "").strip()
         if named:
-            return "%s · bin %d" % (named, b)
-        if is_real_style and b in (0, 1):
-            return "%s · bin %d" % ("real" if b == 1 else "nuisance", b)
-        if b == 1:
-            return "bin 1 · ≥ threshold"
-        if b == 0:
-            return "bin 0 · < threshold"
-        return "bin %d" % b
+            head = "%s · bin %d" % (named, b)
+        elif b == 1:
+            head = "bin 1 · ≥ threshold"
+        elif b == 0:
+            head = "bin 0 · < threshold"
+        else:
+            head = "bin %d" % b
+        word = _TONE_WORD.get(str(outcome or ""), "")
+        return "%s · %s" % (head, strings.tr(word)) if word else head
 
     def set_verdict(self, bin_value: Optional[Any] = None,
-                    is_real_style: bool = False, label: str = "") -> None:
+                    label: str = "", outcome: str = "") -> None:
+        """``outcome`` 來自 `DecideSpec.bin_outcomes()` —— **沒標就是中性**。
+
+        ⚠ 認不得的值也是中性：這一格不猜（同 `bin_outcomes` 丟掉打錯的值）。
+        """
         try:
             b = None if bin_value is None else int(bin_value)
         except (TypeError, ValueError):
             b = None
         self._bin = b
-        if b is None:
+        tone = str(outcome or "")
+        if b is None or tone not in _TONE_BORDER:
             tone = "neutral"
-        elif b == 1:
-            tone = "bad" if is_real_style else "good"
-        elif b == 0:
-            tone = "good" if is_real_style else "bad"
-        else:
-            tone = "neutral"
-        text = self._wording(b, is_real_style, label)
+        text = self._wording(b, label, outcome)
         bg = TOKENS["chip_%s_bg" % tone]
         fg = TOKENS["chip_%s_text" % tone]
         border = TOKENS["chip_%s_border" % tone]

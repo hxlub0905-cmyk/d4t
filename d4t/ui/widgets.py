@@ -59,7 +59,7 @@ from __future__ import annotations
 from .feature_text import (   # noqa: F401
     FEATURE_ABSOLUTE, FEATURE_RELATIVE, FEATURE_SUB, FEATURE_SUP,
     VARIANT_GLOSS, VerdictChip, _card_says, _escape, _fmt_number,
-    _with_variant, feature_gloss, feature_html, feature_unit,
+    _with_variant, feature_gloss, feature_html, feature_unit, verdict_words,
 )
 from .histogram import (
     HistogramWidget,
@@ -114,7 +114,7 @@ __all__ = [
     "LibraryPanel",
     "HistogramWidget",
     "feature_html",
-    "VerdictChip",
+    "VerdictChip", "verdict_words",
     "TemplateField",
     "to_uint8",
     "small_button",

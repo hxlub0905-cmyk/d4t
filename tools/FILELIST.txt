@@ -116,7 +116,7 @@ d076f44d3e88b7a2b5e04bd80a6634a9f3f99e5b d4t/ui/chips.py
 0b5b9bda40faab10def35e9e749c3cf7ef5f5d3f d4t/ui/decide_panel.py
 9475e553fa9c604e9d301b99c6c5e77bd828fc28 d4t/ui/edit_plan.py
 85971b010d882a877401905910c15f97c1ddcd50 d4t/ui/feature_panel.py
-21a5ba3302ef4d42c82caee40db4ef42136cce0f d4t/ui/feature_text.py
+034c55517b7b5c99060dce0eb77d462f2ad9bb17 d4t/ui/feature_text.py
 53065dce2154c0baf72fc53c96c26818f325c130 d4t/ui/feature_tree.py
 320cf7cb3cd2c7eeaa186810d2920e456cb0d0d7 d4t/ui/fields.py
 54394401c3f2e10bbffe34eb952a045338286943 d4t/ui/fit_screen.py
@@ -153,7 +153,7 @@ acee90a6152ed5654699f853ebab9c7f30050832 d4t/ui/run_controller.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-938bdae4c6bd3d4508b5e3522c05881fb7e7cd19 d4t/ui/studio.py
+96c3a57ea7d72d4df02e80a98c61e349b828ef38 d4t/ui/studio.py
 0a033283dc7745779c44c2a28026cbb836627661 d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
@@ -166,7 +166,7 @@ fc022de0bcc322683dec3c171b5f0f24dfde33b2 d4t/ui/tree_panel.py
 6d5cbf0cb9fd5576400e040f614ea76a4bb0d736 d4t/ui/viewmodel.py
 a4cb05e2efedb1d035357ce9a52e146c8bc17237 d4t/ui/welcome.py
 1eb8e9d6aebe6030949046333341c1a92f0822ff d4t/ui/why_panel.py
-08aad87a2b107a7f4b09501e3b52f76dbace25e6 d4t/ui/widgets.py
+eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 177aee81e7bb41dfc5c83fdd0ebe469d84f0e6b2 d4t/ui/windows_menu.py
 5f55b48a2b3d2db3d39a950065209d804346f8af d4t/ui/wiring_slot.py
 871aa7141e35b3e348cd8b1cc4bae1bf9a906d26 d4t/ui/wording.py
@@ -454,10 +454,10 @@ cd74ab49f2bac6958ff5eee6597096b58ee1a05f tests/test_ui_template_dialog.py
 f300097e06459c1c41b3d1bcf8f29b253012b83f tests/test_ui_truth_marks.py
 9e53676195dd84bfc711240ec2fe867c3ec1ab7a tests/test_ui_undo_close_and_stop.py
 3ff2e7c8a9d2c87f730e7b733b9a1017bda4f23c tests/test_ui_verdict_band.py
-ce19c6162b1e129d5dfb7d1edf75f047f12d5c49 tests/test_ui_verdict_wording.py
+90f7ac8440f7d9257474b69f5e80008fd0a7fd65 tests/test_ui_verdict_wording.py
 2a0e8bb77a38ef89989809fafed973ef7550aedf tests/test_ui_welcome.py
 4588fa4041e8b653c9edec8fe584b3e9e26d216d tests/test_ui_why_panel.py
-83f86389eec618b6c0f2a971d4be2772cc2247da tests/test_ui_widgets.py
+7c7580b282453121d7dfdbf13113e76923b9e98f tests/test_ui_widgets.py
 5a95816da2929463e8331744ae022e4559ac1e02 tests/test_ui_window_policy.py
 40e433766410f1ab8829ed262a4d0d12d5b0f7c5 tests/test_ui_wiring_slot.py
 76fea3fe3fd4847cd568bf2375344d475f15ff0d tests/test_ui_wording.py
