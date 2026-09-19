@@ -450,6 +450,8 @@ d4t/
     │                         #     內容比螢幕高的用 `scroll_host` / `scrolled`，
     │                         #     而且只能在**建構時**用（事後搬版面是 segfault）
     ├── numbers.py            #   一個特徵值印成字 —— **全 UI 只有這一支**（F52）
+    ├── wording.py            #   node id／step key／參數名 → **畫面上的那個字**
+    │                         #     —— 全 UI 只有這一支（F118；地位同 numbers.py）
     ├── focus_visible.py      #   焦點環只在鍵盤導覽時出現（F80）—— Qt 沒有
     │                         #     `:focus-visible`，這支把 QFocusEvent.reason()
     │                         #     翻成 `kbFocus` 屬性餵給 QSS

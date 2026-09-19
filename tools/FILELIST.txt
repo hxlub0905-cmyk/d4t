@@ -153,7 +153,7 @@ fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-1f8665a5b2df178015b6e06ed7d967639fbf020b d4t/ui/studio.py
+f991b79fa2cc47e2a988486201e47817cba1f68c d4t/ui/studio.py
 0a033283dc7745779c44c2a28026cbb836627661 d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
@@ -169,9 +169,10 @@ a4cb05e2efedb1d035357ce9a52e146c8bc17237 d4t/ui/welcome.py
 08aad87a2b107a7f4b09501e3b52f76dbace25e6 d4t/ui/widgets.py
 177aee81e7bb41dfc5c83fdd0ebe469d84f0e6b2 d4t/ui/windows_menu.py
 5f55b48a2b3d2db3d39a950065209d804346f8af d4t/ui/wiring_slot.py
+8e50f37710b06c7b4523d5fd35698f28be523dd9 d4t/ui/wording.py
 c9417fddef0cb8c516cf8bafdeb240023f2f1341 d4t/ui/workbench.py
 b6158315a58b3c51e72191844f9911d9d14567b2 d4t/ui/workers.py
-0ec3a78bccd5576f31b93ca2810afa035929e833 docs/ARCHITECTURE.md
+d9a2313926d0c80bc0ccacda378d9ea60f5e4b4d docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
@@ -186,7 +187,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
 fa5db46811cba285fc6a853a68978bafcf9d994d docs/plans/F117-ui-review.md
-6ce65cdb605ccab4acadb1744d86740a1d142acf docs/plans/F118-user-facing-wording.md
+9deb194103f37144ae70a3e2794fc89fca2f6f41 docs/plans/F118-user-facing-wording.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -458,6 +459,7 @@ ce19c6162b1e129d5dfb7d1edf75f047f12d5c49 tests/test_ui_verdict_wording.py
 83f86389eec618b6c0f2a971d4be2772cc2247da tests/test_ui_widgets.py
 5a95816da2929463e8331744ae022e4559ac1e02 tests/test_ui_window_policy.py
 40e433766410f1ab8829ed262a4d0d12d5b0f7c5 tests/test_ui_wiring_slot.py
+f5348339de054c9964d48cacf379634a09d3ca42 tests/test_ui_wording.py
 ea71103ed94aa28b6e8d54f2c0fe2472e89415cd tests/test_ui_workbench.py
 d8b2329e90e524b0600781a641019718516a0d9f tests/test_ui_workers.py
 f01a0b4834b4b21a104c824c23885d213095e5f6 tests/test_ui_write_only_on_run_all.py

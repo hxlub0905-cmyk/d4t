@@ -1,8 +1,8 @@
 # F118 — 使用者面的字：訊息不准講開發者的話（F117 J1／I11／J5／J6）
 
-狀態：**設計中（2026-09-19）** —— 分析做完、設計定了，**還沒有動任何程式碼**。
-這一份要使用者看過再開工：§3 的那一刀（誰翻譯）會決定後面每一步長什麼樣，
-而 §5 那 84 條文字斷言是這一輪真正的成本。
+狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1 步做完**
+（`ui/wording.py` ＋ 四個呼叫端，不動 core）。下一步是第 2 步
+（`Issue` 加選配欄位）。§5 那 84 條文字斷言仍然是後面幾步真正的成本。
 
 > F117 走查把這件事記成四條（J1 P1、I11、J5、J6）。它們是**同一個病根**，
 > 所以收成一輪：[`F117-ui-review.md`](F117-ui-review.md)。
@@ -140,7 +140,7 @@ Results 的 warning 四個地方都要用**，而那正是 F52（`numbers.py`）
 
 | 步 | 做什麼 | 關掉 | 風險 |
 |---|---|---|---|
-| **1** | `ui/wording.py` ＋ `card()` / `field()` / `name_list()`，**先只接三個最刺眼的呼叫端**：`Removed “dn”`、`Preview problem: [glv_stats]`（改用 `StepError.detail` ＋ 卡片名）、`“dn” did not run this time` | **I11**、J1 的一半 | 低 —— 不動 core |
+| **1** ✅ | **做完**。`ui/wording.py`（Qt-free）＋ `card` / `card_of_step` / `field` / `name_list` / `trace_error_text` / `step_error_text`，接了**四**個呼叫端（多一個 `Preview: stopped after “dn”`）。實際畫面：`Removed “dn”` → **`Removed “Write report”`**；`Preview problem: [glv_stats] no input connected…` → **`Preview problem: “GLV”: no input connected…`** | **I11**、J1 的一半 | 低 —— 沒有動 core |
 | **2** | `Issue` 加那四個選配欄位（預設空），UI 的 `issue_line()` 有就用、沒有就退回 `detail` | — | 低 —— 63 個產地一個都還沒改 |
 | **3** | 搬**最常出現的 6 條** lint（`unknown-feature`、`ambiguous-input`、`duplicate-region`、`no-input`、`unknown-step`、`wrong-content`）填那四個欄位 | **J1** 主體、J5 | 中 —— 會動到 §5 那批文字斷言 |
 | **4** | 問題清單改成兩行（結論在第一行、細節第二行）＋「帶我去」 | **J5**、**J6** | 低 |
@@ -148,6 +148,14 @@ Results 的 warning 四個地方都要用**，而那正是 F52（`numbers.py`）
 
 **第 1 步就會讓畫面明顯變好，而且它不動 core** —— 如果這一輪只做得完一步，
 就做那一步。
+
+### 第 1 步之後還剩什麼（實測）
+
+那一句現在是 ``“GLV”: no input connected: 'source' is empty.`` —— **`'source'`
+還在**，而那一段是 `engine.py` 在 core 裡組好的（`missing_inputs` 回參數名，
+engine 把它們串成句子）。要變成「Measure on」只有兩條路：UI 對散文做正則
+（§3 否決），或 core 把參數名**當欄位吐出來**讓 UI 自己組 —— 也就是第 2、3 步。
+**這正是 §3 那一刀的價值：第 1 步能做的到此為止，而界線是清楚的，不是含糊的。**
 
 ---
 
