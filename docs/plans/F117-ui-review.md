@@ -1,7 +1,10 @@
 # F117 — UI 檢視：待改事項（2026-09-19，已複查）
 
-狀態：**待整理** —— UI 走查的紀錄，**每一條都回頭對過程式碼或重拍過畫面**；使用者要併進自己的清單再排優先，還沒有任何一條開工。
-**等 F116 拆完再動**（大多數會碰到 `studio.py` 或剛拆出來的 controller）。
+狀態：**進行中（2026-09-19）** —— F116 拆完了，開始做。第一批挑的是**「一改多條」的根因群**（不是照 P1/P2/P3 走）：
+已完成 **A3＋J2**（選到的卡捲進視野）、**I1**（縮圖 bin 顏色走共用調色盤）、**F6＋I5**（報表的數字跟畫面同一條規則）。
+中文化（H5）這一輪**不碰**（使用者決定：那一條要先有 2–3 位目標使用者試用）。
+
+⚠ **做的時候查出兩條跟原本寫的不一樣**，已改在下面：**D2** 不是 I1 的同一個病根（撤回它的推測）、**D3** 撤回（那個位數是算過的）。
 
 ## 0. 這份紀錄怎麼來的、可信到哪
 
@@ -22,7 +25,7 @@
 | J1 | **錯誤訊息是給開發者看的**：問題清單印 `route 'ebi_patch': …` 與 Python list 原樣（`['glv_max']`、`['clip_frac', 'n_channels', 'score']`）；狀態列 `Removed "dn"`、`Preview problem: [glv_stats] no input connected: 'source' is empty` 用的是 node id、step key、參數名 | 使用者面一律用卡片名與參數 label（`GLV`、`Measure on`）；list 寫成逗號分隔；只有一條 route 時不印 route | ✅ 刪掉 Denoise 重現 |
 | F2 | `report.html` 沒有執行資訊：只有 recipe id 與 bin 計數，沒有日期、來源 KLARF、recipe 版本、d4t 版本／build id、取樣方式。檔案一離開電腦就追不回是哪一次跑的（`report.xlsx` 的摘要頁有 recipe 資訊，HTML 沒有） | HTML 報表頭加一塊 metadata，與 xlsx 摘要頁同源 | ✅ 讀過輸出檔全文 |
 | G1 | 歡迎視窗文字過期：`d4t reads … with a KLARF, or a multi-page TIFF, or just a folder` —— 獨立的多頁 TIFF（`tiff_stack`）2026-09-18 已拿掉 | 改字；加一條測試：歡迎頁提到的輸入種類要對得上 `scope.INPUT_SOURCES` | ✅ `ui/welcome.py:111` |
-| A3 | 在 Tune 模式選取一張卡（`select_node`），畫布**不會**把它捲進視野 —— GLV 只露出上緣。畫布已經有 `reveal_cards()`（F68 用的），只是選取這條路沒有叫它 | 選取時呼叫同一支 `ensureVisible` | ✅ `canvas.py:2173`、`studio.select_node` |
+| A3 | ✅ **做完** —— 在 Tune 模式選取一張卡，畫布不會把它捲進視野 | 新增 `canvas.ensure_card_visible()`（**只捲，不亮** —— `reveal_cards` 那一套的 hover 高亮是給「指給我看」用的），`select_node` 叫它。⚠ **沒有接進 `set_selected`**：那一支在重建路徑上也會被叫到，接上去使用者每拖一次參數畫布就把他捲回去 | ✅ 附帶發現：`_on_problem_activated` 的說明從 U2 起就寫著「選中那張卡並捲到它」—— **那句話描述的行為一直不存在** |
 
 ## P2
 
@@ -34,8 +37,8 @@
 | F1 | `defects.csv` 表頭 `score` 出現兩次（第 4 欄 BASE_COLUMNS 的 `score`，第 18 欄 features 裡也有一個 `score`）。值相同，但 pandas 會讀成 `score.1`，Excel 用欄名查也會對錯欄 | `feature_keys()` 排除已在 BASE_COLUMNS 的名字；加測試：輸出欄名不重複 | ✅ `core/export/report.py:write_csv` |
 | G3 | Recipe 範本庫：清單顯示 recipe id（`ebi_die_to_die`）與 `route: ebi_patch`；右邊整塊說明；`score = (no score expression)` 會讓人以為沒有判定（判定其實在樹上） | 顯示名稱＋一句摘要；`route` 換成資料類型白話；score 那行在有判定樹時改寫或拿掉 | ✅ 截圖 |
 | G4 | Template 對話框工具列下方那排說明字被截、還壓著一條捲軸 | 說明改 tooltip 或換行 | ✅ 截圖 |
-| I1 | **bin 顏色不一致**：已有共用調色盤 `decide_tree` 的 `leaf_color`（樹、報表、Results 長條在用），但 Gallery 色條的 `bin_hex()` 是「bin≥1 一律綠、0 灰」，預覽 verdict chip 也另外上色 —— 同一個 bin 在長條是藍、在縮圖是綠 | `bin_hex()` 與 verdict chip 改用 `leaf_color` | ✅ `gallery.py:bin_hex`、`tree_scene.leaf_hex` |
-| J2 | 出錯的卡在畫布可視範圍邊緣，只露出一個紅點 | 有 error 時把那張卡捲進視野（同 A3 那支） | ✅ 重現 |
+| I1 | ✅ **做完** —— `bin_hex()` 改走 `leaf_color`（失敗＝紅、未判定＝中性沒有被吃掉）。多類別時更明顯：bin 1/2/3 在樹上是三色、在縮圖牆上曾是同一個綠 | 測試**不釘色碼**（釘了換主題就紅然後被關掉），問的是「縮圖色 ＝ 樹的色」 | ✅ ⚠ **verdict chip 沒有跟著改** —— 見 D2 |
+| J2 | ✅ **做完**（同 A3 那一行）—— 點問題清單會 `select_node`，所以 A3 修好它就跟著好了 | — | ✅ |
 | J5 | 問題清單一行一條、要水平捲動才讀得完；狀態列紅字被截斷 | 換行；每條前面放卡片名＋「帶我去」 | ✅ 截圖 |
 | K1 | App 內沒有連到 `docs/USING-*.md` 的入口；手冊只在 repo 裡，廠內使用者不會去翻 | 卡片／視窗的「?」打開對應章節（離線、本機） | ✅ `d4t/ui` 內沒有任何開啟手冊的程式 |
 | K3 | 整批跑沒有剩餘時間估計；`.I01` 一批可到 6 萬顆 | 進度加 ETA；可暫停；跑完通知 | ✅ 找不到 ETA 相關程式 |
@@ -54,8 +57,8 @@
 | B4 | `Write charts` 卡：`At most this many defects 0`（0＝無上限？）、第五格勾選框叫 `chart`、`Enabled` 當 label | 0 顯示 `All`；`Your own chart`；具體動詞 | ✅ |
 | C2 | Features 同名多列：`clip_frac` 三列、`peak` 兩列。說明文字有寫「kept under this name because a later card wrote over it」，但要讀完那句才懂 | 名字後面直接帶來源卡（`clip_frac · Normalize(ref)`） | ✅（屬既有設計的呈現問題）|
 | D1 | 「preview stops at "norm" — press Esc to run the decision too」：Esc 是「取消選取」，句子是對的，但很難被想到 | 旁邊放一顆 `Run to the end` | ✅ |
-| D2 | 均勻度 verdict `measured · bin 0` 是紅色 chip，讀起來像「壞」 | 先查為什麼是紅；改用 `leaf_color` 後應一併解決（I1） | ✅ 截圖；原因未查 |
-| D3 | `score 0.27895` 小數位多 | 走 `numbers.py` | ✅ |
+| D2 | 均勻度 verdict `measured · bin 0` 是紅色 chip，讀起來像「壞」 | **原因查出來了，而原本的推測不成立**：`VerdictChip` 是**二元 pass/fail**（bin 1 = good、其餘 = bad），那是 U13 刻意的設計 —— `is_real_style` 會把紅綠對調，而且對調時 chip 自己的字跟著翻面（`real`／`nuisance`），還有第三個通道（框線樣式）給色覺缺陷者。改成 `leaf_color` 會把那整套拆掉。**真正的問題是語意**：均勻度那份 recipe 裡 `bin 0` 是「量到了、沒有異常」＝好消息。⚠ **需要使用者決定**：「哪一個 bin 是好消息」該由誰說 —— recipe？還是照 `is_real_style` 那樣由判定段宣告？ | ✅ `feature_text.py:356`（`tone = "good" if is_real_style else "bad"`）|
+| ~~D3~~ | ~~`score 0.27895` 小數位多~~ | **撤回** —— 它**已經**走 `numbers.py`，而那 5 位是 F52 算過的：`%.4g` 會把 `99.995` 印成 `100`，於是同一顆在 Results 是 100、點進去是 99.995。縮短它等於把 F52 修掉的 bug 放回來。（移到下面的撤回表）| ✅ `core/numbers.py` 的模組說明 |
 | D4 | Decision / Verdict / bin / class / score 多種叫法 | 一張詞彙表 | ✅ |
 | E2 | 縮圖第一行是類別名（R5 的刻意設計），但 M 尺寸下被截成 `a spot stands …`；色條沒有圖例 | 截斷時用 tooltip；Results 放 bin 色圖例 | ✅ |
 | E3 | 縮圖沒有標出 defect 位置 | 疊量測標記或中心十字 | ✅ |
@@ -74,7 +77,7 @@
 | H2 | 底部兩條狀態列；`Run only – nothing written yet…` 在 Results 又出現一次 | 合併 | ✅（主觀）|
 | H3 | 空白狀態三種資料說明太長，第三種被截 | 一句話＋更多 | ✅ |
 | I2 | 兩個強調色（藍、橘棕） | 收成一個 | ✅（主觀）|
-| I5 | 數字格式：報表 `1.638e+04`、預覽 `0.27895` 沒走 `numbers.py`（CSV 保留全精度是**對的**，不在此列） | 畫面與 HTML 報表走 `numbers.py` | ✅ |
+| I5 | ✅ **做完**（含 F6 的數字那一半）—— 但病灶比記的更深：`core/export/html.py` 的 `number()` 用的是 `%.4g`，**正是 F52 算過之後否決掉的那一個**。除了 `1.638e+04`，它還讓 `99.995` 在報表上變成 `100`（**沒有人回報過，但那就是 F52 第 1 條的危害**）| 規則搬進 `d4t/core/numbers.py`（Qt-free），畫面與報表共用；NaN 的收尾各自保留（報表空白、畫面 `NaN`）。**core 不 import ui**，所以是往下放不是往上借 | ✅ 測試逐值比對兩邊，另加一條「core 不准 import ui」|
 | I6 | 畫布、Features、Results 之間可以互相指：滑過 Features 一列亮起來源卡、點 Results 欄名跳到那張卡（`reveal_cards` 已有，可沿用） | 延伸既有機制 | 建議 |
 | I7 | 每張卡都印 `20 ok · 2051 img/s` | 只在失敗或特別慢時顯示 | 主觀 |
 | I8 | 參數區段標題（`1 · Where to measure`）比欄位名小 | 調字級 | ✅ |
@@ -107,6 +110,7 @@
 | I14 | 快捷鍵看不到 | `_set_tip` 會自動把快捷鍵補進 tooltip |
 | J3 | 刪卡後預覽還顯示舊判定 | 我截圖太快；等預覽跑完會清成 `—` 並顯示問題 |
 | K5 | 在分布圖上拖門檻線 | 判定樹編輯器已有可拖的門檻線（`threshold_view.ThresholdHistogram`） |
+| D3 | `score 0.27895` 小數位多 | **它已經走 `numbers.py` 了。** 那 5 位有效數字是 F52 算過的決定：`%.4g` 會把 `99.995` 印成 `100`，於是同一顆在 Results 是 100、點進單顆是 99.995 —— 縮短它等於把 F52 修掉的 bug 放回來。⚠ 這一條的教訓值得留著：**「看起來太長」不等於「沒走共用的那一支」** —— 先去讀那一支為什麼選這個位數 |
 
 ## 做得好的（改的時候不要改掉）
 

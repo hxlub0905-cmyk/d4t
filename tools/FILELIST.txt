@@ -40,7 +40,7 @@ b5fe256d267f2d487c83b8ac2c036102cbd6f1a4 d4t/core/calibration.py
 607bc796c64e79f5738317810cb8e2a1f04d412e d4t/core/export/boxplot.py
 6bdef6d76457fe600ddbe9069d1a28a215c45971 d4t/core/export/chart_draw.py
 e124c808bc10ad7aac2e434dcf87e3a8efef4794 d4t/core/export/chart_frame.py
-402c6bf76fc079a9bb1fc28186a046a9891fc3bf d4t/core/export/html.py
+f164c233dc03c87477e6f06ceea7abcc8b09c5de d4t/core/export/html.py
 df85cecb3e142f94a5ccb6d8775cd3540d99fa97 d4t/core/export/klarf_out.py
 f1096aa00597a3ce6e7a69b03aa11fdfe0b6cd1a d4t/core/export/overlay.py
 ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
@@ -54,6 +54,7 @@ d3ae152006804b91768a5814428820e57b4ba10e d4t/core/ingest/pair_source.py
 eac311bd1b49860c56d39fb647af9477e2863f45 d4t/core/ingest/rawfile.py
 77be8983b75d6147300d419b60bc02bec2791a52 d4t/core/ingest/tiff_index.py
 cc25328b06de7db578ab68d5d189ffc9ff439d73 d4t/core/log.py
+1aff02dd63912f85f3d810274fa5ad7aa609780f d4t/core/numbers.py
 5aa3964973fb0befdbdde5f6190aaec346c2d48e d4t/core/pipeline/__init__.py
 873e2863b477095a63d63e214187d0d702bba5ac d4t/core/pipeline/batch.py
 cb366e65f25d5f74590219f9062e58eda880d1b5 d4t/core/pipeline/cache.py
@@ -135,7 +136,7 @@ ca30c29322165e11582d2696336da9deb1c5918f d4t/ui/icons.py
 3ae460d9afe25a5db61b7e72389c30b3d059b05f d4t/ui/library.py
 d577ffb1139dedd58a91b63dc21ad922108098c9 d4t/ui/locales/zh_TW.json
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
-99b8d619c884e776014c33948df97d22e6579ef8 d4t/ui/numbers.py
+a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
 f833c92e7f7d4e409ac777ab681db38434d619e1 d4t/ui/param_form.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
@@ -170,7 +171,7 @@ ac550736794fc97ac62439d943e30565aab97b91 d4t/ui/welcome.py
 5f55b48a2b3d2db3d39a950065209d804346f8af d4t/ui/wiring_slot.py
 c9417fddef0cb8c516cf8bafdeb240023f2f1341 d4t/ui/workbench.py
 b6158315a58b3c51e72191844f9911d9d14567b2 d4t/ui/workers.py
-dcfb7b8f44e2cad333a59d03ecd63fc7c2f76b12 docs/ARCHITECTURE.md
+0ec3a78bccd5576f31b93ca2810afa035929e833 docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
@@ -184,7 +185,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-47a006145085f0870d5e117405af6b8a0a24ece8 docs/plans/F117-ui-review.md
+44f5f7cb1de23d5d248fdbf13b5b8aee1031bae5 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -398,7 +399,7 @@ cc25706888ee85d87d2fd03aa0d70672608b7986 tests/test_ui_f99_gestures.py
 7db2cab97ffe3b38bcd3da9cb0562f2d3b48f928 tests/test_ui_feature_ghosts.py
 b89646469a21dae2a315c5488be42167e10e3051 tests/test_ui_feature_name_display.py
 1d0b76b2a59d105f1cea269b2c2bc22b861d26c5 tests/test_ui_feature_panel.py
-13b0a7a2cec69bd4070d06ca1b4dc52e274a0f63 tests/test_ui_feature_value_format.py
+7c44c6bd7087573c27d58d8b058b591d9da3e4a4 tests/test_ui_feature_value_format.py
 55432fab19cac812c011aa97e261413327785c9c tests/test_ui_focus_visible.py
 66aa939add4648fee264b0bf90065c862a59ef98 tests/test_ui_gallery.py
 a3a5c0ab3ec4243abb72f3b35e2d744697d7c9ac tests/test_ui_gc_generator.py

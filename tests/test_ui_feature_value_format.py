@@ -228,3 +228,57 @@ def test_the_short_one_is_only_used_on_the_image(qapp):
                 found.setdefault(path.name, set()).add(node.name)
     assert found == _SHORT_OK, found
     assert numbers.format_feature_value_short(5.0, signed=True) == "+5"
+
+
+# --------------------------------------------------------------------------- #
+# F117：HTML 報表是第七份（而它用的正是 F52 否決掉的那一個）
+# --------------------------------------------------------------------------- #
+def test_the_html_report_prints_the_same_number_as_the_screen():
+    """報表上的數字 ＝ 畫面上的數字。
+
+    `core/export/html.py` 的 `number()` F52 當時沒有被算進去 —— 它用的是
+    ``%.4g``，也就是**算過之後被否決掉的那一個**。兩個症狀：
+
+    * ``16380`` → ``1.638e+04``（走查 F6 看到的：報表上的整數變科學記號）；
+    * ``99.995`` → ``100``，而畫面上是 ``99.995`` —— 使用者在 Results 看到
+      100、報表也是 100、點進單顆卻是 99.995。**那就是 F52 第 1 條的危害**，
+      只是它躲在報表裡沒有人回報。
+    """
+    from d4t.core.export.html import number
+    from d4t.ui.numbers import format_feature_value
+
+    for v in (16380, 99.995, 1234.5, 0.27895, 12, 0.000312, -66.1163, 0):
+        assert number(v) == format_feature_value(v), (
+            "%r：報表 %s、畫面 %s" % (v, number(v), format_feature_value(v)))
+
+
+def test_the_report_keeps_its_own_answer_for_nan():
+    """**同一個規則、不同的收尾。**
+
+    報表的 NaN 是空的（一格空白），畫面上的是 ``NaN`` —— 那是刻意的差別，
+    所以共用的只有「有限的數怎麼印」，不是整支函式。這一條釘住那條界線，
+    免得下一次「統一」把它一起吃掉。
+    """
+    from d4t.core.export.html import number
+    from d4t.ui.numbers import format_feature_value
+
+    assert number(float("nan")) == ""
+    assert format_feature_value(float("nan")) == "NaN"
+
+
+def test_the_rule_lives_in_core_so_core_never_imports_ui():
+    """規則往下放，不是往上借（`d4t/core` 不 import `d4t/ui`）。"""
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "d4t" / "core"
+    bad = []
+    for f in src.rglob("*.py"):
+        for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("d4t.ui"):
+                bad.append("%s:%d" % (f.name, node.lineno))
+            elif isinstance(node, ast.Import):
+                bad += ["%s:%d" % (f.name, node.lineno)
+                        for a in node.names if a.name.startswith("d4t.ui")]
+    assert not bad, "d4t/core 不准 import d4t/ui：%s" % bad
+

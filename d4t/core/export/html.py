@@ -56,6 +56,8 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Sequence
 
+from d4t.core.numbers import format_number
+
 from ..pipeline import decide_tree
 
 __all__ = ["build_report", "build_char_report", "write_html", "escape",
@@ -111,14 +113,28 @@ def escape(value: Any) -> str:
 
 
 def number(value: Any) -> str:
-    """數字 → 短一點的字（NaN 是空的 —— **不是 0**）。"""
+    """數字 → 字（NaN 是空的 —— **不是 0**）。
+
+    ⚠ **跟畫面同一條規則**（F117 F6/I5）：這一支以前是 ``%.4g``，而那正是
+    F52 **算過之後否決掉的**那一個 —— 兩個症狀：
+
+    * ``16380`` 印成 ``1.638e+04``（走查看到的那個：報表上的整數變科學記號）；
+    * ``99.995`` 印成 ``100``，而同一顆在畫面上是 ``99.995`` —— 使用者在
+      Results 看到 100、打開報表也是 100、點進單顆卻是 99.995。那是 F52
+      第 1 條的危害，只是它躲在報表裡沒有人回報。
+
+    NaN／非數字那兩條**留在這裡**：報表的 NaN 是空的，而畫面上的是 ``NaN``
+    （`core.numbers.finite`）—— 同一個規則、不同的收尾，所以分開。
+    """
     try:
         f = float(value)
     except (TypeError, ValueError):
         return escape(value)
     if f != f:                      # nan
         return ""
-    return ("%.4g" % f) if abs(f) < 1e15 else "%g" % f
+    if abs(f) >= 1e15:              # 大到那一步就不要再管好不好讀了
+        return "%g" % f
+    return format_number(f)
 
 
 def bin_summary(bins: Dict[Any, int]) -> str:
