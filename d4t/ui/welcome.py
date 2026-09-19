@@ -107,30 +107,63 @@ _SEG_LINES = (
     ("adc", "Score -> bin -> write back to KLARF"),
 )
 
-_INTRO = (
-    "d4t reads the tool's patch / Review SEM images — with a KLARF, or a "
-    "multi-page TIFF, or just a folder of images — and lets you build a "
-    "pipeline out of step cards: it scores every defect, splits them into bins "
-    "by a threshold, and writes the result back to KLARF."
-    "\nNo programming needed — you decide what a real defect looks like, and the "
-    "pipeline works it out."
-)
+def ways_in() -> int:
+    """「開啟 KLARF」以外還有幾條路進得來（F117 G1）。
 
-#: 導覽底下那句提示。**它必須描述畫面上真的看得到的鈕**。
-#:
-#: 三種狀態三句話（範例資料那顆收著的時候，「按左邊那顆，一分鐘就看得到分數」
-#: 指的會是「開啟我自己的資料」，而那顆給不出那個結果）：
-_FOOTER_HINT = (
-    "First time here? Press the button on the left — you will be looking "
-    "at scored results in about a minute."
-    if scope.SHOW_SAMPLE_DATA else
-    "Open your own data, then press “Templates…” — do not start from an "
-    "empty pipeline; every template is a complete, runnable one."
-    if scope.SHOW_TEMPLATE_LIBRARY else
-    "Close this window and Studio shows you the four kinds of data it reads, "
-    "one entry each; then build the pipeline card by card from the library on "
-    "the left."
-)
+    **數出來的，不是寫死的數字** —— 這裡以前寫著「the other three kinds」並且
+    點名了 ``a multi-page TIFF``，而 ``tiff_stack`` 2026-09-18（F114）就從產品面
+    拿掉了：**第一次見面的那一頁在介紹一種打不開的東西**，而且沒有任何測試
+    問得出來。
+    """
+    return max(0, len(scope.INPUT_SOURCES) - 1) + len(scope.ATTACHMENTS)
+
+
+def _intro_text() -> str:
+    """導覽最上面那一段。
+
+    ⚠ **它刻意不列出有哪幾種資料** —— 那張清單只有一個家
+    （`scope.INPUT_SOURCES`），而 `InputSource` 自己的說明就寫著它為什麼存在：
+    「在這張表出現之前，同一組入口被抄在三個地方：工具列三顆鈕的 tooltip、
+    空白狀態上的那一句話、導覽對話框上的那顆鈕。三份會漂 —— 而且已經漂了」。
+
+    **這一段就是那第三份，而它一直沒有被改成從表上長出來**，所以它漂了
+    （F117 G1）。改法不是「也從表上長一句」—— 那樣長出來的句子讀起來像清單，
+    而這裡要的是一句歡迎詞；改法是**不要在這裡列**，把「有哪幾種」留給真的
+    一種一列的地方（關掉這扇窗就看得到的空白狀態，那一列本來就是從表長的）。
+    """
+    return (
+        "d4t reads the tool's patch / Review SEM images — with or without a "
+        "KLARF — and lets you build a pipeline out of step cards: it scores "
+        "every defect, splits them into bins by a threshold, and writes the "
+        "result back to KLARF."
+        "\nNo programming needed — you decide what a real defect looks like, "
+        "and the pipeline works it out.")
+
+def _footer_hint() -> str:
+    """導覽底下那句提示。**它必須描述畫面上真的看得到的鈕。**
+
+    三種狀態三句話（範例資料那顆收著的時候，「按左邊那顆，一分鐘就看得到
+    分數」指的會是「開啟我自己的資料」，而那顆給不出那個結果）。
+
+    ⚠ **是函式不是常數**（F117 G1）。兩個理由，而第二個是 bug：
+
+    1. 最後那一句以前寫著「the four kinds of data it reads」—— 而
+       `scope.INPUT_SOURCES` 現在是**三**條（F114 拿掉 stack 之後）。
+       寫死的數字會漂，所以它現在是數出來的。
+    2. 常數是在 **import 的那一刻**算的，於是 `scope.use_profile()` 換過
+       profile 之後這一句還停在舊的分支 —— 那正是 U10 那條「旗標要透過模組
+       讀」在講的事，而這一行剛好是漏網的那個。
+    """
+    if scope.SHOW_SAMPLE_DATA:
+        return ("First time here? Press the button on the left — you will be "
+                "looking at scored results in about a minute.")
+    if scope.SHOW_TEMPLATE_LIBRARY:
+        return ("Open your own data, then press “Templates…” — do not start "
+                "from an empty pipeline; every template is a complete, "
+                "runnable one.")
+    return ("Close this window and Studio shows you the %d kinds of data it "
+            "reads, one entry each; then build the pipeline card by card from "
+            "the library on the left." % len(scope.INPUT_SOURCES))
 
 
 # --------------------------------------------------------------------------- #
@@ -333,7 +366,7 @@ class WelcomeDialog(QDialog):
         title.setObjectName("paramTitle")
         root.addWidget(title)
 
-        intro = QLabel(_INTRO, self)
+        intro = QLabel(_intro_text(), self)
         intro.setWordWrap(True)
         intro.setStyleSheet("color:%s;" % TOKENS["text_secondary"])
         self.intro_label = intro
@@ -365,9 +398,8 @@ class WelcomeDialog(QDialog):
         self.btn_open.setCursor(Qt.PointingHandCursor)
         self.btn_open.setToolTip(
             "Close this window and go straight to picking a KLARF - the most "
-            "common case. Studio's start screen lists the other three kinds "
-            "(a multi-page TIFF, a folder of images, and a GLAS layout export "
-            "on top of a lot).")
+            "common case. Studio's start screen lists the other %d ways in, "
+            "one entry each." % ways_in())
         self.btn_open.setMinimumHeight(34)
         self.btn_open.clicked.connect(self.click_open)
 
@@ -393,7 +425,7 @@ class WelcomeDialog(QDialog):
             self.btn_open.setObjectName("primary")
         root.addLayout(row)
 
-        hint = QLabel(_FOOTER_HINT, self)
+        hint = QLabel(_footer_hint(), self)
         hint.setObjectName("paramHint")
         hint.setWordWrap(True)
         self.footer_hint = hint          # 這句話要跟看得到的鈕一致（有測試）

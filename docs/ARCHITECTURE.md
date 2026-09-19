@@ -343,6 +343,8 @@ d4t/
 │   │   │                     #   兩套，相似度 0.01；家具早就共用了）—— 見計畫書 §14
 │   │   └── overlay.py        #   缺陷疊圖：把「機器看到什麼」畫成人看得懂的圖
 │   ├── store/results.py      # SQLite 批次歷史 ＋ rescore
+│   ├── numbers.py            # **一個特徵值一種寫法**（F52 的規則，F117 從 ui 搬下來）：
+│   │                     #   畫面與 HTML 報表共用；core 不 import ui，所以往下放
 │   ├── log.py                # 唯一的 logger：被吃掉的例外留痕（swallowed）、run --log
 │   └── calibration.py        # nm/px 校正 profile
 └── ui/                       # PySide6 Studio（**唯一允許 Qt 的地方**）
@@ -448,6 +450,8 @@ d4t/
     │                         #     內容比螢幕高的用 `scroll_host` / `scrolled`，
     │                         #     而且只能在**建構時**用（事後搬版面是 segfault）
     ├── numbers.py            #   一個特徵值印成字 —— **全 UI 只有這一支**（F52）
+    ├── wording.py            #   node id／step key／參數名 → **畫面上的那個字**
+    │                         #     —— 全 UI 只有這一支（F118；地位同 numbers.py）
     ├── focus_visible.py      #   焦點環只在鍵盤導覽時出現（F80）—— Qt 沒有
     │                         #     `:focus-visible`，這支把 QFocusEvent.reason()
     │                         #     翻成 `kbFocus` 屬性餵給 QSS

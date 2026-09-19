@@ -119,7 +119,7 @@ from . import studio_layout
 from .gallery_controller import GalleryController
 from .attach_sources import AttachSources
 from .run_controller import RunController
-from . import canvas_edges
+from . import canvas_edges, wording
 # ⚠ 這個常數的家在 `ui/run_controller.py`（F116 第 5 步跟著用它的程式碼
 # 搬過去了）。這裡拿回來是因為它在下面的 `__all__` 裡（ruff 認得 ——
 # 所以不必 noqa）：它是對外的名字，不是實作細節。
@@ -1232,7 +1232,7 @@ class StudioWindow(QMainWindow):
             return
         row = next((r for r in self.problems.rows() if not r["node_id"]), None)
         if row:
-            self._status(row["detail"] or row["title"],
+            self._status(row["text"] or row["title"],
                          "error" if row["level"] == "error" else "info")
 
     def _node_problems(self, issues: Optional[Sequence[Any]] = None
@@ -1264,7 +1264,7 @@ class StudioWindow(QMainWindow):
             if prev is not None and (rank.get(str(issue.level), 1)
                                      >= rank.get(prev[1], 1)):
                 continue
-            out[nid] = (str(issue.detail or issue.title), str(issue.level))
+            out[nid] = (wording.issue_line(issue, self.model), str(issue.level))
         return out
 
     def _refresh_pipeline(self) -> None:
@@ -1274,7 +1274,7 @@ class StudioWindow(QMainWindow):
             issues: Sequence[Any] = self.model.validate()
         except Exception:  # 顯示用
             issues = []
-        self.problems.set_issues(issues)
+        self.problems.set_issues(issues, self.model)
         problems = self._node_problems(issues)
         nodes: List[Dict[str, Any]] = []
         for nid in self.model.node_order:
@@ -1479,7 +1479,7 @@ class StudioWindow(QMainWindow):
                 continue
             lvl = str(issue.level)
             if best is None or rank.get(lvl, 1) < rank.get(best[1], 1):
-                best = (str(issue.detail or issue.title), lvl)
+                best = (wording.issue_line(issue, self.model), lvl)
         return best or ("", "")
 
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:
@@ -2089,11 +2089,12 @@ class StudioWindow(QMainWindow):
             # 而 `RecipeModel.remove` 刪卡時本來就會把它兩端的線一起拿掉 ——
             # 拿掉之後水合就把下游那幾格空出來。以前它是從參數推導的，
             # 所以「把那一格空掉」非得在這裡自己做一次不可。
+            name = wording.card(self.model, node_id)   # 先取名，移除之後查不到
             self.model.remove(node_id)
         if self.selected_node == node_id:
             self.selected_node = None
             self.param_form.set_step(None, {}, [])
-        self._status("Removed “%s”" % node_id)
+        self._status("Removed “%s”" % name)
 
     def select_node(self, node_id: str) -> bool:
         """選取一個節點：右邊換成它的參數表單，預覽跑到它為止。"""
@@ -2109,8 +2110,7 @@ class StudioWindow(QMainWindow):
         # 「調 A 卡的 gamma → 換到 B 卡 → 再調回 A 卡的 gamma」會被併成一步。
         self.model.end_coalescing()
         for view in self._canvases():
-            view.set_selected(node_id)
-            view.set_tree_selected(None)   # 一次只編一個東西（卡片或樹的一步）
+            view.select_card(node_id)
         self._fill_param_form(node_id)
         self.stack.setCurrentWidget(self.param_form)
         self.gauge_note.setText("")              # 儀表又是這張卡的了（P1-7）
@@ -3572,21 +3572,21 @@ class StudioWindow(QMainWindow):
             self.selected_node, verdict_bin, getattr(result, "ok", False)))
         self._show_decide_path(result)
 
+        who = wording.card(self.model, self.selected_node)
         if not ran:
             # 兩種「沒有東西可看」要講不同的話，因為下一步不一樣：
             #   跑起來了但失敗   → 講**那個錯誤**（它自己就帶著怎麼修）；
             #   根本沒跑到       → 講**怎麼接線**（lint 對這件事早就有一句可以照做
             #                      的話，用它而不是再寫一份）。
             tr = self._selected_trace(result)
-            err = str(getattr(tr, "error", "") or "") if tr is not None else ""
+            err = wording.trace_error_text(tr, self.model) if tr else ""
             if err:
                 self._status("Preview problem: %s" % err, "error")
             else:
                 why = self._node_problems().get(self.selected_node or "",
                                                 ("", ""))[0]
-                self._status(why or ("“%s” did not run this time, so there is "
-                                     "nothing to show for it yet."
-                                     % self.selected_node), "error")
+                self._status(why or "“%s” did not run this time, so there "
+                             "is nothing to show for it yet." % who, "error")
         elif not getattr(result, "ok", False):
             # 這張卡跑過了，是**後面**某張卡失敗 —— 那時候畫面上的影像有意義
             # （診斷比清空有用），所以留著。
@@ -3594,7 +3594,7 @@ class StudioWindow(QMainWindow):
                          % (getattr(result, "error", None) or "unknown error"))
         elif self.selected_node:
             self._status("Preview: stopped after “%s” (%d image streams)"
-                         % (self.selected_node, len(images)))
+                         % (who, len(images)))
         else:
             self._status("Preview done (%d image streams)%s"
                          % (len(images),

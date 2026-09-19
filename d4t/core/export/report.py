@@ -40,7 +40,7 @@ from typing import (Any, Dict, Iterable, List, Optional, Sequence,
 from .klarf_out import ExportError
 
 __all__ = ["summarize", "write_csv", "write_excel",
-           "feature_keys", "BASE_COLUMNS"]
+           "feature_keys", "detail_feature_keys", "BASE_COLUMNS"]
 
 #: 明細表最前面的固定欄位（其後接排序過的特徵欄）。
 BASE_COLUMNS = ("defect_id", "ok", "error", "score", "bin")
@@ -82,6 +82,26 @@ def feature_keys(results: Sequence[Dict[str, Any]]) -> List[str]:
     for r in results or ():
         keys.update((r.get("features") or {}).keys())
     return sorted(keys)
+
+
+def detail_feature_keys(results: Sequence[Dict[str, Any]]) -> List[str]:
+    """明細表的特徵欄 —— :func:`feature_keys` **扣掉已經在 `BASE_COLUMNS` 的**。
+
+    為什麼需要它（F117 F1）：`score` 同時是基本欄與一個特徵（判定段把分數也
+    寫進 features），所以 ``BASE_COLUMNS + feature_keys`` 的表頭裡 **`score`
+    出現兩次**。值一樣，所以肉眼看不出問題 —— 但
+
+    * pandas 讀進來會把第二個改名成 ``score.1``（於是「同一個欄名」在兩個人
+      的腳本裡是兩個不同的欄）；
+    * Excel 用欄名查（`MATCH` / `VLOOKUP`）永遠只找到第一個，而使用者以為
+      自己查的是後面那個。
+
+    ⚠ **`feature_keys` 本身沒有改**：Features 面板與特徵統計要的是「這批跑出
+    了哪些數字」，`score` 是其中之一。扣掉它是**明細表**的事 —— 那張表的前五欄
+    已經有它了。
+    """
+    base = set(BASE_COLUMNS)
+    return [k for k in feature_keys(results) if k not in base]
 
 
 def _gt_is_real(value: Any) -> Optional[bool]:
@@ -346,7 +366,7 @@ def write_csv(results: Sequence[Dict[str, Any]], path: str, *,
     results = list(results or [])
     path = str(path)
     _ensure_parent(path)
-    keys = feature_keys(results) if include_features else []
+    keys = detail_feature_keys(results) if include_features else []
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
@@ -438,7 +458,7 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
     path = str(path)
     _ensure_parent(path)
     s = summarize(results, ground_truth=ground_truth, positive_bins=positive_bins)
-    keys = feature_keys(results)
+    keys = detail_feature_keys(results)
 
     bold = Font(bold=True)
     head_fill = PatternFill("solid", fgColor="EDEFF2")

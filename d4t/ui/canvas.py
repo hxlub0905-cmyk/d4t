@@ -2194,6 +2194,38 @@ class PipelineCanvas(QGraphicsView):
         self.ensureVisible(items[0], 80, 80)
         return len(items)
 
+    def select_card(self, node_id: Optional[str]) -> None:
+        """**這張卡被選了**：畫成選中、清掉樹的選取、捲進視野。
+
+        三件事一起發生，而且只在這一條路上一起發生（`studio.select_node`）——
+        所以它們是**畫布的一個事實**，不是呼叫端要記得照順序做的三件事。
+        清掉樹的選取是「一次只編一個東西」（卡片或樹的一步）。
+        """
+        self.set_selected(node_id)
+        self.set_tree_selected(None)
+        self.ensure_card_visible(node_id)
+
+    def ensure_card_visible(self, node_id: Optional[str]) -> bool:
+        """把一張卡捲進視野 —— **只捲，不亮也不選**（F117 A3／J2）。
+
+        跟 :meth:`reveal_cards` 的差別是刻意的：那一支是「在畫布上**指給我
+        看**」（hover 那一套的高亮，使用者一動就熄），而這一支是「你剛選到的
+        東西在畫面外」—— 選取本身已經把卡片畫成選中的樣子了，再亮一次只是
+        兩種強調疊在一起。
+
+        ⚠ **不要把它接進 `set_selected`**：那一支在 `set_nodes` 的重建路徑上
+        也會被叫到（`canvas.py` 內、`studio` 的 refresh 各一處），接上去的話
+        使用者每拖一次參數、畫布就把他捲回去 —— 捲動是**使用者動作的回應**，
+        不是同步的副作用。
+
+        回傳「真的捲了嗎」（找不到那張卡就是 False，什麼都不動）。
+        """
+        item = self._items.get(str(node_id or ""))
+        if item is None:
+            return False
+        self.ensureVisible(item, 80, 80)
+        return True
+
     def ghost_items(self) -> List[Any]:
         """現在畫著的幽靈線（測試用）。"""
         return list(getattr(self, "_ghost_items", []) or [])

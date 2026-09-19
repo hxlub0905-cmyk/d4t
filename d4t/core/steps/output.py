@@ -1038,7 +1038,7 @@ class OutputReportStep(_OutputStep):
         writers = {
             CONTENT_REPORT: lambda path: export_html.write_html(
                 export_html.build_report(
-                    rows, title, export_report.feature_keys(rows),
+                    rows, title, export_report.detail_feature_keys(rows),
                     decide=getattr(bctx.recipe, "decide", None),
                     images=images),
                 path),

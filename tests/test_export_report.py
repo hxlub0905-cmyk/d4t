@@ -439,3 +439,63 @@ def test_the_json_payload_cannot_close_the_script_tag():
     blob = page.split("id='rows' type='application/json'>", 1)[1].split("</script>", 1)[0]
     assert "oops" in blob, "那一列要留在 JSON 裡（不是被切掉）"
     assert "<" not in blob, "JSON 裡不准有裸的 <"
+
+
+# --------------------------------------------------------------------------- #
+# F117 F1：輸出檔的欄名不准重複
+# --------------------------------------------------------------------------- #
+def _rows_with_score_as_a_feature():
+    """判定段會把 `score` 也寫進 features —— 真實形狀，不是捏的。"""
+    return [{"defect_id": "1", "ok": True, "error": None,
+             "score": 3.0, "bin": 1,
+             "features": {"score": 3.0, "bin": 1, "glv_max": 9.0}}]
+
+
+def test_the_detail_table_never_repeats_a_base_column(tmp_path):
+    """`score` 同時是基本欄與一個特徵 → 表頭裡出現兩次。
+
+    值一樣，所以肉眼看不出問題。出事的是**下游**：
+
+    * pandas 把第二個改名成 ``score.1`` —— 同一個欄名在兩個人的腳本裡是兩個
+      不同的欄；
+    * Excel 用欄名查（`MATCH` / `VLOOKUP`）永遠只找到第一個。
+    """
+    import csv as _csv
+
+    from d4t.core.export.report import write_csv
+
+    path = tmp_path / "defects.csv"
+    write_csv(_rows_with_score_as_a_feature(), str(path))
+    with open(str(path), encoding="utf-8-sig", newline="") as f:
+        header = next(_csv.reader(f))
+    assert len(header) == len(set(header)), "欄名重複了：%s" % header
+    assert header.count("score") == 1
+
+
+def test_feature_keys_itself_did_not_change(tmp_path):
+    """⚠ **扣掉是明細表的事，不是 `feature_keys` 的事。**
+
+    Features 面板與特徵統計問的是「這批跑出了哪些數字」——`score` 是其中之一，
+    而那張面板的基本欄是另外一條路（`feature_tree` 自己拿 `BASE_COLUMNS`）。
+    把扣除做進 `feature_keys` 會讓畫面上少一列。
+    """
+    from d4t.core.export.report import detail_feature_keys, feature_keys
+
+    rows = _rows_with_score_as_a_feature()
+    assert "score" in feature_keys(rows)
+    assert "score" not in detail_feature_keys(rows)
+
+
+def test_the_html_report_header_is_unique_too():
+    """HTML 報表自己寫 `defect / ok / score / bin` 再接特徵欄 —— 同一個坑。"""
+    import re
+
+    from d4t.core.export.html import build_report
+    from d4t.core.export.report import detail_feature_keys
+
+    rows = _rows_with_score_as_a_feature()
+    text = build_report(rows, "t", detail_feature_keys(rows))
+    head = re.search(r"<thead>.*?</thead>", text, re.S).group(0)
+    names = re.findall(r"<th>(.*?)</th>", head)
+    assert len(names) == len(set(names)), "HTML 表頭重複：%s" % names
+

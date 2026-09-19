@@ -171,7 +171,8 @@ def test_a_line_out_of_a_lot_card_is_an_error():
     assert "batch-card-has-downstream" in _codes(issues)
     bad = [i for i in issues if i.code == "batch-card-has-downstream"][0]
     assert bad.node_id == "csv" and bad.level == "error"
-    assert "glv" in bad.detail
+    # 講的是卡片名不是 node id（F118）—— `glv` 不是使用者取的名字。
+    assert "“GLV”" in bad.detail and "'glv'" not in bad.detail
 
 
 def test_a_normal_recipe_does_not_trip_it():

@@ -444,10 +444,14 @@ def test_bin_colour_bar_and_caption_carry_the_bin_number(qapp):
     assert "bin 0" in p.caption_of("D000")
     assert p.caption_at(0) == p.caption_of("D000")
 
-    # 顏色一律取自 theme token
+    # 顏色：bin 走**共用調色盤**（F117 I1 起 —— 以前這裡是寫死的
+    # `TOKENS["success"]`，而那正是「同一個 bin 在長條是藍、在縮圖是綠」的
+    # 病根）；失敗與未判定仍然是主題的 token。
+    from d4t.ui import tree_scene
+
     T = theme_mod.TOKENS
-    assert p.bin_color("D001") == T["success"]     # bin 1 = 過門檻（綠）
-    assert p.bin_color("D000") == T["seg_disabled"]  # bin 0 = 低調灰
+    assert p.bin_color("D001") == tree_scene.leaf_hex(1)
+    assert p.bin_color("D000") == tree_scene.leaf_hex(0)
     assert p.bin_color("D003") == T["danger"]      # 跑失敗 = 紅
     assert "FAILED" in p.caption_of("D003")
 
@@ -511,3 +515,42 @@ def test_every_control_has_an_english_tooltip(qapp):
     # 空狀態與載入中佔位也是白話英文
     p.set_items([])
     assert p.empty_text() and not _has_cjk(p.empty_text())
+
+
+# --------------------------------------------------------------------------- #
+# bin 顏色：一個 bin 一個顏色，而那個顏色在哪裡都一樣（F117 I1）
+# --------------------------------------------------------------------------- #
+def test_tile_colour_is_the_shared_leaf_palette(qapp):
+    """縮圖色條 ＝ 判定樹 ＝ Results 長條 ＝ 報表，**同一支調色盤**。
+
+    症狀（F117 走查）：同一顆 defect 在 Results 的長條上是藍色、在縮圖上是
+    綠色 —— 而畫面上沒有任何東西講得出那是同一類。多類別的 recipe 更明顯：
+    bin 1/2/3 在樹上是三個顏色，在縮圖上是同一個綠。
+
+    ⚠ 這一條**不釘任何一個色碼**：釘的話換主題就紅，然後會被關掉。它問的是
+    「兩邊是不是同一個答案」。
+    """
+    from d4t.ui import tree_scene
+    from d4t.ui.gallery import bin_hex
+
+    for b in (0, 1, 2, 3, 4, 5):
+        tile = bin_hex({"ok": True, "bin": b})
+        tree = tree_scene.leaf_hex(b)
+        assert tile == tree, "bin %d：縮圖 %s、樹 %s" % (b, tile, tree)
+
+
+def test_tile_colour_still_says_failed_and_unjudged(qapp):
+    """走共用調色盤之後，**另外兩種狀態不准被吃掉**。
+
+    `leaf_color` 只認得 bin；「這顆跑失敗了」與「還沒判」不是 bin，而它們是
+    使用者在縮圖牆上第一眼要分出來的兩種東西。
+    """
+    from d4t.ui import tree_scene
+    from d4t.ui.gallery import bin_hex
+
+    failed = bin_hex({"ok": False, "bin": 1})
+    unjudged = bin_hex({"ok": True, "bin": None})
+    assert failed != tree_scene.leaf_hex(1), "失敗的不能跟 bin 1 同色"
+    assert unjudged != tree_scene.leaf_hex(0), "未判定的不能跟 bin 0 同色"
+    assert failed != unjudged
+

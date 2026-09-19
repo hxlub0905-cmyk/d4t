@@ -28,6 +28,130 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F118：使用者面的字 —— 訊息不准講開發者的話（2026-09-19）
+
+F117 走查的 **J1／I11／J5／J6 是同一個病根**：內部識別碼漏到使用者面。
+真的跑出來的那一句（把分數表達式寫成 `glv_max + nosuch_feature`）：
+
+```
+route 'ebi_patch': the variables ['nosuch_feature'] are not among the features
+this route produces (['cd_axis_deg', 'cd_bright', … 還有 20 幾個 …])
+```
+
+現在是 `“nosuch_feature” — Check the spelling, or add the card that
+measures it - the score may not be computable at run time.`
+
+設計與五個步驟在
+[`docs/history/plans/F118-user-facing-wording.md`](docs/history/plans/F118-user-facing-wording.md)
+（做完了，所以搬進 history）。**四條都關掉了。**
+
+| 步 | 做了什麼 |
+|---|---|
+| 1 | `d4t/ui/wording.py`（Qt-free）：`card` / `card_of_step` / `field` / `name_list` / `trace_error_text` / `step_error_text`，接四個呼叫端 |
+| 2 | `Issue` 加**選配**欄位（預設空）＋ `issue_line()`：有結構就用、沒有就退回 `detail`。接上 Problems 列、畫布警示點、判定徽章、兩句「不能跑」 |
+| 3 | 最常出現的六條 lint 交結構；core 多 `card_name()` 與 `closest()` |
+| 4 | 問題清單兩行（結論／細節）、換行不橫捲、常駐一句「點一列會跳到那張卡」 |
+| 5 | 掃完剩下的 41 個產地：**27 個填了、14 個量出來不需要填** ＋ 一條擋回頭的測試 |
+
+### 這一輪學到的三件事
+
+**一、`Issue` 有兩個，不是一個。** 設計文件寫「63 個產地」，實際是 **48**
+—— `klarf_core.Issue` 是另一個 class（欄位不同、不經過 Problems 列），它那
+15 個是 KLARF 健檢的結果，不在這個題目裡。**數字要自己數一次**。
+
+**二、畫面只該拿它才答得出來的那幾件。** 第一版做了一個 `nodes` 欄位讓畫面
+把 node id 翻成卡片名，結果是 `“A” · “B”` 這種**沒有動詞**的句子：那兩張卡
+之間是什麼關係每一條 lint 都不一樣，通用的組句器造不出那個動詞。收回 core
+（`Step.label` 本來就住在那裡，而 CLI 的讀者一樣讀不懂 `'dn'`）。畫面留著的
+只有兩件：**這份 recipe 有幾條 route**（單 route 就不要講）、**一串名字列到
+第幾個就夠**（CLI 要全部）—— 跟 `numbers.py` 那條界線一模一樣。
+
+**三、`detail` 不能直接接在結構後面。** 它正是把同樣這些東西攤平成一句話的
+版本，接上去那一行會**同時**有「“nosuch_feature”」跟「the variables
+nosuch_feature are not among…」。所以多一個 `advice`（那句「所以你該怎麼
+辦」），**兩邊共用同一個字串**，話只寫一次。
+
+§5 估的「84 條文字斷言」**實際只動到 8 條**，而且四條都變成更好的斷言：
+從句子裡剖字（`i.title.split("'")[1]`）改成讀 `i.names[0]`、從斷言 node id
+在句子裡改成斷言卡片名 ＋ `node_id` 指著哪一張。剩下的落在第 1 類 ——
+`detail` 照舊是一句完整的話，只是裡面不再有 node id 與 Python 的 repr。
+
+**四、48 條不是都要填 —— 而「不填」要有測試說出來。** 第 5 步掃完：
+**34 個交結構、14 個量出來本來就乾淨**（判定段的語法錯、卡片自己的「還沒設定
+完」、分數表達式 parse 不過）。對它們填欄位買不到任何東西，`issue_line()` 退回
+`detail` 就是對的答案。所以這一輪**沒有把 48 填滿，而那是刻意的**。
+
+### 真正買到的是一條不准回頭的關
+
+`test_no_lint_writes_an_internal_id_into_its_sentence` 掃 `recipe.py` 每一個
+`Issue(...)`，把 node id 插進句子就紅。**白名單是空的**：`card_name()` 一行就
+答得出卡片叫什麼，所以那個動作沒有正當理由。唯一非印 node id 不可的那一條
+（`unknown-node`：那張卡根本不在 `recipe.nodes` 裡）寫成 `"…'%s'" % (k, nid)`
+並留一句為什麼 —— **多打幾個字正是重點**，它讓「我是故意的」在 review 看得見。
+配一條反向的（`test_the_lints_that_carry_no_structure_are_the_plain_ones`）：
+哪天有人機械地把欄位填滿，那一條會紅。
+
+順手修掉的三個真 bug：`decide.let[3]`（程式裡的路徑，面板上那幾行是從 1 數
+的）、「“GLV” first, then “GLV”」（兩張同型別的卡等於沒講）、
+`%s take input from it`（一張卡要是 `takes`）。
+
+守門：`tests/test_ui_wording.py`（`issue_line()` 對**每一個** `code` 都給得出
+一句話，名冊是 ast 從 `recipe.py` 數出來的；唯一一個轉手 `Step.kind_issues`
+的地方寫死成 1，第二個出現時會紅）。天花板：`recipe.py` 4,101 → 4,342，
+`studio.py` **沒變**（4,347，`HARD_CAPS` 只准往下 —— 三處都一行換一行）。
+
+---
+
+## F117 第一批：UI 走查的「一改多條」那幾群（2026-09-19）
+
+走查文件 [`docs/plans/F117-ui-review.md`](docs/plans/F117-ui-review.md) 有 57 條
+live item，但 **P1/P2/P3 不是它真正的結構** —— 很多條是同一個病灶的不同症狀。
+這一批挑的是**根因群**：四個改動關掉 8 條，而且用的全是 repo 裡已經有的機制。
+
+| 改動 | 關掉的條目 |
+|---|---|
+| `canvas.ensure_card_visible()`／`select_card()` | A3、J2 |
+| `gallery.bin_hex()` 走 `decide_tree.leaf_color` | I1 |
+| 數字規則搬進 `d4t/core/numbers.py`，畫面與 HTML 報表共用 | F6、I5 |
+| 歡迎頁不再列資料種類、數量改成數出來的 | G1 |
+| `detail_feature_keys()` —— 明細表扣掉 `BASE_COLUMNS` | F1 |
+
+中文化（H5）這一批**不碰**（使用者決定：要先有 2–3 位目標使用者試用）。
+
+### 走查寫的跟查出來的不一樣：三條
+
+**D2 不是 I1 的同一個病根**（走查推測「改用 `leaf_color` 後應一併解決」）。
+`VerdictChip` 是**二元 pass/fail**，而那是 U13 刻意的設計：`is_real_style` 會把
+紅綠對調，**對調時 chip 自己的字跟著翻面**（`real`／`nuisance`），還有第三個通道
+（框線樣式）給色覺缺陷者。改成 `leaf_color` 會把那整套拆掉。真正的問題是語意 ——
+均勻度那份 recipe 裡 `bin 0` 是好消息。**待使用者決定**：「哪個 bin 是好消息」
+該由誰說。
+
+**D3 撤回。** `score 0.27895` **本來就走** `numbers.py` —— 那 5 位是 F52 算過的：
+`%.4g` 會把 `99.995` 印成 `100`。縮短它等於把 F52 修掉的 bug 放回來。
+教訓：**「看起來太長」不等於「沒走共用的那一支」**。
+
+**F6 比走查記的更深。** `core/export/html.py` 的 `number()` 用的正是 F52 否決掉的
+`%.4g` —— 除了 `1.638e+04`，它還讓 `99.995` 在報表上變成 `100`。**沒有人回報過**，
+因為它躲在報表裡。F52 把畫面的六份收成一份，而**報表是第七份**。
+
+同一種形狀還有兩個：G1 的歡迎頁是 `InputSource` 那張表想消滅的**第三份拷貝**
+（而它從來沒被改成從表上長，所以 F114 拿掉 stack 之後它還在介紹一種打不開的
+東西，連「three kinds」「four kinds」兩個數字也是錯的）；F1 的欄名重複**三個
+輸出檔都有**，不只走查記的 CSV。
+
+### 兩次被天花板擋下來，兩次都擋對了
+
+`CLAUDE.md` 那一格擋下 +16 行、`studio.py` 那一格擋下 **+1** 行 —— 兩次都是
+**我把故事寫進了規則的位置**。後者更有意思：`studio.py` 在 `HARD_CAPS` 裡，
+**簽名這條路不存在**，只能「先從它手上搬走等量的東西」。照做之後得到的是
+`canvas.select_card()`（選一張卡在畫布上是**一件事**：畫成選中、清掉樹的選取、
+捲進視野），`studio.py` 三行變一行 —— **比動手之前還低**。
+
+天花板在替人分辨「規則」與「故事」，而那比它擋住的行數值錢。
+
+---
+
 ## F116：拆 `studio.py` —— 六步走完（2026-09-19）
 
 `CLAUDE.md` §4 早就寫著「`studio.py` 留給接線，不留給內容」，而 `HARD_CAPS` 讓那

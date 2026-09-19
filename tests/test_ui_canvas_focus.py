@@ -302,3 +302,73 @@ def test_wiring_a_line_while_a_card_is_selected_prints_no_traceback(window,
     window._on_edge_added(src, b, "test")
 
     assert "already deleted" not in capfd.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# 4. 選到的東西要看得見（F117 A3／J2）
+# --------------------------------------------------------------------------- #
+def test_selecting_a_card_scrolls_it_into_view(window, qapp):
+    """選一張畫面外的卡 → 畫布捲到它。
+
+    症狀（F117 走查）：Tune 模式的畫布只有 ~300 px 高，選一張排在下面的卡
+    只露出上緣 —— 而右邊的設定區**已經**換成它了，於是「正在編的那張卡」
+    跟「看得到的那張卡」不是同一張。`_on_problem_activated` 的說明從 U2 起
+    就寫著「選中那張卡並捲到它」，缺的一直是那一行。
+    """
+    ids, _ = _chain(window)
+    view = window.pipeline
+    # 把畫布縮到放不下整條鏈，再捲到最上面 —— 最後一張因此在視野外。
+    view.resize(420, 220)
+    qapp.processEvents()
+    last = view._items[ids[-1]]
+    view.verticalScrollBar().setValue(view.verticalScrollBar().minimum())
+    view.horizontalScrollBar().setValue(view.horizontalScrollBar().minimum())
+    qapp.processEvents()
+
+    def visible(item):
+        port = view.viewport().rect()
+        return port.intersects(
+            view.mapFromScene(item.sceneBoundingRect()).boundingRect())
+
+    if visible(last):
+        pytest.skip("這個尺寸下最後一張本來就看得到，問不出這件事")
+    assert window.select_node(ids[-1]) is True
+    qapp.processEvents()
+    assert visible(last), "選到的卡還是在視野外 —— 捲動那一行不見了"
+
+
+def test_scrolling_into_view_does_not_highlight_it(window, qapp):
+    """**只捲，不亮**：選取自己已經把卡畫成選中的樣子了。
+
+    `reveal_cards()`（F68 的「指給我看」）會 hover 高亮，而那一套的清潔工是
+    「使用者一動就熄」。選取走的是另一條路 —— 兩種強調疊在一起，畫面上會有
+    一張看起來被指著、又被選著的卡。
+    """
+    ids, _ = _chain(window)
+    view = window.pipeline
+    window.select_node(ids[-1])
+    qapp.processEvents()
+    ghosts = list(getattr(view, "_ghost_cards", []) or [])
+    assert ghosts == [], "選取不該留下 reveal_cards 的高亮"
+
+
+def test_it_is_not_wired_into_set_selected(window, qapp):
+    """⚠ 捲動是**使用者動作的回應**，不是同步的副作用。
+
+    `set_selected` 在 `set_nodes` 的重建路徑上也會被叫到 —— 接上去的話，
+    使用者每拖一次參數、畫布就把他捲回去。這一條釘住那個界線。
+    """
+    ids, _ = _chain(window)
+    view = window.pipeline
+    view.resize(420, 220)
+    qapp.processEvents()
+    window.select_node(ids[-1])
+    qapp.processEvents()
+    view.horizontalScrollBar().setValue(view.horizontalScrollBar().maximum())
+    before = (view.horizontalScrollBar().value(),
+              view.verticalScrollBar().value())
+    view.set_selected(ids[-1])          # 同步路徑：不准動捲軸
+    qapp.processEvents()
+    assert (view.horizontalScrollBar().value(),
+            view.verticalScrollBar().value()) == before
+

@@ -32,10 +32,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import strings
+from . import strings, wording
 from .theme import TOKENS
 
-__all__ = ["ProblemsBar", "counts_of", "summary_of", "issue_rows"]
+__all__ = ["ProblemsBar", "counts_of", "summary_of", "issue_rows",
+           "row_text"]
 
 #: 由重到輕。清單照這個順序排 —— **error 一定在最上面**：使用者要的是
 #: 「先修哪一個」，而那個答案不該取決於 lint 內部的產生順序。
@@ -84,11 +85,17 @@ def summary_of(issues: Sequence[Any]) -> str:
                    else " — you can still run")
 
 
-def issue_rows(issues: Sequence[Any]) -> List[Dict[str, Any]]:
+def issue_rows(issues: Sequence[Any],
+               model: Any = None) -> List[Dict[str, Any]]:
     """lint 的發現 → 清單要顯示的列（**純資料**，排序規則住在這裡）。
 
     同一級的保持 lint 給的順序 —— 那個順序是照 pipeline 由上游到下游走出來
     的，而「先修上游那個」通常是對的（下游那幾條常常是它的回音）。
+
+    ``model`` 給了就用它把 node id 與參數名換成畫面上的字（`wording`，
+    F118）—— **沒給也有一句話**（退回 `detail`），因為這一支的其他使用者
+    （測試、CLI 的匯出）手上沒有 model。``detail`` 原樣留著：它是 lint 自己
+    的話，而 ``text`` 是畫面那一句，兩個問的不是同一件事。
     """
     rank = {level: i for i, level in enumerate(LEVEL_ORDER)}
     rows = []
@@ -99,6 +106,7 @@ def issue_rows(issues: Sequence[Any]) -> List[Dict[str, Any]]:
             "node_id": str(getattr(issue, "node_id", "") or ""),
             "title": str(getattr(issue, "title", "") or ""),
             "detail": str(getattr(issue, "detail", "") or ""),
+            "text": wording.issue_line(issue, model),
             "code": str(getattr(issue, "code", "") or ""),
             "_sort": (rank.get(level, len(rank)), i),
         })
@@ -106,6 +114,32 @@ def issue_rows(issues: Sequence[Any]) -> List[Dict[str, Any]]:
     for r in rows:
         r.pop("_sort")
     return rows
+
+
+def row_text(row: Dict[str, Any]) -> str:
+    """一列在清單上長什麼樣：**結論一行，細節一行**（J5／J6）。
+
+    ``× “Denoise” has no input yet``
+    ``   “Denoise” · “Image streams” — Drag a line from the card that…``
+
+    為什麼是兩行而不是一行
+    ----------------------
+    走查看到的那一列**要捲到右邊才讀得完**，而一條讀不完的錯誤訊息跟沒有是
+    一樣的（J5）。攤成一行也不行：`title` 是結論（「這張卡還沒接上東西」）、
+    `text` 是怎麼修，兩件事擠在同一行的時候使用者要先讀完才知道嚴不嚴重 ——
+    而他要的第一個答案是「先修哪一個」（J6：**先講結論**）。
+
+    兩個都有才兩行：`title` 與 `text` 一樣（沒搬的那幾條有時是這樣）就只有
+    一行 —— 同一句話印兩次比較糟。
+    """
+    mark = LEVEL_MARK.get(str(row.get("level", "")), "·")
+    title = str(row.get("title") or "").strip()
+    text = str(row.get("text") or "").strip()
+    if not title or title == text:
+        return "%s  %s" % (mark, text or title)
+    if not text:
+        return "%s  %s" % (mark, title)
+    return "%s  %s\n     %s" % (mark, title, text)
 
 
 class ProblemsBar(QWidget):
@@ -121,7 +155,10 @@ class ProblemsBar(QWidget):
 
     #: 清單最多長這麼高（超過就自己捲）。一份 30 條的清單把設定區整個推出
     #: 畫面的話，使用者就得先關掉它才能去修 —— 而他要修的就是清單上那一條。
-    LIST_MAX_HEIGHT = 132
+    #:
+    #: 2026-09-19（F118 第 4 步）：132 → 168。一列從一行變兩行（結論一行、
+    #: 細節一行），132 只剩得下一列半 —— 而「先修哪一個」要看得到第二列。
+    LIST_MAX_HEIGHT = 168
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -156,10 +193,22 @@ class ProblemsBar(QWidget):
         lay.addWidget(head)
         self.head = head
 
+        # 「點一列會跳到那張卡」以前只寫在**按鈕的 tooltip** 上 —— 一個要把
+        # 滑鼠停在別的地方才看得到的說明，等於沒有說明（J5 的「帶我去」）。
+        self.hint = QLabel("", self)
+        self.hint.setObjectName("paramHint")
+        self.hint.setContentsMargins(10, 0, 8, 4)
+        self.hint.hide()
+        lay.addWidget(self.hint)
+
         self.list = QListWidget(self)
         self.list.setObjectName("problemsList")
         self.list.setMaximumHeight(self.LIST_MAX_HEIGHT)
         self.list.setAlternatingRowColors(True)
+        # ⚠ **換行，不要水平捲軸**（J5）：走查看到的那一列要捲到右邊才讀得完，
+        # 而一條讀不完的錯誤訊息跟沒有是一樣的。
+        self.list.setWordWrap(True)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list.itemClicked.connect(self._on_item)
         self.list.hide()
         lay.addWidget(self.list)
@@ -167,9 +216,13 @@ class ProblemsBar(QWidget):
         self.set_issues(())
 
     # ---- 對外 -------------------------------------------------------------
-    def set_issues(self, issues: Sequence[Any]) -> None:
-        """換一份 lint 結果（宿主每次 model 變動時餵）。"""
-        self._rows = issue_rows(issues)
+    def set_issues(self, issues: Sequence[Any], model: Any = None) -> None:
+        """換一份 lint 結果（宿主每次 model 變動時餵）。
+
+        ``model`` 是拿來把內部識別碼換成畫面上的字的（F118）—— 宿主一定給得
+        出來，所以它預設 None 只是為了讓這個 widget 自己測得動。
+        """
+        self._rows = issue_rows(issues, model)
         c = counts_of(issues)
         self.label.setText(summary_of(issues))
         worst = next((lv for lv in LEVEL_ORDER if c[lv]), "")
@@ -186,19 +239,24 @@ class ProblemsBar(QWidget):
 
         self.list.clear()
         for row in self._rows:
-            text = "%s  %s" % (LEVEL_MARK.get(row["level"], "·"),
-                               row["detail"] or row["title"])
-            item = QListWidgetItem(text, self.list)
+            item = QListWidgetItem(row_text(row), self.list)
             item.setData(Qt.UserRole, row["node_id"])
-            item.setToolTip("%s\n%s" % (row["title"], row["detail"])
-                            if row["title"] else row["detail"])
+            item.setToolTip("%s\n%s" % (row["title"], row["text"])
+                            if row["title"] else row["text"])
             if row["level"] == "error":
                 # 顏色是**冗餘**的第二個訊號 —— 前面那個 ``✕`` 已經把意思講完
                 # 了（U13：紅綠對色覺缺陷者不可分辨，而這一列是「還能不能跑」
                 # 唯一的答案）。
                 item.setForeground(QColor(TOKENS["danger_text"]))
+        # 指得到卡片的那幾條才講「點一下會跳過去」—— 一條指不到任何一張卡的
+        # lint（「這份 recipe 沒有這個 route」那種）點下去不會跳，而一句做不到
+        # 的提示比沒有提示糟。
+        self.hint.setText(strings.tr("Click a line to go to that card.")
+                          if any(r["node_id"] for r in self._rows) else "")
         if not self._rows:
             self.set_open(False)
+        else:
+            self.hint.setVisible(self._open and bool(self.hint.text()))
 
     def counts(self) -> Dict[str, int]:
         return {level: sum(1 for r in self._rows if r["level"] == level)
@@ -217,6 +275,7 @@ class ProblemsBar(QWidget):
         show = bool(on) and bool(self._rows)
         self._open = show
         self.list.setVisible(show)
+        self.hint.setVisible(show and bool(self.hint.text()))
         self.btn_toggle.setText(strings.tr("Hide the list") if show
                                 else strings.tr("Show the list"))
 

@@ -570,3 +570,67 @@ def test_generated_demo_lot_is_a_kind_this_build_supports(demo_lot):
     paths = studio_mod.generate_demo_lot(str(demo_lot), n=6)
     ds = load_dataset(paths["klarf"])
     assert is_supported_kind(ds.kind), ds.kind
+
+
+# --------------------------------------------------------------------------- #
+# F117 G1：歡迎頁不准介紹一種打不開的東西
+# --------------------------------------------------------------------------- #
+def test_the_welcome_page_does_not_name_the_kinds_it_reads(qapp):
+    """**那張清單只有一個家**（`scope.INPUT_SOURCES`）。
+
+    `InputSource` 自己的說明就寫著它為什麼存在：「同一組入口被抄在三個地方
+    …… 三份會漂 —— 而且已經漂了」。**導覽這一段就是那第三份**，而它一直沒有
+    被改成從表上長出來 —— 於是 F114 把 `tiff_stack` 拿掉之後，第一次見面的
+    那一頁還在介紹「a multi-page TIFF」。
+
+    這一條問的不是「字對不對」，是**這裡還有沒有在列清單**：列了就會再漂。
+    """
+    from d4t.ui import scope
+    from d4t.ui import welcome as w
+
+    text = w._intro_text()
+    for src in scope.INPUT_SOURCES:
+        head = str(src.what).split(" - ")[0].split(":")[0].strip().rstrip(".")
+        assert head not in text, (
+            "導覽最上面那段又在列資料種類了（%r）—— 那張清單的家是 "
+            "scope.INPUT_SOURCES，這裡列第二份就會漂" % head)
+
+
+def test_the_counts_on_the_welcome_page_are_counted_not_typed(qapp):
+    """畫面上那幾個「有幾種」的數字要跟著表走。
+
+    以前是寫死的：tooltip 寫「the other three kinds」、頁尾寫「the four kinds
+    of data it reads」—— 而 `INPUT_SOURCES` 現在是三條。
+    """
+    from d4t.ui import scope
+    from d4t.ui import welcome as w
+
+    assert w.ways_in() == len(scope.INPUT_SOURCES) - 1 + len(scope.ATTACHMENTS)
+
+    real = scope.INPUT_SOURCES
+    try:                                    # 少一種 → 那幾句話要跟著少
+        scope.INPUT_SOURCES = real[:-1]
+        assert w.ways_in() == len(real) - 2 + len(scope.ATTACHMENTS)
+        assert str(len(real) - 1) in w._footer_hint() or scope.SHOW_SAMPLE_DATA
+    finally:
+        scope.INPUT_SOURCES = real
+
+
+def test_no_retired_input_kind_is_still_advertised(qapp):
+    """具體的回歸：`tiff_stack` 2026-09-18 從產品面拿掉了（F114）。
+
+    ⚠ 這一條是**針對那一次**的釘子，不是一張會愈長愈長的禁用字表 ——
+    上面兩條才是通則（不列清單、數字用數的）。
+    """
+    from d4t.ui import welcome as w
+
+    dlg = w.WelcomeDialog()
+    try:
+        texts = [w._intro_text(), w._footer_hint(), dlg.btn_open.toolTip()]
+        for t in texts:
+            assert "multi-page TIFF" not in t, t
+            assert "stack" not in t.lower(), t
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+

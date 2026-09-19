@@ -63,10 +63,15 @@ def test_two_cards_defining_the_same_region_is_an_error():
     assert bad, "兩張卡都定義 'epi' —— 後面那張會蓋掉前面那張的框"
     assert all(i.level == "error" for i in bad)
     # 訊息要指得出**兩張卡**（只講一張的話使用者不知道去哪裡改名）。
+    # ⚠ **指的方式是卡片名＋`node_id`，不是把 node id 寫進句子**（F118）：
+    # `node_id` 指著後面那張（點清單就選到它），句子裡講的是前面那張叫什麼。
+    # 兩張同名的卡（兩張 ROI 正是最常見的撞法）句子裡分不出來 —— 而
+    # ``'a'`` / ``'b'`` 那種字使用者一樣找不到，還看不懂。
     one = bad[0]
-    assert "a" in one.detail and "b" in one.detail
     assert one.node_id == "b", "報在後面那張卡上 —— 蓋掉別人的是它"
-    assert "rename" in one.detail.lower() or "different region name" in one.detail
+    assert "“ROI”" in one.detail, one.detail       # 卡片庫上那張卡的名字
+    assert one.names == ("epi",), one.names
+    assert "different region name" in one.detail
 
 
 def test_the_center_and_others_names_collide_too():
@@ -80,7 +85,7 @@ def test_the_center_and_others_names_collide_too():
          "a": _profile("epi"),
          "b": _profile("epi")},
         {"ebi_patch": ["load", "a", "b"]})
-    names = {i.title.split("'")[1] for i in _issues(rec)}
+    names = {i.names[0] for i in _issues(rec)}
     assert names == {"epi", "epi_center", "epi_others"}
 
 
@@ -91,7 +96,7 @@ def test_a_name_that_collides_with_someone_elses_family_member():
          "a": _profile("epi"),
          "b": _profile("epi_center")},
         {"ebi_patch": ["load", "a", "b"]})
-    names = {i.title.split("'")[1] for i in _issues(rec)}
+    names = {i.names[0] for i in _issues(rec)}
     assert names == {"epi_center"}
 
 
@@ -105,7 +110,7 @@ def test_a_gds_card_and_a_profile_card_collide_across_methods():
                           "label_source": "layout_label"}),
          "a": _profile("mg")},
         {"ebi_patch": ["load", "sidecar", "g", "a"]})
-    names = {i.title.split("'")[1] for i in _issues(rec)}
+    names = {i.names[0] for i in _issues(rec)}
     assert names == {"mg", "mg_center", "mg_others"}
 
 

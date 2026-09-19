@@ -63,16 +63,20 @@ def test_it_says_so_when_the_decision_is_the_one_reading_the_name():
     got = _of(_two_measure(expr="glv_max"), "feature-collision")
     assert len(got) == 1
     d = got[0].detail
-    assert "the decision reads 'glv_max'" in d
-    assert "'a' first, then 'b'" in d          # 誰先誰後要講出來
+    # ⚠ **名字與引號有分工**（F118）：`“glv_max”` 是「這個數字」，
+    # `'a_glv_max'` 是**使用者要打進去的字** —— 救回來的那一份真的叫
+    # `<node id>_<特徵>`，所以那一個不准換成卡片名（換了就指不到）。
+    assert "The decision reads “glv_max”" in d
+    assert "another “GLV” card first, then this one" in d   # 誰先誰後
     assert "a_glv_max" in d                    # 想要前面那張的話打什麼
+    assert "'a'" not in d and "'b'" not in d   # node id 不上畫面
 
 
 def test_it_says_nothing_reads_it_when_nothing_does():
     got = _of(_two_measure(expr="0"), "feature-collision")
     assert len(got) == 1
     d = got[0].detail
-    assert "Nothing reads 'glv_max'" in d
+    assert "Nothing reads it at the moment" in d
     # 舊訊息在這個情況下也宣稱「在分數表達式裡指的是這張卡」——**那是假的**
     assert "in the score expression means" not in d
 
@@ -84,7 +88,7 @@ def test_a_decision_tree_counts_as_reading_it():
     r = _two_measure(expr="", decide=DecideSpec(let=[], tree=tree))
     got = _of(r, "feature-collision")
     assert len(got) == 1
-    assert "the decision reads 'glv_max'" in got[0].detail
+    assert "The decision reads “glv_max”" in got[0].detail
 
 
 def test_a_working_number_counts_as_reading_it():
@@ -94,7 +98,7 @@ def test_a_working_number_counts_as_reading_it():
     r = _two_measure(expr="",
                      decide=DecideSpec(let=[Let(name="m", expr="glv_max * 2")],
                                        tree=tree))
-    assert "the decision reads 'glv_max'" in _of(r, "feature-collision")[0].detail
+    assert "The decision reads “glv_max”" in         _of(r, "feature-collision")[0].detail
 
 
 # --------------------------------------------------------------------------- #

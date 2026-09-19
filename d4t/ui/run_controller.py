@@ -56,6 +56,7 @@ from PySide6.QtWidgets import QMessageBox
 from d4t.core.log import swallowed
 from d4t.core.pipeline import sampling
 
+from . import wording
 from .status_action import open_folder
 from .workers import OutputWorker, TrialWorker
 
@@ -119,8 +120,10 @@ class RunController(QObject):
             more = ("  (and %d more problem%s)"
                     % (len(problems) - 1, "" if len(problems) == 2 else "s")
                     if len(problems) > 1 else "")
-            self.w._status("Cannot run — %s: %s%s"
-                         % (first.title, first.detail, more), "error")
+            self.w._status(
+                "Cannot run — %s: %s%s"
+                % (first.title, wording.issue_line(first, self.w.model), more),
+                "error")
             return False
         self.w._pending_warnings = [i for i in issues if i.level == "warning"]
 
@@ -267,8 +270,9 @@ class RunController(QObject):
         problems = [i for i in issues if i.level == "error"]
         if problems:
             first = problems[0]
-            self.w._status("Cannot re-run — %s: %s" % (first.title, first.detail),
-                         "error")
+            self.w._status(
+                "Cannot re-run — %s: %s"
+                % (first.title, wording.issue_line(first, self.w.model)), "error")
             return False
         self.w._pending_warnings = [i for i in issues if i.level == "warning"]
         recipe = self.w.model.to_recipe()

@@ -105,6 +105,63 @@ def test_the_list_is_hidden_until_asked_and_empty_disables_the_button(qapp):
     bar.deleteLater()
 
 
+# --------------------------------------------------------------------------- #
+# 一列長什麼樣（F118 第 4 步：J5 讀不完、J6 結論在後面）
+# --------------------------------------------------------------------------- #
+def test_a_row_puts_the_conclusion_first_and_the_details_underneath():
+    """J6：**先講結論。** 使用者的第一個問題是「先修哪一個」。"""
+    row = {"level": "error", "title": "“Denoise” has no input yet",
+           "text": "“Denoise” · “Image streams” — Drag a line…",
+           "node_id": "dn"}
+    lines = pb.row_text(row).splitlines()
+    assert len(lines) == 2
+    assert lines[0] == "×  “Denoise” has no input yet"      # 結論，含級別記號
+    assert "Drag a line" in lines[1]
+    assert lines[1].startswith("  "), "第二行要縮排，不然兩行看起來是兩條"
+
+
+def test_a_row_does_not_say_the_same_thing_twice():
+    """`title` 跟 `text` 一樣的時候只有一行 —— 同一句話印兩次比較糟。
+
+    沒搬去交結構的那幾條會走到這裡（`issue_line` 退回 `detail`，而有些
+    lint 的 `detail` 本來就等於 `title`）。
+    """
+    same = {"level": "warning", "title": "one sentence", "text": "one sentence"}
+    assert pb.row_text(same) == "⚠  one sentence"
+    assert pb.row_text({"level": "info", "title": "", "text": "only text"})         == "i  only text"
+    assert pb.row_text({"level": "info", "title": "only title", "text": ""})         == "i  only title"
+
+
+def test_the_list_says_out_loud_that_a_row_takes_you_there(qapp):
+    """J5 的「帶我去」：**那句話以前只在按鈕的 tooltip 上。**
+
+    一個要把滑鼠停在別的地方才看得到的說明，等於沒有說明。而指不到任何一張
+    卡的時候不要講 —— 一句做不到的提示比沒有提示糟。
+    """
+    bar = pb.ProblemsBar()
+    bar.set_issues([_issue("error", node_id="a")])
+    bar.set_open(True)
+    # ⚠ **問 `isHidden()` 不是 `isVisible()`**：一個還沒有被 show 的視窗，
+    # 裡面每一個 widget 的 `isVisible` 都是 False（`_open` 那個旗標存在的
+    # 理由一模一樣）。`isHidden` 問的是「有沒有人叫它躲起來」。
+    assert bar.hint.text() and bar.hint.isHidden() is False
+
+    bar.set_issues([_issue("error")])            # 指不到卡片的那種
+    assert bar.hint.text() == ""
+    assert bar.hint.isHidden() is True
+    bar.deleteLater()
+
+
+def test_a_long_row_wraps_instead_of_scrolling_sideways(qapp):
+    """走查看到的那一列**要捲到右邊才讀得完** —— 而讀不完等於沒有。"""
+    from PySide6.QtCore import Qt
+
+    bar = pb.ProblemsBar()
+    assert bar.list.wordWrap() is True
+    assert bar.list.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    bar.deleteLater()
+
+
 def test_clicking_a_row_says_which_card(qapp):
     bar = pb.ProblemsBar()
     seen = []
