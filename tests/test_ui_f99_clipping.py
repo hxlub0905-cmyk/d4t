@@ -107,7 +107,11 @@ def test_the_verdict_note_only_speaks_when_the_preview_stopped_early(qapp):
     """膠囊寫著「—」的時候要說為什麼（P1-2）——而且只在那一種情況講話。"""
     from d4t.ui.studio import verdict_note
     said = verdict_note("glv", None, True)
-    assert "glv" in said and "Esc" in said
+    assert "glv" in said
+    # ⚠ **那幾個字要點得下去**（F117 D1）：以前這裡寫的是「press Esc」，
+    # 而 Esc 在這個畫面的意思是「放掉手上的東西」—— 一句正確而想不到的
+    # 提示等於沒有提示。Esc 照樣有效，寫在 tooltip 上。
+    assert "<a href=" in said and "run to the end" in said
     assert verdict_note(None, None, True) == "", "沒選卡：預覽本來就跑完"
     assert verdict_note("glv", 2, True) == "", "真的有判定：膠囊自己在講"
     assert verdict_note("glv", None, False) == "", "跑出錯：狀態列在講"

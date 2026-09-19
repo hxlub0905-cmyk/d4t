@@ -61,7 +61,7 @@
 | B3 | 卡片說明一行截斷，沒有展開方式 | 兩行＋more | ✅ |
 | B4 | `Write charts` 卡：`At most this many defects 0`（0＝無上限？）、第五格勾選框叫 `chart`、`Enabled` 當 label | 0 顯示 `All`；`Your own chart`；具體動詞 | ✅ |
 | C2 | Features 同名多列：`clip_frac` 三列、`peak` 兩列。說明文字有寫「kept under this name because a later card wrote over it」，但要讀完那句才懂 | 名字後面直接帶來源卡（`clip_frac · Normalize(ref)`） | ✅（屬既有設計的呈現問題）|
-| D1 | 「preview stops at "norm" — press Esc to run the decision too」：Esc 是「取消選取」，句子是對的，但很難被想到 | 旁邊放一顆 `Run to the end` | ✅ |
+| D1 ✅ | **做完 —— 而且句子本身也不是對的。** `Esc` 走的是 `pipeline.clear_selection()`，那一支只放掉**畫布**那一份選取，而預覽停在哪裡看的是 `win.selected_node`（`_run_preview` 的 `upto`）—— 按了 Esc 框不見了，預覽照樣停在同一張卡上。修了兩件事：①`studio_layout.clear_selection()` 兩份一起放並重跑預覽；②最後那幾個字做成**連結**（同 `decide_path` 的先例 U11），Esc 照樣有效、寫在 tooltip 上。原本記的：「preview stops at "norm" — press Esc to run the decision too」：Esc 是「取消選取」，句子是對的，但很難被想到| 旁邊放一顆 `Run to the end` | ✅ |
 | D2 ✅ | 均勻度 verdict `measured · bin 0` 是紅色 chip，讀起來像「壞」 | **原因查出來了，而原本的推測不成立**：`VerdictChip` 是**二元 pass/fail**（bin 1 = good、其餘 = bad），那是 U13 刻意的設計 —— `is_real_style` 會把紅綠對調，而且對調時 chip 自己的字跟著翻面（`real`／`nuisance`），還有第三個通道（框線樣式）給色覺缺陷者。改成 `leaf_color` 會把那整套拆掉。**真正的問題是語意**：均勻度那份 recipe 裡 `bin 0` 是「量到了、沒有異常」＝好消息。⚠ **需要使用者決定**：「哪一個 bin 是好消息」該由誰說 —— recipe？還是照 `is_real_style` 那樣由判定段宣告？ | ✅ `feature_text.py:356`（`tone = "good" if is_real_style else "bad"`）|  **已關（[F119](../history/plans/F119-which-bin-is-good-news.md) 五步）**：葉子自己標 `outcome`，膠囊的顏色／字／框線三條都吃它。⚠ **實測是三份出貨 recipe 全反**，不只均勻度那一條
 | ~~D3~~ | ~~`score 0.27895` 小數位多~~ | **撤回** —— 它**已經**走 `numbers.py`，而那 5 位是 F52 算過的：`%.4g` 會把 `99.995` 印成 `100`，於是同一顆在 Results 是 100、點進去是 99.995。縮短它等於把 F52 修掉的 bug 放回來。（移到下面的撤回表）| ✅ `core/numbers.py` 的模組說明 |
 | D4 | Decision / Verdict / bin / class / score 多種叫法 | 一張詞彙表 | ✅ |

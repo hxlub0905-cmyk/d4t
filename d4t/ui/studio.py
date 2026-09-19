@@ -323,7 +323,10 @@ def verdict_note(selected_node: Optional[str], verdict_bin: Any,
     膠囊或狀態列已經在講那件事，這裡再講一次只是把位子佔掉。
     """
     if selected_node and ok and verdict_bin is None:
-        return ("preview stops at “%s” — press Esc to run the decision too"
+        # ⚠ **不再只寫「press Esc」**（F117 D1）：那句話沒有人想得到，而且
+        # 查下去它根本不成立（見 `studio_layout.clear_selection`）。最後那幾
+        # 個字是點得下去的，Esc 修好之後照樣有效、寫在 tooltip 上。
+        return ('preview stops at “%s” — <a href="#end">run to the end</a>'
                 % selected_node)
     return ""
 
@@ -897,8 +900,8 @@ class StudioWindow(QMainWindow):
         self.pipeline.delete_selected()
 
     def _clear_canvas_selection(self) -> None:
-        """Esc：放掉手上的東西。"""
-        self.pipeline.clear_selection()
+        """Esc：放掉手上的東西（內容在 `studio_layout.clear_selection`）。"""
+        studio_layout.clear_selection(self)
 
     # ---- 複製 / 貼上 / 複製一份（F99 P1-8；內容在 `ui/clipboard.py`）--------
     def copy_cards(self) -> int:
@@ -1539,8 +1542,10 @@ class StudioWindow(QMainWindow):
         # ⚠ **收起來的樹上沒有菱形**（F117 A5）：面板那句「去點一顆菱形」
         # 要跟著畫布的狀態換一句話。`set_tree_collapsed` 自己會 refresh。
         # ⚠ `getattr`：這一支在**畫布還沒組出來之前**就會被叫到一次。
+        # ⚠ 那個屬性叫 `pipeline` —— 第一版寫成 `canvas`，而 `getattr` 的
+        # 預設把它吞掉了：那一版永遠回 False，A5 等於沒修而測試也不會紅。
         self.decide_panel.set_tree_collapsed(
-            getattr(getattr(self, "canvas", None), "tree_collapsed",
+            getattr(getattr(self, "pipeline", None), "tree_collapsed",
                     bool)())
         self.pipeline.set_score_summary(self._score_summary_text())
 

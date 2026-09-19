@@ -88,6 +88,27 @@ COLUMN_SIZES = (256, 660, 450)
 DEFAULT_TRIAL_N = 200
 
 
+def clear_selection(win: Any) -> None:
+    """Esc（與那個連結）：放掉手上的東西 —— **而且預覽跟著跑到底**。
+
+    ⚠ **以前它只放掉畫布那一份**（F117 D1）：`win.selected_node` 原封不動，
+    而預覽停在哪裡看的正是它（`_run_preview` 的 `upto`）。所以膠囊旁邊那句
+    「press Esc to run the decision too」**是假的** —— 按了 Esc 畫布上的框
+    不見了，預覽照樣停在同一張卡上，判定也照樣沒有跑。
+
+    走查把 D1 記成「句子是對的，但很難被想到」；查下去**句子也不是對的**。
+
+    ⚠ 這一支住在這裡而不是 `studio.py`：那一支的三格尺只准往下（F116），
+    而這是畫布與視窗之間的接線 —— 這個模組正是接線的家。
+    """
+    win.pipeline.clear_selection()
+    if getattr(win, "selected_node", None) is None:
+        return
+    win.selected_node = None
+    win.param_form.set_step(None, {}, [])
+    win._schedule_preview()
+
+
 def build_toolbar(win: "StudioWindow") -> None:
     """工具列（M7 精簡；F7-22 分組）。
 
@@ -999,6 +1020,20 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     win.verdict_note = QLabel("", win.verdict_live)
     win.verdict_note.setObjectName("paramHint")
     win.verdict_note.setWordWrap(True)
+    # ⚠ **「按 Esc」是對的，但沒有人想得到**（F117 D1）。Esc 在這個畫面的
+    # 意思是「放掉手上的東西」（U18），而「放掉選取 ⇒ 預覽跑到底」是一條要
+    # 先知道前提才推得出來的因果 —— 一句正確而想不到的提示，等於沒有提示。
+    #
+    # **做成連結而不是另加一顆鈕** —— 跟底下 `decide_path` 同一個先例
+    # （U11）：底線本來就是「這個字可以點」的意思，而多一顆鈕要多一個
+    # `StudioWindow` 的屬性（那一格只准往下）。
+    win.verdict_note.setTextFormat(Qt.RichText)
+    win.verdict_note.setOpenExternalLinks(False)
+    win.verdict_note.linkActivated.connect(
+        lambda _href: win._clear_canvas_selection())
+    win.verdict_note.setToolTip(
+        "Let go of the selected card so the preview runs the whole pipeline, "
+        "decision included. Esc does the same thing.")
     vrow2.addWidget(win.verdict_note, 1)
     vcol.addLayout(vrow2)
     # **那一行點得下去**（U11）：走過的路旁邊沒有別的入口，而回溯以前只有
