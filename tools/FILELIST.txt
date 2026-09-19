@@ -126,7 +126,7 @@ ae82608db53dc1f37c582b74c1192261b2051978 d4t/ui/gallery.py
 134f10de3fa89450c5a03377776f702414eecc15 d4t/ui/gauge_panel.py
 c6babb997a0f6e3c4703e9148d002afbaed23cda d4t/ui/gc_generator.py
 e7df3d112338385785cce94e375e27cee62c7127 d4t/ui/gc_paint.py
-e205f9e948689d2dfc32b743ab928e2faf3653f0 d4t/ui/glyphs.py
+41a693695bda5ebe9689961f36c063d5556831e4 d4t/ui/glyphs.py
 480e6660f5b9015be5047282146bc37c80ec2eb1 d4t/ui/graph_builder.py
 0d8522f971e608eb3f97e659741419f648fdba86 d4t/ui/histogram.py
 ca30c29322165e11582d2696336da9deb1c5918f d4t/ui/icons.py
@@ -158,12 +158,12 @@ dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
-fc022de0bcc322683dec3c171b5f0f24dfde33b2 d4t/ui/tree_panel.py
+248b4e3610970b808637724d288f1751f20775bf d4t/ui/tree_panel.py
 2d5368b4f0a8a6b1d7aa76a045ca1787b240b39e d4t/ui/tree_scene.py
 3ef77f5c339cffd31d12127954e819113e0c0885 d4t/ui/truth_marks.py
 0c1c3333b76408b77cd3b5f461714145b363e961 d4t/ui/uniformity_window.py
 6da43c6279ecdf777612100e67613f482c269d33 d4t/ui/verdict_band.py
-6d5cbf0cb9fd5576400e040f614ea76a4bb0d736 d4t/ui/viewmodel.py
+97c95b0619fbd49e733f7570a271061d21dfe92f d4t/ui/viewmodel.py
 a4cb05e2efedb1d035357ce9a52e146c8bc17237 d4t/ui/welcome.py
 1eb8e9d6aebe6030949046333341c1a92f0822ff d4t/ui/why_panel.py
 eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
@@ -423,6 +423,7 @@ e080d7615bf2f2b8df2c17b6bd0d9b4e4c1b9107 tests/test_ui_layout_follows_the_wires.
 015736e44cf1a75ed4f01937821a51b047083497 tests/test_ui_next_step.py
 8b510a8958771bc33fac91959a31b70f3710e7e5 tests/test_ui_no_klarf_label.py
 ee2409f03b5bdad686549ea5d9639d5653151350 tests/test_ui_number_picker.py
+d7fc1d0894914f00950a97cc3314e6c9b870d6fb tests/test_ui_outcome_chips.py
 517c38a66c0973adcc445eaae1b50d4f1748e0cf tests/test_ui_panel_truth.py
 d346560d0285c87606673279e3417ad6109e7c38 tests/test_ui_panels_pr2.py
 6a3f59e4edeb47dc32395c89d7ebf0fc702a8eea tests/test_ui_preview_why.py

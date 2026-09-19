@@ -68,6 +68,8 @@ CHIP_ICONS = (
     "rank_dark1", "rank_dark2", "rank_dark3", "rank_all",
     # Region：哪一個框是缺陷所在的那一個
     "pick_centre", "pick_none",
+    # 判定：這一類是好消息還是壞消息（F119）
+    "news_good", "news_review", "news_none",
     # CD：邊在哪裡（都畫在同一條邊的亮度剖面上）
     "crit_threshold", "crit_gradient", "crit_fit",
     # Focus index：OP-301 那四個步驟跑在哪一張圖上（同一張影像，
@@ -577,6 +579,27 @@ def _pick(g: _Pad, centre: bool) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 判定：這一類是好消息還是壞消息（F119）
+# --------------------------------------------------------------------------- #
+#
+# ⚠ **打勾與驚嘆號是畫出來的，不是字**。F7-23 擋的是「拿 ``✓``／``✕`` 這種
+# 字元當圖示」—— 廠內的 Segoe UI 蓋不到那一族，退字型的下場是大小與 baseline
+# 都不一樣，最壞是豆腐框。這一支整族存在的理由就是繞過那件事：同樣的形狀，
+# 用向量畫，每一台畫出來都一樣。
+def _news_good(g: _Pad) -> None:
+    g.poly([(0.18, 0.54), (0.40, 0.76), (0.82, 0.26)], True, 0.13)
+
+
+def _news_review(g: _Pad) -> None:
+    g.blk(0.43, 0.14, 0.57, 0.60)
+    g.dot(0.50, 0.79, 0.075)
+
+
+def _news_none(g: _Pad) -> None:
+    g.blk(0.18, 0.44, 0.82, 0.56)
+
+
+# --------------------------------------------------------------------------- #
 # CD：邊在哪裡（同一條邊的亮度剖面）
 # --------------------------------------------------------------------------- #
 _EDGE = [(0.06, 0.82), (0.26, 0.78), (0.44, 0.52), (0.62, 0.24), (0.94, 0.18)]
@@ -1029,6 +1052,9 @@ _DRAW = {
     "rank_dark2": lambda g: _rank(g, 4),
     "rank_dark1": lambda g: _rank(g, 5),
     "rank_all": lambda g: _rank(g, -1, every=True),
+    "news_good": _news_good,
+    "news_review": _news_review,
+    "news_none": _news_none,
     "pick_centre": lambda g: _pick(g, True),
     "pick_none": lambda g: _pick(g, False),
     "crit_threshold": _crit_threshold,

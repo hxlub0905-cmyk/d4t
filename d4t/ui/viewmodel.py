@@ -809,12 +809,15 @@ class RecipeModel:
         self._edit_tree(path, replace(node, when=str(when)))
 
     def set_tree_leaf(self, path: str, bin: Optional[int] = None,
-                      label: Optional[str] = None) -> None:
+                      label: Optional[str] = None,
+                      outcome: Optional[str] = None) -> None:
         node = self.tree_node(path)
         if not isinstance(node, TreeLeaf):
             return
         new = TreeLeaf(bin=node.bin if bin is None else int(bin),
-                       label=node.label if label is None else str(label))
+                       label=node.label if label is None else str(label),
+                       outcome=(node.outcome if outcome is None
+                                else str(outcome)))
         if new != node:
             self._edit_tree(path, new)
 
