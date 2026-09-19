@@ -235,12 +235,22 @@ git add -A && python tools/release.py && git add -A
 有測試數像素）。新元件直接 import 拆出來的那幾支（`ui/fields.py`、`ui/chips.py`、
 `ui/icons.py`、`ui/library.py`、`ui/histogram.py`、`ui/image_view.py`、
 `ui/param_form.py`、`ui/buttons.py`、`ui/feature_text.py`）；**`widgets.py` 只是一道
-轉出口，裡面不准再有 class / def**（幾行去 `tests/test_size_ceilings.py` 看）。搬家時「誰在用這個名字」不能只掃 import
-（測試大量用屬性存取），判準是搬前有的名字搬後 `hasattr` 還答得出來。
+轉出口，裡面不准再有 class / def**（幾行去 `tests/test_size_ceilings.py` 看）。
+
+`studio.py` 的內容 F116 搬完一輪了（內容住在 `ui/` 那七支 controller／模組，
+目錄樹見 `docs/ARCHITECTURE.md`）。**要再從它手上搬東西，先讀
+[`docs/history/plans/F116-split-studio.md`](docs/history/plans/F116-split-studio.md)
+的 §3 與 §6** —— §6 是「這種搬家會安靜做錯的六件事」，每一件都真的踩過。
+
+搬家時「誰在用這個名字」**不能只掃 import**（測試大量用屬性存取）：用
+`python tools/studio_surface.py --save before.json` ／ `--check before.json`。
+它同時守兩件事 —— 測試還找不找得到，以及 `d4t/ui/` 裡還有沒有人在叫一個已經搬走的
+名字（後者是**接線**，測試大多不會碰，只有使用者按下去才炸）。
 
 真的要動 `studio.py` 那一天，前置條件是 `python tools/freeze_golden.py --check` 三份
 全綠 —— 那是「改了但數字沒變」的唯一證據（這個 repo 踩過七次「跑得完、有數字、
-而且是錯的」）。
+而且是錯的」）。⚠ **家用機上第三份是紅的，而那不是行為變了** —— 見
+`docs/PITFALLS.md` 的「`align_score` 那一格」。
 
 ### 三件會安靜做錯的事（F91）
 

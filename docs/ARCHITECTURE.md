@@ -350,10 +350,16 @@ d4t/
     ├── viewmodel.py          #   RecipeModel（Qt-free、可 headless 測；含 edges）
     ├── edit_plan.py          #   接線／換線／剪線的**決定**（F93 U6；同樣 Qt-free）：
     │                         #     「這條線落在哪一格、要不要擠掉別條、擠掉哪幾條」
-    │                         #     ⚠ 只回答「應該發生什麼」；真的動 model 的仍然是
-    │                         #     studio.py —— 那一段的**順序**有意義（add_edge 會
-    │                         #     因為成環而失敗，而失敗的那條線不該留下痕跡）
-    ├── studio.py app.py      #   主視窗（**只做接線**）＋ 進入點
+    │                         #     ⚠ 只回答「應該發生什麼」；真的動 model 的是
+    │                         #     `canvas_edges.py`（F116 第 6 步之前在 studio.py）
+    │                         #     —— 那一段的**順序**有意義（add_edge 會因為成環
+    │                         #     而失敗，而失敗的那條線不該留下痕跡）
+    ├── studio.py app.py      #   主視窗（**只做組裝與接線**）＋ 進入點
+    │                         #     F116 把內容搬進上面那七支 controller／模組：
+    │                         #     `studio_layout` / `gauge_panel` / `preview_overlays`
+    │                         #     / `gallery_controller` / `attach_sources`
+    │                         #     / `run_controller` / `canvas_edges`
+    │                         #     留下的是 `model → UI`、signal 接線、狀態列、門面
     ├── canvas.py             #   節點畫布（n8n 式；純 UI，引擎零改動）
     ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
     ├── tree_scene.py tree_panel.py     #   判定樹住在畫布上／點一步就編輯那一步（F24）
@@ -469,9 +475,15 @@ d4t/
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
 
-⚠ **新的 UI 面板一律開新模組**，不要塞進 `studio.py`（它是這個 repo 最大的一支，
-現在幾行看 `tests/test_size_ceilings.py` 的 `FILE_CEILINGS` / `HARD_CAPS`）——
+⚠ **新的 UI 面板一律開新模組**，不要塞進 `studio.py`（它仍然是這個 repo 最大的
+一支，現在幾行看 `tests/test_size_ceilings.py` 的 `FILE_CEILINGS` / `HARD_CAPS`）——
 `studio.py` 留給接線，不留給內容。理由與現況見 [`../CLAUDE.md`](../CLAUDE.md) §4。
+
+**要從 `studio.py` 搬東西出去**，先讀
+[`docs/history/plans/F116-split-studio.md`](history/plans/F116-split-studio.md)：
+那一份把整條路走完了（7,686 → 4,347 行），而它的 §6 是一張**這種搬家會安靜做錯
+的六件事**的清單 —— 每一件都是那一輪真的踩到的。工具是
+`python tools/studio_surface.py --save/--check`。
 
 ### `docs/`
 

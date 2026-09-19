@@ -28,10 +28,12 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
-## F116 第 6 步：畫布上的線搬出 `studio.py` —— **六步收尾**（2026-09-19）
+## F116：拆 `studio.py` —— 六步走完（2026-09-19）
 
-最後一刀，也是計畫書寫著「評估後再決定做不做」的那一步。**評估推翻了它原本的
-兩個判斷**，所以做了。
+`CLAUDE.md` §4 早就寫著「`studio.py` 留給接線，不留給內容」，而 `HARD_CAPS` 讓那
+一格只准往下。F110／F114 各往下搬過一小塊，證明路走得通；這一輪照
+[`docs/history/plans/F116-split-studio.md`](docs/history/plans/F116-split-studio.md)
+把它**有計畫地走完**，一步一個 commit、一步一次全套驗收。
 
 | | 起點 | 六步之後 |
 |---|---|---|
@@ -39,281 +41,84 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 | `StudioWindow` 方法 | 293 | **197**（−96）|
 | `StudioWindow` 的 `self.*` | 433 | **266**（−167）|
 
-七個新模組（依序）：`gauge_panel.py`、`preview_overlays.py`、`studio_layout.py`、
-`gallery_controller.py`、`attach_sources.py`、`run_controller.py`、
-`canvas_edges.py`；另外三族併進**既有的** `region_check.py` 與 `open_dialogs.py`。
-
-### 這一步推翻的兩件事
-
-**「它本質上就是接線」—— 量出來不是。** 437 行裡六支規則型的方法佔 284 行
-（65%），真正的 handler 只有 67 行（15%）。那 284 行寫的是鐵則 10 本身。
-
-**「測試引用最重 ⇒ 最危險」—— 反了。** 這一整輪真正咬人的是**沒有測試按過的
-那顆鈕**（第 4 步組出來的 `_on_open_gds` 分派、第 3 步 `region_check.py` 兩行
-接線）：ruff 綠、import 綠、`--check` 綠，只有使用者真的按下去才炸。
-`_on_edge_added` 有 191 處／21 個測試檔 —— 每一個錯誤都會當場紅，而耦合又是剩下
-最低的（11 個外部名字）。**測試密度是安全係數，不是風險係數。**
-
-### 六步下來，真正學到的一課
-
-搬家沒有新邏輯，所以它的 bug 只有一種形狀：**import 過、開得起來、然後在某一條
-沒有人走過的路上才炸**。這一輪踩到六種，每一種都寫進計畫書 §6：
-
-1. 單獨當參數傳出去的 `self`（controller 是 QObject，不是 QWidget）
-2. `@property` 掉在原地（`ast` 的 `lineno` 指著 `def`，不是裝飾器）
-3. `monkeypatch.setattr(win, "名字", …)` —— 名字是**字串**
-4. 門面的簽章憑印象寫
-5. **`d4t/ui/` 裡別的模組還在叫那個名字**（接線，測試大多不會碰）
-6. **`getattr(self, "_on_open_%s" % key)` —— 名字是組出來的，沒有任何掃描找得到**
-
-`tools/studio_surface.py` 現在守得住 1、3、5；2、4、6 只能靠清單。
-
-### ⚠ §8 的「≤ 4,000 行」沒有達成（4,347），而那個數字要重估
-
-剩下的 4,347 裡有 **927 行是 `model → UI`** —— 計畫書 §2 自己寫的「這就是接線
-本身」。要壓到 4,000 只要再搬一塊「預覽」（301 行），但那該是一輪自己的事。
-計畫書 §8 改成建議「`model → UI` 以外沒有一段超過 300 行」，那是這六步真正在守
-的東西，而現在已經成立。
-
----
-
-## F116 第 5 步：跑與寫搬出 `studio.py`（2026-09-19）
-
-第五刀，也是六步裡唯一一步**沒有照計畫的形狀做**的。
-
-| | 第 4 步之後 | 第 5 步之後 | 從頭算 |
-|---|---|---|---|
-| `d4t/ui/studio.py` | 5,135 行 | **4,785**（−350）| 7,686 → 4,785（**−2,901**）|
-| `StudioWindow` 方法 | 221 | **210** | 293 → 210（−83）|
-| `self.*` | 292 | **279** | 433 → 279 |
-
-15 支進 [`d4t/ui/run_controller.py`](d4t/ui/run_controller.py)，**鐵則 11
-（跑不寫，寫是另一個動作）整條住在那裡**。門面四支（`run_trial` / `run_all` /
-`write_outputs` / `rerun`）—— 這個視窗的公開動詞，光 `run_trial` 就有 44 處／
-13 個測試檔。
-
-### ⚠ 計畫說發 signal，量完之後沒有發
-
-計畫書寫「controller 發 `trial_finished(results)`，`studio.py` 接到那一串
-refresh」。讀完 `_apply_trial_results` 那 115 行之後，**前提不成立**：那不是一串
-可以搬出來的 refresh —— 它跟「這批數字怎麼變成一句話」「要不要寫出去」是**交織**
-的，而且每一段前面都釘著一句「順序反過來就會畫出上一批的顏色」。
-
-所以刀切在另一個地方：**`_apply_trial_results` 留在視窗**，controller 只留
-「怎麼發動、怎麼寫」。這一族往外因此只剩**一個**呼叫 —— 那正是計畫想用 signal
-換到的東西，而且沒有把一個有順序的方法拆成三段。
-
-**連那一個也沒做成 signal**：Qt 的 direct connection 雖然同步，例外卻會被 Qt 的
-hook 吃掉。測試大量用 `run_trial(sync=True)`，那 115 行裡爆掉的東西現在會讓測試
-當場紅；包成 signal 之後只會印在 stderr 上。
-
-### ⚠ 建構順序的第一個實例
-
-`studio_layout` 跑在 controller **之前**，所以 `win.run_ctl._on_trial_clicked`
-這種寫法會在**建工具列的當下**查 `win.run_ctl` —— 建視窗就 AttributeError
-（15 條 error，不是 1 條）。指到 controller 的 slot **一律包一層 `lambda`**。
-
-### 計畫書 §5（`StudioState`）評估完了：不做
-
-五步下來因為 `self.w.<名字>` 出過的錯是 **0 次**；真正出錯的是「名字搬走之後沒人
-跟上」，那是**接線**，`StudioState` 一條都擋不到。而改「住哪」是搬家、改「怎麼
-通知」是重寫 —— 同一輪做兩件事正是這一份 §1 第一條禁的。
-
----
-
-## F116 第 4 步：掛第二份東西、recipe 的開存搬出 `studio.py`（2026-09-19）
-
-第四刀。兩個去處，**一支門面都沒留**：`ui/attach_sources.py`（新）收「把第二份
-東西掛到已載入的這一份上」—— 配對卡的第二份 lot 與 GLAS 匯出的 layer 標註；
-recipe 的開／存三支進**既有的** `ui/open_dialogs.py`。
-
-| | 第 3 步之後 | 第 4 步之後 | 從頭算 |
-|---|---|---|---|
-| `d4t/ui/studio.py` | 5,434 行 | **5,135**（−299）| 7,686 → 5,135（**−2,551**）|
-| `StudioWindow` 方法 | 235 | **221** | 293 → 221（−72）|
-| `self.*` | 308 | **292** | 433 → 292 |
-
-計畫書只點名了配對那一半（`ui/pair_source_ui.py`），但 GLAS 匯出那兩支的形狀
-**一字不差**：問一個路徑 → 交給 ingest 層 → 把結果講成一句話 → 把量到的名字填回
-卡片。只搬一半的話，模組名會比內容窄，而 `對話框` 那一段會剩下兩支名字對不上
-段名的東西。
-
-### 兩種「掃不到」的漏法，這一輪各遇到一次
-
-**第一種（第 3 步加的那一關抓到）**：`studio_layout.py` 那 5 行還在叫
-`win._on_open_recipe` / `win._on_save_recipe`。那是「按工具列那顆存檔鈕就
-AttributeError」，而**一條測試都不會紅**。這次在跑任何測試之前就看到了 ——
-那一關第一次派上用場就賺回它自己。
-
-**第二種（那一關也抓不到）**：`_on_source_requested` 用
-`getattr(self, "_on_open_%s" % att_key)()` 分派 —— 名字是 `"_on_open_"` 加上一張
-表裡的值**拼出來的**，沒有任何靜態掃描找得到。`ruff`、`--check`、`import` 全綠，
-只有「選到 layout(GDS) 卡再按那顆鈕」那一條路會炸。計畫書 §6 因此多一條：
-搬一族之前先 `grep 'getattr(self, "'`。
-
-### 測試裡兩種要跟著改的形狀
-
-* `monkeypatch.setattr(window, "_on_open_gds", …)` —— 字串形式，改打在
-  `window.attach_ctl` 上。
-* **打在方法上的存檔 stub**（`window._on_save_recipe_as = lambda: …`）——
-  那現在是模組層函式，改成打在 `open_dialogs` 模組上、用 try/finally 還原。
-  兩條守的事情（「已經有原檔就不要再問路徑」「取消另存不算可以關窗」）
-  一個字都沒變。
-
----
-
-## F116 第 3 步：Gallery／Results／回溯搬出 `studio.py`（2026-09-19）
-
-第三刀。15 支方法加上**縮圖那一條鏈**（`THUMB_CHANNEL_PRIORITY` →
-`thumb_channel` → `load_thumb` → `ThumbWorker`，本來散在 `studio.py` 的模組層，
-而唯一的使用者是 Gallery）整族進
-[`d4t/ui/gallery_controller.py`](d4t/ui/gallery_controller.py)。
-
-| | 第 2 步之後 | 第 3 步之後 | 從頭算 |
-|---|---|---|---|
-| `d4t/ui/studio.py` | 5,792 行 | **5,434**（−358）| 7,686 → 5,434（**−2,252**）|
-| `StudioWindow` 方法 | 248 | **235** | 293 → 235（−58）|
-| `self.*` | 323 | **308** | 433 → 308 |
-
-`_items_by_id` **沒有**跟著搬（計畫書原本寫要搬）：它是 `_on_dataset_loaded`
-寫的，而那一段不在這一族裡 —— §3-1 說被別段也寫的留在視窗。
-
-### ⚠ 這六步裡目前最危險的一種漏法
-
-**`d4t/ui/` 裡別的模組也在叫搬走的名字。** `region_check.py` 兩處、
-`studio_layout.py` 一處的 `win._on_defect_activated` / `win._on_why_item`
-—— 它們是**接線**，所以 import 過、視窗開得起來、`import ok` 印得出來，
-只有**使用者真的按下**「跨顆檢視裡的一張圖」或「Results 裡的一列」那一刻才會
-AttributeError。
-
-全套測試抓到了（`test_ui_region_check` 3 條、`test_ui_template_dialog` 1 條），
-但那是運氣 —— 前兩步我只掃 `studio.py` 與 `tests/`，而那三行不在裡面。
-
-`tools/studio_surface.py --check` 因此多一關：**這一輪從視窗上消失的名字，
-`d4t/ui/` 裡還有沒有人在 `win.<名字>` 上叫它**。判準刻意是「搬走的名字」而不是
-「視窗上沒有的名字」—— 後者會把繼承來的 Qt 方法、類別層常數、以及每一個剛好
-也叫 `win` 的區域變數全部報紅（實測 26 個全是誤報）。拿修之前的檔案回放，
-那一關**正好列出那三行**。
-
-手動走一遍也加長到 **31 條**（多了 Gallery／縮圖／回溯／點長條），而且是
-**跟起點 commit 的樹跑同一支、`diff` 空的**那種驗收。
-
----
-
-## F116 第 2 步：介面組裝搬出 `studio.py`（2026-09-19）
-
-接著第 1 步。這一輪搬的是**擺東西**那一族 —— 工具列、主體三欄、預覽區、進度列、
-快捷鍵，七支 `_build_*` 加上 `_tool_button`、`_GlyphToolButton` 與四個版面常數，
-整族進 [`d4t/ui/studio_layout.py`](d4t/ui/studio_layout.py)。
-
-| | 第 1 步之後 | 第 2 步之後 | 從頭算 |
-|---|---|---|---|
-| `d4t/ui/studio.py` | 6,782 行 | **5,792**（−990）| 7,686 → 5,792（**−1,894**）|
-| `StudioWindow` 方法 | 256 | **248** | 293 → 248（−45）|
-
-形狀照 `ui/open_dialogs.py`：模組層函式吃 `win`，**照舊在 `win` 上設同樣那 86 個
-名字**。所以這一步**一個門面都沒留** —— 沒有人從外面叫那幾支。
-
-### ⚠ 一把尺在這一步之後不能再那樣讀
-
-`studio_window_attributes` 那一格數的是**這個檔案裡**的 `self.*`，而那 86 個名字
-現在是在 `studio_layout.py` 裡用 `win.x = …` 設的：數字從 389 掉到 323，而名字
-一個都沒動。**問「那個名字還在不在」要用 `tools/studio_surface.py`**，不是那一格
-—— 而那一支也跟著改成會讀 `d4t/ui/*.py` 裡的 `win.x = …` 與 `self.w.x = …`。
-沒有這一改，它對這一步誤報 **69 個**名字不見了（`pipeline` 261 處、`results`
-90 處、`param_form` 67 處……）。計畫書 §6 那句「誤報就改成明寫 `win.xxx = ...`」
-只講了一半：明寫了，**工具也要看得懂**。
-
-### 一個工具鏈的坑
-
-這個 shell 的 heredoc 會把**兩個**反斜線吃成一個，於是 `re.sub` 的替換字串
-若寫成非 raw 的那一版，Python 實際收到的是單反斜線 —— 而單反斜線加 1 在
-非 raw 字串裡是 `chr(1)`，不是「第 1 組」。產出的是 `def build_(win)`
-（名字沒了），**而且不報錯**。替換字串一律用 raw 字串。
-（這一段自己也被吃過一次 —— 寫進來的是一個真的 `chr(1)` 位元組，
-所以是用檔案編輯而不是 heredoc 修回來的。）
-
-計畫書 §4 那個「可選附加」（toolbar 改成資料表驅動）**沒有做**：那一條寫著要
-使用者點頭，而且它是**改寫**不是搬家，跟這一輪「行為零改動」的紀律不相容。
-
----
-
-## F116 第 1 步：拆 `studio.py` 的第一刀 —— 右下角那一塊與預覽區（2026-09-19）
-
-計畫書 [`docs/plans/F116-split-studio.md`](docs/plans/F116-split-studio.md) 的六步
-裡的第一步，一個 PR 三個 commit（1a／1b／1c）。`CLAUDE.md` §4 早就寫著
-「`studio.py` 留給接線，不留給內容」，而 `HARD_CAPS` 讓那一格只准往下 ——
-這一輪是**有計畫地**把它走完的開始。
-
-| | 之前 | 之後 |
+| 步 | 搬的是什麼 | 去哪 |
 |---|---|---|
-| `d4t/ui/studio.py` | 7,686 行 | **6,782**（−904）|
-| `StudioWindow` 方法 | 293 | **256**（−37）|
-| `StudioWindow` 的 `self.*` | 433 | **389**（−44）|
+| 1a／1b／1c | 右下角的卡片儀表 ＋ 特徵表；影像流選擇與畫在圖上的東西；區域跨顆檢視 | `gauge_panel.py`、`preview_overlays.py`、**既有的** `region_check.py` |
+| 2 | 介面組裝（工具列、主體三欄、預覽區、進度列、快捷鍵） | `studio_layout.py` |
+| 3 | Gallery／Results／回溯 ＋ 縮圖那一條鏈 | `gallery_controller.py` |
+| 4 | 掛第二份東西（第二份 lot ＋ GLAS 匯出）；recipe 的開／存 | `attach_sources.py`、**既有的** `open_dialogs.py` |
+| 5 | 怎麼發動一次執行、怎麼把結果寫出去（鐵則 11 整條） | `run_controller.py` |
+| 6 | 畫布上拉一條線／剪一條線在 model 上是什麼意思（鐵則 10 主場） | `canvas_edges.py` |
 
-三個去處，而**只有兩個是新模組**：
+`studio.py` 現在只剩**組裝、`model → UI`、signal 接線、狀態列、門面**。
 
-* `d4t/ui/gauge_panel.py` —— `bottom_stack` 的**兩頁**（卡片儀表 ＋ 特徵表）。
-  它們是同一塊畫面、同一個狀態機（`show_bottom_page` 管誰在前面），拆成兩個
-  controller 的話那一支會變成跨物件呼叫。
-* `d4t/ui/preview_overlays.py` —— 影像流選擇與畫在圖上的東西（區域框、量測標記、
-  熱色磚、並排比對、兩張圖互跟）。
-* 區域跨顆檢視那四支進了**既有的** `d4t/ui/region_check.py`。計畫書原本寫可能
-  開一個 `ui/feature_pane.py`，判準是「>600 行就分」；搬之前量是 609 行，剛好
-  踩線，於是回頭問 `CLAUDE.md` §4 那一句「先問那一塊該不該是一塊」——
-  答案是**照畫面上的位置分，不是照行數分**：那顆「跨顆檢視」的按鈕住在預覽區，
-  而它用的每一個東西本來就在 `region_check.py` 裡。所以少開了一個模組。
+### 三次跟計畫書不一樣，每一次都是量完才改的
 
-新工具 `tools/studio_surface.py`（計畫書 §6）：量 `StudioWindow` 的表面與**測試裡
-用到的名字**，`--save` / `--check` 一對。這種搬家最危險的失敗是搬走一個測試正在
-用的名字，而測試大量用屬性存取、`grep import` 答不出誰在用。
+**1b：`feature_pane.py` 沒有出現。** 判準是「>600 行就分」，搬之前量是 609 行剛好
+踩線 —— 回頭問「先問那一塊該不該是一塊」，答案是**照畫面上的位置分，不是照行數
+分**：跨顆檢視那顆按鈕住在預覽區，而它用的每一個東西本來就在 `region_check.py`
+裡。所以**少開**了一個模組。
 
-### 四件「跑得完但是錯的」
+**5：計畫說發 signal，量完之後沒有發。** 讀完 `_apply_trial_results` 那 115 行之後
+前提不成立 —— **那不是一串可以搬出來的 refresh**，它跟「這批數字怎麼變成一句話」
+「要不要寫出去」是交織的，每一段前面都釘著一句「順序反過來就會畫出上一批的
+顏色」。刀改切在別處：**`_apply_trial_results` 留在視窗**，controller 只留「怎麼
+發動、怎麼寫」，往外因此只剩**一個**呼叫 —— 那正是計畫想用 signal 換到的東西。
+連那一個也沒做成 signal：Qt 的 direct connection 雖然同步，**例外會被 Qt 的 hook
+吃掉**，而測試大量用 `run_trial(sync=True)` 靠例外當場紅。
 
-搬家這種事沒有新邏輯，所以它的 bug 全部長成同一個樣子：**import 過、開得起來、
-然後在某一條路上才爆**。第 1 步踩到四個，每一個都寫回計畫書 §6 的清單：
+**6：計畫猜「本質上就是接線」，量出來 65% 是規則**（437 行裡六支規則型的方法佔
+284 行，handler 只有 67 行）。而計畫把它列為最危險（191 處引用）—— **反了**。
 
-1. **單獨當參數傳出去的 `self`**。`self.x → self.w.x` 的機械式取代抓不到
-   `UniformityWindow(self)` —— 而 controller 是 `QObject`，那個位置要的是 QWidget。
-2. **`@property` 掉在原地**。`ast` 的 `lineno` 指著 `def` 不是裝飾器，照它切出來的
-   區間會把 `@property` 留下，而症狀是門面回一個 **bound method**。
-3. **門面的簽章憑印象寫**。`heat_tiles` 實際吃一個 `stream` 參數。改成用 ast 把
-   十支門面跟 controller 的簽章逐一比對。
-4. **`F401` 答不出「別人有沒有透過這個檔案用到」**（`CLAUDE.md` §4 的警告逐字命中）。
-   `tests/` 是用 `studio_mod.FEATURE_OWNER_KEY` **別名**拿的，grep
-   `studio.FEATURE_OWNER_KEY` 掃不到。修的是測試 —— 那個鍵的家在引擎，
-   `ui.studio` 只是剛好 import 過它。
+### 六步下來真正學到的一課
+
+**測試密度是安全係數，不是風險係數。** 這一輪真正咬人的全是**沒有測試按過的那顆
+鈕**：第 4 步用字串拼出來的 `_on_open_gds` 分派、第 3 步 `region_check.py` 那兩行
+接線 —— ruff 綠、import 綠、`--check` 綠，只有使用者真的按下去才炸。而
+`_on_edge_added` 有 191 處／21 個測試檔，每個錯誤都當場紅。
+
+搬家沒有新邏輯，所以 bug 只有一種形狀：**import 過、開得起來、在一條沒有人走過的
+路上才炸**。踩到六種，清單在計畫書 §6：① 單獨當參數傳出去的 `self`（controller 是
+QObject 不是 QWidget）② `@property` 掉在原地（`ast` 的 `lineno` 指著 `def`）
+③ 字串形式的 `monkeypatch.setattr` ④ 門面的簽章憑印象寫 ⑤ **別的 UI 模組還在叫那個
+名字**（接線，測試大多不會碰）⑥ **組出來的名字**（`getattr(self, "_on_open_%s" % k)`，
+任何掃描都找不到）。
+
+新工具 `tools/studio_surface.py` 守得住 ①③⑤，三輪演進每一次都是被一個真的漏掉的
+東西逼出來的。它在第 4 步**第一次派上用場就賺回自己**：在跑任何測試之前就列出
+`studio_layout.py` 那 5 行還在叫 `win._on_save_recipe`。
 
 ### ⚠ 家用機上的黃金值：`align_score` 那一格
 
-計畫書 §6 的前置檢查第一條是「三份全綠」，而動手前跑出來**第三份是紅的**。
-查清楚了，**不是這個 repo 的行為變了**：
+前置檢查一跑就紅，而**不是行為變了** —— 判準、證據與做法寫進
+[`docs/PITFALLS.md`](docs/PITFALLS.md) 了（摘要：`align_dx`/`align_dy` 17 位相同、
+下游全部相同、`algo/align.py` 一個位元沒動 ⇒ 剩下的變數只有 OpenCV build）。
+repo 裡那三份**沒有動**，基準凍在暫存區，每一步都逐項對過。
 
-* 差的只有 `align_score`，而且差在第 4 位；
-* `align_dx`／`align_dy`（`%.17g`）與**每一個下游特徵**逐位元組相同 ——
-  也就是對齊的結果一模一樣，只有那個信心分數不同；
-* `d4t/core/algo/align.py`（`final_score` 的出處）自從黃金值凍結（F109）以來
-  **一個位元都沒動**，`steps/align.py` 那 8 行是 F114 加的 `label=`。
+### 驗收（每一步都做）
 
-同樣的程式碼配同樣的輸入吐不同的數字，剩下的變數只有這台機器的 OpenCV build
-（那個分數吃 `cv2.warpAffine` 的殘差，而 dx/dy 來自 FFT —— 一個會跟著 SIMD 路徑
-漂，一個不會）。`freeze_golden.py` 自己的說明本來就寫著「用途是**同一台機器上**、
-重構前後的比較」。2026-08-19 那次「跨機器也逐位元組相同」的實測是在 align 卡
-還沒回到卡片庫之前做的，沒有涵蓋這個特徵。
+258 個測試檔逐檔跑，紅的 **10 個檔案全部是既有的**（用 git worktree 開一份起點
+commit 的樹逐檔對過）；第 6 步另外單獨跑那 21 個引用 `_on_edge_added` 的檔案全綠；
+鐵則 11 的兩支守門 15 條全綠。**每一步都真的開一次 Studio 走過那一塊**，最後長到
+**41 條**檢查，而且是「在起點的樹上跑同一支、`diff` 空的」那種驗收 ——
+「測試全綠而畫面壞掉」是這種搬家最常見的死法。
 
-所以：**repo 裡那三份沒有動**（它們帶著跨環境的歷史），第 1 步的基準凍在
-scratchpad，三個 commit 每一個都對過、逐項相同。
+### 計畫書的兩個結論改掉了
 
-### 順手修掉的一個（獨立 commit）
+* **§8 的「≤ 4,000 行」沒有達成（4,347），而那個數字要重估**：剩下的裡面有 927 行
+  是 `model → UI`（計畫書 §2 自己寫的「這就是接線本身」）。建議改成
+  「`model → UI` 以外沒有一段超過 300 行」—— 那是這六步真正在守的東西，現在成立。
+* **§5 的 `StudioState` 評估完了：不做。** 六步下來因為 `self.w.<名字>` 出過的錯是
+  **0 次**；真正出錯的都是「名字搬走之後沒人跟上」，那是接線，`StudioState` 一條都
+  擋不到。
 
-`tools/doctor.py` 的子行程沒設 `QT_ASSUME_STDERR_HAS_CONSOLE` —— Qt 開不了
-platform plugin 是 fatal，而 **Windows 上的 fatal 預設是一個跳出來的對話框**。
-`test_doctor_says_the_cli_still_works_when_qt_cannot_open_a_window` 故意用一個
-不存在的 platform 逼它失敗，於是每跑一次測試就在家用機上留一個按不完的視窗，
-而那一項還要等滿 timeout 才有結論（修完 7 秒）。這正是 `CLAUDE.md` §4 F91
-那條「會跳 modal 對話框的東西要有一個關得掉的旗標」的子行程版。
+### 順手修掉的一個（獨立 commit，不屬於 F116）
 
----
+`tools/doctor.py` 的子行程沒設 `QT_ASSUME_STDERR_HAS_CONSOLE` —— Qt 開不了 platform
+plugin 是 fatal，而 **Windows 上的 fatal 預設是一個跳出來的對話框**。那條故意用
+不存在 platform 的測試因此每跑一次就在家用機上留一個按不完的視窗，而那一項還要等滿
+timeout（修完 7 秒）。這是 `CLAUDE.md` §4 F91「會跳 modal 的東西要有一個關得掉的
+旗標」的**子行程版**。
 
 ## F115：OP-301 廠外驗證的結果 —— noise、區域型態、以及 16→8 bit（2026-09-18）
 
