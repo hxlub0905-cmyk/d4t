@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from d4t.core.pipeline.decide_tree import leaf_color
 from .numbers import format_feature_value
 from . import theme
 from .theme import TOKENS
@@ -749,15 +750,24 @@ class _GridView(QAbstractScrollArea):
 
 
 def bin_hex(item: Dict[str, Any]) -> str:
-    """tile 色條顏色：失敗=紅、bin 1=綠、bin 0=灰、未判定=中性。"""
+    """tile 色條顏色：失敗=紅、未判定=中性，其餘**走共用調色盤**。
+
+    ⚠ **一個 bin 一個顏色，而那個顏色在哪裡都一樣**（F117 I1）。這一支以前
+    是「bin ≥ 1 一律綠、bin 0 灰」—— 於是同一顆 defect 在 Results 的長條上是
+    藍色（那裡走 `decide_tree.leaf_color`）、在縮圖上是綠色，而畫面上沒有任何
+    東西講得出那是同一類。多類別的 recipe 更明顯：bin 1/2/3 在長條、樹、報表
+    上是三個顏色，在縮圖上是**同一個綠**。
+
+    `leaf_color` 的 bin 0 那一格由呼叫端給（那一個是主題的一部分，見
+    `decide_tree.leaf_color` 的說明）—— 傳 `seg_disabled` 進去，跟樹那邊
+    （`tree_scene.leaf_hex`）用的是同一個。
+    """
     if not item.get("ok", True):
         return TOKENS["danger"]
     b = item.get("bin")
     if b is None:
         return TOKENS["chip_neutral_border"]
-    if int(b) == 0:
-        return TOKENS["seg_disabled"]
-    return TOKENS["success"]
+    return leaf_color(int(b), TOKENS["seg_disabled"])
 
 
 def caption_lines_of(item: Dict[str, Any],
