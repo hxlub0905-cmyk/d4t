@@ -43,7 +43,7 @@ e124c808bc10ad7aac2e434dcf87e3a8efef4794 d4t/core/export/chart_frame.py
 f164c233dc03c87477e6f06ceea7abcc8b09c5de d4t/core/export/html.py
 df85cecb3e142f94a5ccb6d8775cd3540d99fa97 d4t/core/export/klarf_out.py
 f1096aa00597a3ce6e7a69b03aa11fdfe0b6cd1a d4t/core/export/overlay.py
-ab5031e7056134aa94c5551aba9b80a774b6397a d4t/core/export/report.py
+97bcb8cc00d5b8f40e07ae0d22fe3ef178af8a15 d4t/core/export/report.py
 66e0f95368bfaaeffd70ea4b7ceff2d8e3625daf d4t/core/export/uniformity_charts.py
 cfa364ebeaf68456e2ac3a55c7120a3b650d0739 d4t/core/ingest/__init__.py
 feffaff91ac2d56955fc9743ba10aae476f52518 d4t/core/ingest/dataset.py
@@ -85,7 +85,7 @@ e4379264e37ab47c37974e94415b2c72386e8932 d4t/core/steps/__init__.py
 6374a586fa926b9283a7bdd1f1b75e75466ee449 d4t/core/steps/load.py
 d3e1fe208e365d72f2fdcf9ccdaf543af9cd85a1 d4t/core/steps/load_sidecar.py
 d8b1021ce4eb76b436ba9dea26d62951febd06ac d4t/core/steps/normalize.py
-51126807c9e126a86f3f07fcf1ee8b2f7643686d d4t/core/steps/output.py
+502eeffd5c4af818e21610358a72b3eaf3e9e6b4 d4t/core/steps/output.py
 effe382a885c4d5e4308ddcfae8968f04d0ccda7 d4t/core/steps/pair_source.py
 6964c80f4583ab0d9e2cf5469ea790b8f1338738 d4t/core/steps/quality.py
 256789e28d725b76e991351b333b659078d69419 d4t/core/steps/roi_cross.py
@@ -185,7 +185,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-5ae9595f30851bcfbf77084fda345af9e6d509e4 docs/plans/F117-ui-review.md
+831058c8eba97c3f80944183819bd1feca332cb7 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -252,7 +252,7 @@ c0118936ed3142d67da8d49b9520167dd3fa94ee tests/test_edit_plan.py
 5bcbc5d88b74b990dac7d69874664cc9ca5617fe tests/test_export_klarf.py
 76e33c29788bc9608c6b33cae469de4a2dd971c4 tests/test_export_overlay.py
 1534570199d2ef7ae5e6c58ff7760d724a2b0e85 tests/test_export_parity.py
-1bee17aa05e53e4ac03228380717b228310da094 tests/test_export_report.py
+6138a81f0685a2f422c85b965b558ee1adbc1873 tests/test_export_report.py
 492495bffaf1e92a236605b50c04047a8bcb36b0 tests/test_export_uniformity.py
 2415c6f4229d2d8ff5044b35cdde8560d3bcd8c2 tests/test_expression.py
 ac96b108b3e36256f91bbbfe49025e801a1cbaa3 tests/test_f11_channel_map.py

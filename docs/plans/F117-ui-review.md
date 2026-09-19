@@ -34,7 +34,7 @@
 | A4 | Tune 模式畫布只剩約 300 px 高，7 張卡就縮到 50%，副標與埠名讀不到；而沒選卡時下方參數區只有一行 `(Pick a card…)` 卻占一半以上。**Build 模式下同一份 recipe 在 61% 是讀得到的**，所以問題在 Tune 的空間分配 | 沒選卡時收起參數區；或讓 Tune 的畫布最小高度大一點 | ✅ 兩種模式截圖比對 |
 | C1 | Features 面板的**數值被長說明擠到可視範圍外**：值在最右欄，面板預設寬度要水平捲 ~270 px 才看得到，第一眼只看到名字與說明 | 值放在名字旁邊（第二欄），說明放第三欄或 tooltip | ✅ 捲到最右截圖確認值存在 |
 | E1 | 有 ground truth 時上方寫 `missed 4`，但**縮圖沒有任何標記**、表格有 `truth` 欄卻沒有把「判定≠答案」的列標出來，要自己逐列比 | 判錯的格子／列加紅框；篩選加「只看判錯的」 | ✅ `gallery._paint_tile` 只看 ok/bin；`results_table` 的 truth 只有文字 |
-| F1 | `defects.csv` 表頭 `score` 出現兩次（第 4 欄 BASE_COLUMNS 的 `score`，第 18 欄 features 裡也有一個 `score`）。值相同，但 pandas 會讀成 `score.1`，Excel 用欄名查也會對錯欄 | `feature_keys()` 排除已在 BASE_COLUMNS 的名字；加測試：輸出欄名不重複 | ✅ `core/export/report.py:write_csv` |
+| F1 | ✅ **做完** —— 而且**三個輸出檔都有**這個坑：CSV、xlsx 的「明細」頁、以及 HTML 報表（它自己寫 `defect/ok/score/bin` 再接特徵欄）| 新增 `detail_feature_keys()`（= `feature_keys` 扣掉 `BASE_COLUMNS`），三個寫檔的地方都用它。⚠ **`feature_keys` 本身沒有動** —— Features 面板與特徵統計要的是「這批跑出了哪些數字」，`score` 是其中之一；扣掉是**明細表**的事。原本的建議是改 `feature_keys()`，那會讓畫面上少一列 | ✅ 三條測試：CSV 表頭不重複、HTML 表頭不重複、`feature_keys` 沒變 |
 | G3 | Recipe 範本庫：清單顯示 recipe id（`ebi_die_to_die`）與 `route: ebi_patch`；右邊整塊說明；`score = (no score expression)` 會讓人以為沒有判定（判定其實在樹上） | 顯示名稱＋一句摘要；`route` 換成資料類型白話；score 那行在有判定樹時改寫或拿掉 | ✅ 截圖 |
 | G4 | Template 對話框工具列下方那排說明字被截、還壓著一條捲軸 | 說明改 tooltip 或換行 | ✅ 截圖 |
 | I1 | ✅ **做完** —— `bin_hex()` 改走 `leaf_color`（失敗＝紅、未判定＝中性沒有被吃掉）。多類別時更明顯：bin 1/2/3 在樹上是三色、在縮圖牆上曾是同一個綠 | 測試**不釘色碼**（釘了換主題就紅然後被關掉），問的是「縮圖色 ＝ 樹的色」 | ✅ ⚠ **verdict chip 沒有跟著改** —— 見 D2 |
