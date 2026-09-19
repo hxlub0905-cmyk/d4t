@@ -255,7 +255,10 @@ def _role_word(role: str) -> str:
     return {cspec.ROLE_X: "Across the bottom",
             cspec.ROLE_Y: "Up the side",
             cspec.ROLE_COLOR: "Colour means",
-            cspec.ROLE_SIZE: "Size means"}.get(str(role), str(role))
+            cspec.ROLE_SIZE: "Size means",
+            # F117 G6：少了這一個，那一列印的是鍵（``facet``）——
+            # 而那個字連英文母語者都不一定知道它在圖表上是什麼意思。
+            cspec.ROLE_FACET: "Split into panels by"}.get(str(role), str(role))
 
 
 class _PresetRow(QWidget):
@@ -289,6 +292,18 @@ class _PresetRow(QWidget):
             lay.addWidget(btn, 0)
             self.buttons[name] = btn
         lay.addStretch(1)
+        # **一顆都做不出來的時候要講話**（F117 G6）。五顆灰掉的鈕讀起來像
+        # 一排標題，而使用者不知道那是「壞了」還是「還不能按」—— 而真正的
+        # 原因幾乎一定是同一個：還沒有數字可以放上去。
+        # ⚠ 停用的 widget **收不到 tooltip**，所以那句話一定要寫在畫面上。
+        self.hint = QLabel(
+            "Run a trial first - these fill themselves in from the numbers "
+            "it measures.", self)
+        self.hint.setObjectName("paramHint")
+        self.hint.setWordWrap(True)
+        self.hint.setVisible(not any(b.isEnabled()
+                                     for b in self.buttons.values()))
+        lay.addWidget(self.hint, 0)
 
     def first_spec(self) -> str:
         """打開時落在哪一個 —— **第一個做得出來的**。一顆都做不出來（那一顆

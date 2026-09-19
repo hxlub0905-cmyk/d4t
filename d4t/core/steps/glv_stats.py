@@ -717,6 +717,16 @@ class GlvStatsStep(MultiSourceStep):
             section="3 \u00b7 How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             label="How even are the boxes",
+            # ⚠ **鍵是 recipe 的字，格子上寫的是給人看的字**（F117 B2）。
+            # 以前這一排直接印 `range` / `cv_pct` / `slope_x` —— 那幾個是寫
+            # 進 JSON 的鍵，不是一個製程工程師會用的詞。
+            choice_labels={
+                UNIF_RANGE: "Gap (gray levels)",
+                UNIF_RANGE_PCT: "Gap (%)",
+                UNIF_CV_PCT: "Spread (%)",
+                UNIF_SLOPE_X: "Tilt across",
+                UNIF_SLOPE_Y: "Tilt down",
+            },
             choice_help={
                 UNIF_RANGE: "The brightest box minus the darkest one, in "
                             "gray levels.",

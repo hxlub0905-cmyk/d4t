@@ -950,16 +950,26 @@ class MultiChoicePicker(QWidget):
 
     recipe 帶進來、不在清單上的值（手寫的 ``glv_q37``）照樣列出來並勾著 ——
     看不到就被靜靜刪掉，是最糟的一種「幫忙」。
+
+    ⚠ **格子上寫的字與存進 recipe 的值是兩件事**（F117 B2）：``labels`` 給了
+    就顯示那個字，而勾起來寫回去的永遠是**鍵**（``cv_pct``）。值跟著每一顆
+    box 上的 ``choice`` 屬性走，**不跟著 `box.text()` 走** —— 讀字的那一版會
+    把白話名字存進 recipe，而那是一個跑得完、存得下、下次開起來全錯的形狀。
+
+    沒給 label 的選項顯示鍵本身：手寫 recipe 帶進來的那種本來就沒有人給得出
+    白話名字，而顯示鍵至少跟他打的字對得起來。
     """
 
     changed = Signal(str)
     _PER_ROW = 3
 
     def __init__(self, choices: Sequence[str], value: str = "",
-                 parent: Optional[QWidget] = None, empty_hint: str = ""):
+                 parent: Optional[QWidget] = None, empty_hint: str = "",
+                 labels: Optional[Dict[str, str]] = None):
         super().__init__(parent)
         self._boxes: List[QCheckBox] = []
         self._emitting = False
+        self._labels: Dict[str, str] = dict(labels or {})
 
         grid = QGridLayout(self)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -973,11 +983,8 @@ class MultiChoicePicker(QWidget):
             if name and name not in names:
                 names.append(name)
         for i, name in enumerate(names):
-            box = QCheckBox(name, self)
-            box.setChecked(name in picked)
-            box.toggled.connect(self._on_toggled)
-            grid.addWidget(box, i // self._PER_ROW, i % self._PER_ROW)
-            self._boxes.append(box)
+            grid.addWidget(self._make_box(name, name in picked),
+                           i // self._PER_ROW, i % self._PER_ROW)
         # **一個都沒有的時候要講話**（F15-2）。選項是執行期來的（那一份 KLARF
         # 有哪些欄），所以「還沒掛第二份」是一個正常狀態 —— 而它畫出來是一塊
         # 空白，讀起來像壞掉。
@@ -989,14 +996,15 @@ class MultiChoicePicker(QWidget):
 
     def text(self) -> str:
         """目前的值（逗號分隔，順序同勾選框）。"""
-        return ",".join(b.text() for b in self._boxes if b.isChecked())
+        return ",".join(self._value_of(b) for b in self._boxes
+                        if b.isChecked())
 
     def set_text(self, value: str) -> None:
         picked = {t.strip() for t in str(value or "").split(",") if t.strip()}
         self._emitting = True
         try:
             for box in self._boxes:
-                box.setChecked(box.text() in picked)
+                box.setChecked(self._value_of(box) in picked)
         finally:
             self._emitting = False
 
@@ -1025,16 +1033,28 @@ class MultiChoicePicker(QWidget):
         self._emitting = True
         try:
             for i, name in enumerate(names):
-                box = QCheckBox(name, self)
-                box.setChecked(name in picked)
-                box.toggled.connect(self._on_toggled)
-                grid.addWidget(box, i // self._PER_ROW, i % self._PER_ROW)
-                self._boxes.append(box)
+                grid.addWidget(self._make_box(name, name in picked),
+                               i // self._PER_ROW, i % self._PER_ROW)
         finally:
             self._emitting = False
 
+    def _make_box(self, name: str, checked: bool) -> QCheckBox:
+        """一顆勾選框：**字是給人看的，屬性是存進 recipe 的**（F117 B2）。"""
+        box = QCheckBox(self._labels.get(name, name), self)
+        box.setProperty("choice", name)
+        box.setChecked(bool(checked))
+        box.toggled.connect(self._on_toggled)
+        self._boxes.append(box)
+        return box
+
+    @staticmethod
+    def _value_of(box: QCheckBox) -> str:
+        """這一顆代表的**值**（不是它畫出來的字）。"""
+        return str(box.property("choice") or box.text())
+
     def choice_names(self) -> List[str]:
-        return [b.text() for b in self._boxes]
+        """畫面上列得出來的每一顆的**值**（不是 label）。"""
+        return [self._value_of(b) for b in self._boxes]
 
     def _on_toggled(self, _checked: bool) -> None:
         if not self._emitting:

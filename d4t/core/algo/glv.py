@@ -103,7 +103,7 @@ class ROI:
 
 
 def quantile_of(mid: str) -> Optional[int]:
-    """Percentile for a quantile metric id (``glv_q90`` -> 90), else None."""
+    """Percentile for a quantile metric id (``glv_q90`` → 90), else None."""
     if mid.startswith("glv_q") and mid[5:].isdigit():
         return int(mid[5:])
     return None

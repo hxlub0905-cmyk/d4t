@@ -219,7 +219,7 @@ TAB_GALLERY = 1
 _FEATURE_PLACEHOLDER = "Insert feature ▾"
 _SCORE_HELP = ("The score is an expression whose variables are the feature names "
                "produced by the pipeline above (e.g. snr_max, area_px, "
-               "glv_max). score >= threshold -> bin 1, otherwise bin 0. "
+               "glv_max). score >= threshold → bin 1, otherwise bin 0. "
                "You can use + - * / ( ) and sqrt / abs / min / max.")
 
 
@@ -1536,7 +1536,12 @@ class StudioWindow(QMainWindow):
         **打字時不會走到這裡** —— 那一格是直接寫 model 的，而 `DecidePanel`
         自己會跳過「有人正在打字」的重建（見它的 `refresh`）。
         """
-        self.decide_panel.refresh()
+        # ⚠ **收起來的樹上沒有菱形**（F117 A5）：面板那句「去點一顆菱形」
+        # 要跟著畫布的狀態換一句話。`set_tree_collapsed` 自己會 refresh。
+        # ⚠ `getattr`：這一支在**畫布還沒組出來之前**就會被叫到一次。
+        self.decide_panel.set_tree_collapsed(
+            getattr(getattr(self, "canvas", None), "tree_collapsed",
+                    bool)())
         self.pipeline.set_score_summary(self._score_summary_text())
 
     def _on_decide_mode(self, on: bool) -> None:

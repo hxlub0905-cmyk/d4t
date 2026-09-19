@@ -981,7 +981,8 @@ class ParamForm(QWidget):
             w = MultiChoicePicker(
                 choices, "" if value is None else str(value),
                 empty_hint=self._EMPTY_HINTS.get(
-                    str(spec.get("choices_from") or ""), ""))
+                    str(spec.get("choices_from") or ""), ""),
+                labels=spec.get("choice_labels") or {})
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

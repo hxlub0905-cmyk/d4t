@@ -322,7 +322,7 @@ def half_period_check(image: Any, px: float, py: float, *,
                     best = int(near[np.argmin(np.abs(near - 2.0 * p))])
                     new = float(algo_period._parabolic(np.asarray(line, np.float64), best)[0])
             out.notes.append("the period %s was doubled after the half-period "
-                             "check (%s -> %s px); rows are probably staggered"
+                             "check (%s → %s px); rows are probably staggered"
                              % (words[i], fmt_px(p), fmt_px(new)))
             periods[i] = new
             doubled[i] = True

@@ -560,7 +560,7 @@ def _route_by_from_json(raw: Any) -> Optional["RouteBy"]:
     missing = [k for k in ("column", "map") if k not in raw]
     if missing:
         raise RecipeError("route_by is missing %s - it needs 'column' (the "
-                          "KLARF column to look at) and 'map' (value -> route "
+                          "KLARF column to look at) and 'map' (value → route "
                           "name)" % missing)
     m = raw["map"]
     if not isinstance(m, dict):
@@ -2984,7 +2984,7 @@ class Recipe:
 
         if not isinstance(d["routes"], dict):
             raise RecipeError("recipe JSON field 'routes' must be an object "
-                              "(dict) of route name -> list of step ids, got "
+                              "(dict) of route name → list of step ids, got "
                               "%s" % type(d["routes"]).__name__)
         routes: Dict[str, List[str]] = {}
         for k, v in dict(d["routes"]).items():

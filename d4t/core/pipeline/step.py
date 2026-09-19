@@ -632,9 +632,11 @@ class ParamSpec:
             raise ParamError(f"parameter '{self.name}': only chip_choice "
                              f"takes icons")
         if self.choice_labels:
-            if self.type != "chip_choice":
+            # F117 B2：`multi_choice` 也收 —— 那一格的選項名同樣是 recipe 的
+            # 鍵（`cv_pct`），而勾選格子上以前就把那個鍵直接寫出來了。
+            if self.type not in ("chip_choice", "multi_choice"):
                 raise ParamError(f"parameter '{self.name}': only chip_choice "
-                                 f"takes choice_labels")
+                                 f"and multi_choice take choice_labels")
             unknown = [v for v in self.choice_labels
                        if v not in (self.choices or [])]
             if unknown:

@@ -104,7 +104,7 @@ THEME_KEY = "ui/theme"
 _SEG_LINES = (
     ("image", "Make images clean and comparable"),
     ("algo", "Measure numbers from images (quantified evidence)"),
-    ("adc", "Score -> bin -> write back to KLARF"),
+    ("adc", "Score → bin → write back to KLARF"),
 )
 
 def ways_in() -> int:
@@ -681,7 +681,8 @@ class RecipeLibraryDialog(QDialog):
         lines.append("")
         lines.append("score = %s" % (info["expr"] or "(no score expression)"))
         if info["threshold"] is not None:
-            lines.append("threshold = %g (score >= threshold -> bin 1)" % float(info["threshold"]))
+            lines.append("threshold = %g (score >= threshold → bin 1)"
+                         % float(info["threshold"]))
         if info["author"]:
             lines.append("Author: %s" % info["author"])
         return "\n".join(lines)

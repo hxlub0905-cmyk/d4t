@@ -17,7 +17,7 @@ dbcf7ddc11affd20145254f192259784aa3b8789 d4t/core/algo/__init__.py
 ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 17e03ca94f0dd599c67258b0aff775147b9a10f2 d4t/core/algo/edge.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
-24a3b24329aac49f7ffdc78d8ff74ddc38a49c4e d4t/core/algo/glv.py
+d6c3a5eb32faee125931bc684025d20ddf773c71 d4t/core/algo/glv.py
 b288ebe7f0d127ed0b08634ef314c7102e4accea d4t/core/algo/golden.py
 abc681b0dfd485d0526dfa930ac9b3cf22b89ccf d4t/core/algo/grid.py
 b1a09a48d4ae47dde5c94cafc4304e91e9c8dd60 d4t/core/algo/histmatch.py
@@ -26,14 +26,14 @@ b1a09a48d4ae47dde5c94cafc4304e91e9c8dd60 d4t/core/algo/histmatch.py
 3a9c1ca9dbdd84f60766714ffac9445380356bcc d4t/core/algo/normalize.py
 d090bc2eefc1fe45c48d60848280ba323b0ef4a7 d4t/core/algo/pairing.py
 a946c20c02ac548f8b34c08910808135d411b0c3 d4t/core/algo/period.py
-ac2934c2d7cda91e1dcff5def3d9a6e582b6e961 d4t/core/algo/period2d.py
+69d4bd814b171848110b5251b357915d60439407 d4t/core/algo/period2d.py
 acba11d258e8a4fb5250d478a59b2d02fe57fe35 d4t/core/algo/profile.py
 c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
 5cce5bdd16ae3302b243ed606b5795ffb5e8ad59 d4t/core/algo/roi.py
 7ba9df9be2f85d10c0597f0bd64371269a051626 d4t/core/algo/shape.py
 68cc4103e16118ddd9b4a8effdf16a6e805c493a d4t/core/algo/snr.py
 37ca6111e8c24e5e39a05450e4e1ea2d7dd74039 d4t/core/algo/subpixel.py
-c4bfa3ce5c124cbdc104092d03a4f72dc99dc72c d4t/core/algo/template.py
+bf58094e18962f0c30ab6a092d07794f390b7581 d4t/core/algo/template.py
 8f6dfdf253a710588b334e1c009e2521c3bf7e46 d4t/core/algo/uniformity.py
 b5fe256d267f2d487c83b8ac2c036102cbd6f1a4 d4t/core/calibration.py
 78924f0edd38b3d96346542c63372c7fee679a91 d4t/core/export/__init__.py
@@ -67,9 +67,9 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 6b771c0724b4dc46acf411d072d7d9df96718960 d4t/core/pipeline/decide_tree.py
 01642c139af07e3710a304c4e2af480072bea819 d4t/core/pipeline/engine.py
 26b348a8525cbd923e325fe0b6d75413317a3e69 d4t/core/pipeline/expression.py
-522aa6c633361d84877f86870b3137eda125d8bf d4t/core/pipeline/recipe.py
+0df108aa2c68f0124c3de10d0f6a5e0f2a9ebb04 d4t/core/pipeline/recipe.py
 f9758a867504c40c30b0974bb9cd81afe033a8b6 d4t/core/pipeline/sampling.py
-6c51a3f42aaf270b66e6c40597867703d1312f07 d4t/core/pipeline/step.py
+1446d0b346d453a56c223172185d206e7d6311c2 d4t/core/pipeline/step.py
 78f4e6b77a07748b6f6bd2c8072cea8023929c1a d4t/core/pipeline/verdict_features.py
 168c2e3811844d0267a24f4a69963848bd594e60 d4t/core/pipeline/verdict_trace.py
 e4379264e37ab47c37974e94415b2c72386e8932 d4t/core/steps/__init__.py
@@ -81,7 +81,7 @@ e4379264e37ab47c37974e94415b2c72386e8932 d4t/core/steps/__init__.py
 44e60eb24b07f1c59f3d26ce6593dbfd29d4bf83 d4t/core/steps/combine.py
 04d20bfd7351b9868e9af57275b197a4eaebabaf d4t/core/steps/denoise.py
 3c0a7c3a280e1a63d413bac064a3b32e1f24a4c5 d4t/core/steps/flatten.py
-19be9c1ddbaec4e4eba2207d0a4038fd3e241cf6 d4t/core/steps/glv_stats.py
+c00b36a61bd8530a6b140cca6bca897bfa96e669 d4t/core/steps/glv_stats.py
 6374a586fa926b9283a7bdd1f1b75e75466ee449 d4t/core/steps/load.py
 d3e1fe208e365d72f2fdcf9ccdaf543af9cd85a1 d4t/core/steps/load_sidecar.py
 d8b1021ce4eb76b436ba9dea26d62951febd06ac d4t/core/steps/normalize.py
@@ -113,12 +113,12 @@ d076f44d3e88b7a2b5e04bd80a6634a9f3f99e5b d4t/ui/chips.py
 1456ca791afced0be73ecadb874afbdf0f5de7f0 d4t/ui/clipboard.py
 7935652b2c400dcfa78c66dccfd608b61de3b0e9 d4t/ui/crashlog.py
 1c624e7ed4567174f84b00469aa064375537c862 d4t/ui/crop_dialog.py
-0b5b9bda40faab10def35e9e749c3cf7ef5f5d3f d4t/ui/decide_panel.py
+51117c858934adacf0bed57b305d6b46eb8e1181 d4t/ui/decide_panel.py
 9475e553fa9c604e9d301b99c6c5e77bd828fc28 d4t/ui/edit_plan.py
 85971b010d882a877401905910c15f97c1ddcd50 d4t/ui/feature_panel.py
 034c55517b7b5c99060dce0eb77d462f2ad9bb17 d4t/ui/feature_text.py
 53065dce2154c0baf72fc53c96c26818f325c130 d4t/ui/feature_tree.py
-320cf7cb3cd2c7eeaa186810d2920e456cb0d0d7 d4t/ui/fields.py
+81d812fd54d5051cde09909d4950ee9e2df88e2f d4t/ui/fields.py
 54394401c3f2e10bbffe34eb952a045338286943 d4t/ui/fit_screen.py
 609792e09dd861516568287882f085741f21fc67 d4t/ui/focus_visible.py
 ae82608db53dc1f37c582b74c1192261b2051978 d4t/ui/gallery.py
@@ -127,7 +127,7 @@ c7b9f56e7635a148a25c8906d2eaa9dbc7d08027 d4t/ui/gauge_panel.py
 c6babb997a0f6e3c4703e9148d002afbaed23cda d4t/ui/gc_generator.py
 e7df3d112338385785cce94e375e27cee62c7127 d4t/ui/gc_paint.py
 41a693695bda5ebe9689961f36c063d5556831e4 d4t/ui/glyphs.py
-480e6660f5b9015be5047282146bc37c80ec2eb1 d4t/ui/graph_builder.py
+9655d8a0034d6bd218d8f4a9a40b344400fe2280 d4t/ui/graph_builder.py
 0d8522f971e608eb3f97e659741419f648fdba86 d4t/ui/histogram.py
 ca30c29322165e11582d2696336da9deb1c5918f d4t/ui/icons.py
 5c366f8c72112db19328032d72efbed756463190 d4t/ui/image_view.py
@@ -138,7 +138,7 @@ d577ffb1139dedd58a91b63dc21ad922108098c9 d4t/ui/locales/zh_TW.json
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
-f833c92e7f7d4e409ac777ab681db38434d619e1 d4t/ui/param_form.py
+45c81c5ea8659fb6946f692f393eaa55d29eace5 d4t/ui/param_form.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 8b27913e9a32d324381a1e00dca9e53b267711fc d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
@@ -153,7 +153,7 @@ acee90a6152ed5654699f853ebab9c7f30050832 d4t/ui/run_controller.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-5d6473eaf2b77a3f161b7dfdd0ebd5cc9953c037 d4t/ui/studio.py
+116557a77f4dafefa7e2399ba1da0b4eaa9a0df6 d4t/ui/studio.py
 0a033283dc7745779c44c2a28026cbb836627661 d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
@@ -164,7 +164,7 @@ e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 363b7e077297333d0e6a1556af81841bff9bddb1 d4t/ui/uniformity_window.py
 6da43c6279ecdf777612100e67613f482c269d33 d4t/ui/verdict_band.py
 97c95b0619fbd49e733f7570a271061d21dfe92f d4t/ui/viewmodel.py
-a4cb05e2efedb1d035357ce9a52e146c8bc17237 d4t/ui/welcome.py
+4e506f213c6a3f081e19a7114b63fcad5fa6b6ae d4t/ui/welcome.py
 1eb8e9d6aebe6030949046333341c1a92f0822ff d4t/ui/why_panel.py
 eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 177aee81e7bb41dfc5c83fdd0ebe469d84f0e6b2 d4t/ui/windows_menu.py
@@ -366,6 +366,7 @@ dd44172aed175c05a9dfca9295969a2470b404a7 tests/test_ui_canvas_ports.py
 650c29eb505d72a276eb6ee3848c0425f1d81cac tests/test_ui_canvas_truth.py
 d8a004cf1f5cb33b9b3b7285265caea6a4721e57 tests/test_ui_chart_settings.py
 8f0ef2de7c4c1408fa65aa2e004272247d6d8b45 tests/test_ui_charts_window_says_whose.py
+3fc3923a19d22db7f2ae6989ff3ca8afc0e8dc24 tests/test_ui_choice_labels.py
 6b3063053397eed7b5b2dff79a665297d0574095 tests/test_ui_contrast.py
 aa3582995d2196b03cc865f531628e7d22055f5c tests/test_ui_controls_readable.py
 1bbee8aa872f6531b55f963988acf9891832343b tests/test_ui_crashlog.py
@@ -450,6 +451,7 @@ a1db517de73145ea6335bba5b7c92979bd9c7289 tests/test_ui_small_screen.py
 9e74f08478ccac523398487764e72763368ca078 tests/test_ui_strings.py
 7c1456ed258852bd03470a01d98a69a9fe06ec1f tests/test_ui_studio_m5.py
 66f790165a3ef3a52bca247804b65d59bfd241c0 tests/test_ui_studio_smoke.py
+73fb14cea33e50e8c4b7fe806eb1c449f34c66a9 tests/test_ui_symbols.py
 cd74ab49f2bac6958ff5eee6597096b58ee1a05f tests/test_ui_template_dialog.py
 4afcc5dde93d4638226f8e8e6b5951c2180e3ed6 tests/test_ui_template_library.py
 08bacfb75a1edef9872b8db5e7d3fe04370040f9 tests/test_ui_tree_canvas.py

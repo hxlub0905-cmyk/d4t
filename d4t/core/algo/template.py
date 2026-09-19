@@ -342,7 +342,7 @@ def _measure_period(gray: np.ndarray,
                                     ("down", py, hp.doubled_y, fy)):
         if doubled:
             notes.append("the period %s was doubled after the half-period check "
-                         "(%s -> %s px); rows are probably staggered"
+                         "(%s → %s px); rows are probably staggered"
                          % (axis, algo_period2d.fmt_px(was), algo_period2d.fmt_px(now)))
     return MeasuredPeriod(px=fx, py=fy, conf_x=cx, conf_y=cy,
                           notes=notes, stagger=float(hp.stagger),

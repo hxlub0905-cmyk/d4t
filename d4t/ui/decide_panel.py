@@ -191,6 +191,9 @@ class DecidePanel(QWidget):
         self._tips: Dict[str, str] = {}
         self._counts: Dict[int, int] = {}
         self._purity: Dict[int, Any] = {}
+        #: 畫布上那棵樹收起來了沒有（F117 A5）—— 收著的時候畫布上一顆菱形
+        #: 都沒有，而這個面板照樣叫人去點菱形。由宿主餵（`set_tree_collapsed`）。
+        self._tree_collapsed = False
         self._building = False
         #: 有人在打字時來的重建請求記在這裡，等焦點離開再補（見 `refresh`）。
         self._stale = False
@@ -235,6 +238,27 @@ class DecidePanel(QWidget):
         outer.addWidget(self.scroll, 1)
 
     # ---- 外面餵進來的東西 --------------------------------------------------
+    def set_tree_collapsed(self, on: bool) -> None:
+        """畫布上那棵樹**收起來了沒有**（F117 A5）。
+
+        沒有這一格的時候，面板照樣寫「click a diamond on the canvas」——
+        而樹收著的時候畫布上一顆菱形都沒有。**一句叫人去點看不到的東西的
+        提示，比沒有提示糟**：他會以為是自己找不到。
+
+        ⚠ **永遠 refresh，不要「沒變就跳過」**：`_sync_score_widgets` 現在是
+        走這一支進來的，而它的契約是「model 換過之後重畫一次」—— 提早
+        return 的那一版會讓載入 recipe 之後的面板停在舊的。
+        """
+        self._tree_collapsed = bool(on)
+        self.refresh()
+
+    def _where_to_edit(self) -> str:
+        """「去哪裡編輯這棵樹」—— 樹收著與攤開是兩句不同的話。"""
+        if self._tree_collapsed:
+            return ("double-click the Decision card on the canvas to show "
+                    "the tree, then click a diamond to edit a step")
+        return "click a diamond there to edit a step"
+
     def set_model(self, model: Any) -> None:
         self._model = model
         self.refresh()
@@ -314,8 +338,8 @@ class DecidePanel(QWidget):
         if on:
             tree = getattr(m.decide, "tree", None) is not None
             self.head.setText(
-                "The decision tree on the canvas does the sorting - click a "
-                "diamond there to edit a step." if tree else
+                "The decision tree on the canvas does the sorting - %s."
+                % self._where_to_edit() if tree else
                 "Read top to bottom - the first rule that matches is the "
                 "answer. Reordering the rules is how you change which one "
                 "wins.")
@@ -359,8 +383,10 @@ class DecidePanel(QWidget):
             self.body_lay.addWidget(self._section(
                 "Sorting",
                 "This recipe sorts with the decision tree on the canvas"))
-            note = QLabel("Click a diamond on the canvas to edit a step, "
-                          "or a tray to edit a class.")
+            note = QLabel(
+                "%s%s, or a tray to edit a class."
+                % (self._where_to_edit()[0].upper(),
+                   self._where_to_edit()[1:]))
             note.setObjectName("paramHint")
             note.setWordWrap(True)
             self.body_lay.addWidget(note)
