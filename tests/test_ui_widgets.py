@@ -1195,26 +1195,37 @@ def test_verdict_chip(qapp):
     chip = widgets_mod.VerdictChip()
     assert chip.text() == "—" and chip.tone() == "neutral"
 
+    # ⚠ **沒標就是中性灰**（F119）。以前這裡是「bin 1 → 綠、bin 0 → 紅」，
+    # 而那個對應是**看號碼猜的** —— 三份出貨的 recipe 全反了（F117 D2）。
+    # 一個很有把握的錯顏色比沒有顏色糟得多：使用者會相信它。
     chip.set_verdict(1)
     assert chip.text() == "bin 1 · ≥ threshold"
-    assert chip.tone() == "good"
-    assert theme_mod.TOKENS["chip_good_bg"] in chip.styleSheet()
+    assert chip.tone() == "neutral"
     assert chip.verdict() == 1
 
     chip.set_verdict(0)
     assert chip.text() == "bin 0 · < threshold"
+    assert chip.tone() == "neutral"
+
+    # 標了才有顏色 —— 而**字跟著顏色走**（U13 的第二個通道）。
+    chip.set_verdict(0, label="nothing stands out", outcome="good")
+    assert chip.text() == "nothing stands out · bin 0 · good"
+    assert chip.tone() == "good"
+    assert theme_mod.TOKENS["chip_good_bg"] in chip.styleSheet()
+
+    chip.set_verdict(1, label="a spot stands out", outcome="bad")
+    assert chip.text() == "a spot stands out · bin 1 · review"
     assert chip.tone() == "bad"
     assert theme_mod.TOKENS["chip_bad_bg"] in chip.styleSheet()
 
-    # is_real_style：bin 1 = 抓到真缺陷 = 壞消息（紅），bin 0 = 乾淨（綠）。
-    # ⚠ **字也要跟著翻面**（U13，2026-09-08）。這幾行以前斷言的是
-    # 「文字兩種模式都一樣，只有顏色換邊」—— 而那正是那一輪要修掉的 bug：
-    # 同一個綠色 chip 在兩份 recipe 裡意思相反，畫面上沒有東西講得出是哪一種。
-    # 完整的一組在 tests/test_ui_verdict_wording.py。
-    chip.set_verdict(1, is_real_style=True)
-    assert chip.text() == "real · bin 1" and chip.tone() == "bad"
-    chip.set_verdict(0, is_real_style=True)
-    assert chip.text() == "nuisance · bin 0" and chip.tone() == "good"
+    # 中性是**說了**沒有主張 —— 不加字（加了會讓人以為系統說了什麼）。
+    chip.set_verdict(2, label="more than one box is off", outcome="neutral")
+    assert chip.text() == "more than one box is off · bin 2"
+    assert chip.tone() == "neutral"
+
+    # 打錯的值不猜（同 `bin_outcomes` 丟掉認不得的值）。
+    chip.set_verdict(1, label="x", outcome="gud")
+    assert chip.tone() == "neutral" and chip.text() == "x · bin 1"
 
     chip.set_verdict(None)
     assert chip.text() == "—" and chip.verdict() is None

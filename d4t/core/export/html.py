@@ -78,6 +78,9 @@ th{background:#f4f5f7;position:sticky;top:0;text-align:center}
 .more button{font:inherit;margin-left:8px;padding:2px 10px;cursor:pointer}
 td.id,td.err{text-align:left} tr.bad td{background:#fdeeeb}
 tr.pick td{outline:2px solid #3574d6;outline-offset:-2px}
+.run{margin:0 0 18px;font-size:12px;color:#444;display:grid;
+ grid-template-columns:max-content 1fr;gap:2px 14px}
+.run dt{color:#888} .run dd{margin:0}
 .cards{margin:0 0 18px;font-size:12px;color:#444}
 .cards b{font-weight:600}
 .verdict{margin:0 0 18px}
@@ -268,11 +271,32 @@ _VIEWER_JS = """
 """
 
 
+def _run_html(info: Sequence[Sequence[Any]]) -> List[str]:
+    """報表頭上那一塊「這是哪一次跑的」（F117 F2）。
+
+    **一份報表離開這台電腦之後，這幾行是唯一追得回來的東西。** 走查記的原話
+    是「檔案一離開電腦就追不回是哪一次跑的」—— 而 xlsx 的摘要頁本來就有
+    recipe 那一段，HTML 什麼都沒有。
+
+    ⚠ **內容不在這裡決定**：那幾列由 `export/report.run_info()` 產，兩份檔案
+    **同源**（F2 要的就是這件事）。這一支只負責把它畫成 ``<dl>``。
+    """
+    if not info:
+        return []
+    out = ["<dl class='run'>"]
+    for name, value in info:
+        out.append("<dt>%s</dt><dd>%s</dd>" % (escape(name), escape(value)))
+    out.append("</dl>")
+    return out
+
+
 def _page_head(title: str, rows: Sequence[Dict[str, Any]],
-               decide: Any = None, note: str = "") -> List[str]:
+               decide: Any = None, note: str = "",
+               info: Sequence[Sequence[Any]] = ()) -> List[str]:
     """兩份報表**逐字相同**的那個開頭（F37 B2）。
 
-    標題、「幾顆／幾顆沒跑起來／bins 摘要」那一行、可有可無的一句說明，
+    標題、「幾顆／幾顆沒跑起來／bins 摘要」那一行、這一次跑的身分
+    （``info``，見 :func:`_run_html`）、可有可無的一句說明，
     以及第 1 段「判定」。
 
     以前這 14 行在 :func:`build_report` 與 :func:`build_char_report` 裡各寫
@@ -293,6 +317,7 @@ def _page_head(title: str, rows: Sequence[Dict[str, Any]],
            % (len(rows),
               (" &middot; <b>%d did not run</b>" % n_bad) if n_bad else "",
               escape(bin_summary(bins)))]
+    out += _run_html(info)
     if note:
         out.append("<p class='cards'>%s</p>" % escape(note))
     out += _verdict_html(decide_tree.verdict_rows(decide, rows))
@@ -338,7 +363,8 @@ def build_report(rows: Sequence[Dict[str, Any]], title: str,
                  feature_keys: Sequence[str],
                  decide: Any = None,
                  images: Optional[Dict[Any, str]] = None,
-                 cards: str = "") -> str:
+                 cards: str = "",
+                 info: Sequence[Sequence[Any]] = ()) -> str:
     """整批的結果 → 一份完整的 HTML 頁（字串）。
 
     ``images`` 是 ``{defect_id: 相對路徑}``。給了就多一欄可以點的列與一個
@@ -349,7 +375,7 @@ def build_report(rows: Sequence[Dict[str, Any]], title: str,
     keys = list(feature_keys or [])
     imgs = {str(k): str(v) for k, v in (images or {}).items()}
 
-    out = _page_head(title, rows, decide, cards)
+    out = _page_head(title, rows, decide, cards, info)
     out.append("<h2>2 &middot; Which ones%s</h2>"
                % (" (click a row to see it)" if imgs else ""))
     if imgs:
@@ -403,7 +429,8 @@ def build_char_report(rows: Sequence[Dict[str, Any]], title: str,
                       verdicts: Optional[Dict[Any, Dict[str, Any]]] = None,
                       decide: Any = None,
                       headings: Sequence[str] = ("ground truth", "second lot"),
-                      note: str = "") -> str:
+                      note: str = "",
+                      info: Sequence[Sequence[Any]] = ()) -> str:
     """characterization 的點對點報表 —— **一顆一列，圖跟數字在同一列上**。
 
     跟 :func:`build_report` 的差別只有一個，而那個差別就是這張卡存在的理由：
@@ -426,7 +453,7 @@ def build_char_report(rows: Sequence[Dict[str, Any]], title: str,
     seats = {str(k): dict(v or {}) for k, v in (verdicts or {}).items()}
     left, right = (list(headings) + ["ground truth", "second lot"])[:2]
 
-    out = _page_head(title, rows, decide, note)
+    out = _page_head(title, rows, decide, note, info)
     out.append("<h2>2 &middot; Defect by defect</h2>")
     out.append("<div class='tablewrap'><table><thead><tr>"
                "<th>defect</th>"

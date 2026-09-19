@@ -3,7 +3,10 @@
 狀態：**進行中（2026-09-19）** —— F116 拆完了，開始做。第一批挑的是**「一改多條」的根因群**（不是照 P1/P2/P3 走）：
 已完成 **A3＋J2**（選到的卡捲進視野）、**I1**（縮圖 bin 顏色走共用調色盤）、**F6＋I5**（報表的數字跟畫面同一條規則）、
 **G1**（歡迎頁不介紹打不開的東西）、**F1**（輸出檔的 score 欄不重複）、
-**J1＋I11＋J5＋J6**（使用者面的字 —— 整群走 [F118](../history/plans/F118-user-facing-wording.md)）。
+**J1＋I11＋J5＋J6**（使用者面的字 —— 整群走 [F118](../history/plans/F118-user-facing-wording.md)）、
+**D2**（哪一個 bin 是好消息 —— [F119](../history/plans/F119-which-bin-is-good-news.md)）、
+**F2**（報表講得出這是哪一次跑的）＋ **F6 的前半**（標題不再用 recipe id）。
+**P1 到此全部關掉。**
 中文化（H5）這一輪**不碰**（使用者決定：那一條要先有 2–3 位目標使用者試用）。
 
 ⚠ **做的時候查出兩條跟原本寫的不一樣**，已改在下面：**D2** 不是 I1 的同一個病根（撤回它的推測）、**D3** 撤回（那個位數是算過的）。
@@ -25,7 +28,7 @@
 | # | 問題 | 建議 | 查證 |
 |---|---|---|---|
 | J1 ✅ | **錯誤訊息是給開發者看的**（同 I11／J5／J6 —— 同一個病根）| **做完了：[`F118`](../history/plans/F118-user-facing-wording.md) 五步全做完。**`Issue` 加選配的結構化欄位（預設空，所以 48 個產地一條一條搬），UI 新增 `ui/wording.py` 組句子；`detail` 不刪，CLI 照舊。⚠ 查出來 **`StepError` 那一半已經有結構了**（`step_key` ＋ 不含前綴的 `detail`），UI 只是沒用它。⚠ 產地是 **48 不是 63**：`klarf_core.Issue` 是另一個 class | ✅ 真的跑出一句來看過（`route 'ebi_patch': the variables ['nosuch_feature'] … (['cd_axis_deg', …20 幾個…])`）|  **已關（F118）**
-| F2 | `report.html` 沒有執行資訊：只有 recipe id 與 bin 計數，沒有日期、來源 KLARF、recipe 版本、d4t 版本／build id、取樣方式。檔案一離開電腦就追不回是哪一次跑的（`report.xlsx` 的摘要頁有 recipe 資訊，HTML 沒有） | HTML 報表頭加一塊 metadata，與 xlsx 摘要頁同源 | ✅ 讀過輸出檔全文 |
+| F2 ✅ | **做完** —— 而且不只 HTML：`d4t export` 產的 xlsx 以前連 recipe 那一段都沒有（沒傳 `recipe=`），現在兩個路徑都蓋上 `run_info()` 那一塊，**HTML 與 xlsx 同源**。⚠ `d4t export` 蓋的是**那一次跑的時間**（從批次歷史的 `created_utc`），不是現在 —— 對一份三個月前的 run 蓋上今天的日期比沒有日期更糟。原本記的：`report.html` 沒有執行資訊：只有 recipe id 與 bin 計數，沒有日期、來源 KLARF、recipe 版本、d4t 版本／build id、取樣方式。檔案一離開電腦就追不回是哪一次跑的（`report.xlsx` 的摘要頁有 recipe 資訊，HTML 沒有） | HTML 報表頭加一塊 metadata，與 xlsx 摘要頁同源 | ✅ 讀過輸出檔全文 |
 | G1 | ✅ **做完** —— 而且不只一處：`welcome.py:111` 那一句、`btn_open` 的 tooltip（`the other three kinds`，也點名了 multi-page TIFF）、還有頁尾那句 **`the four kinds of data it reads`**（`INPUT_SOURCES` 是**三**條）| **改法不是「改字」**：`InputSource` 的說明寫著那張表存在的理由是「同一組入口被抄在三個地方…三份會漂」—— **導覽這一段就是那第三份**，從來沒被改成從表上長。所以導覽**不再列清單**（留給真的一種一列的空白狀態），數量一律數出來（`ways_in()`）。`_FOOTER_HINT` 常數改成函式 —— 它在 import 那一刻算，換 profile 之後會停在舊分支（U10 漏網的那一個）| ✅ 三條測試：不准再列清單、數字要用數的、以及一根釘死 `tiff_stack` 的回歸釘 |
 | A3 | ✅ **做完** —— 在 Tune 模式選取一張卡，畫布不會把它捲進視野 | 新增 `canvas.ensure_card_visible()`（**只捲，不亮** —— `reveal_cards` 那一套的 hover 高亮是給「指給我看」用的），`select_node` 叫它。⚠ **沒有接進 `set_selected`**：那一支在重建路徑上也會被叫到，接上去使用者每拖一次參數畫布就把他捲回去 | ✅ 附帶發現：`_on_problem_activated` 的說明從 U2 起就寫著「選中那張卡並捲到它」—— **那句話描述的行為一直不存在** |
 
@@ -59,7 +62,7 @@
 | B4 | `Write charts` 卡：`At most this many defects 0`（0＝無上限？）、第五格勾選框叫 `chart`、`Enabled` 當 label | 0 顯示 `All`；`Your own chart`；具體動詞 | ✅ |
 | C2 | Features 同名多列：`clip_frac` 三列、`peak` 兩列。說明文字有寫「kept under this name because a later card wrote over it」，但要讀完那句才懂 | 名字後面直接帶來源卡（`clip_frac · Normalize(ref)`） | ✅（屬既有設計的呈現問題）|
 | D1 | 「preview stops at "norm" — press Esc to run the decision too」：Esc 是「取消選取」，句子是對的，但很難被想到 | 旁邊放一顆 `Run to the end` | ✅ |
-| D2 | 均勻度 verdict `measured · bin 0` 是紅色 chip，讀起來像「壞」 | **原因查出來了，而原本的推測不成立**：`VerdictChip` 是**二元 pass/fail**（bin 1 = good、其餘 = bad），那是 U13 刻意的設計 —— `is_real_style` 會把紅綠對調，而且對調時 chip 自己的字跟著翻面（`real`／`nuisance`），還有第三個通道（框線樣式）給色覺缺陷者。改成 `leaf_color` 會把那整套拆掉。**真正的問題是語意**：均勻度那份 recipe 裡 `bin 0` 是「量到了、沒有異常」＝好消息。⚠ **需要使用者決定**：「哪一個 bin 是好消息」該由誰說 —— recipe？還是照 `is_real_style` 那樣由判定段宣告？ | ✅ `feature_text.py:356`（`tone = "good" if is_real_style else "bad"`）|
+| D2 ✅ | 均勻度 verdict `measured · bin 0` 是紅色 chip，讀起來像「壞」 | **原因查出來了，而原本的推測不成立**：`VerdictChip` 是**二元 pass/fail**（bin 1 = good、其餘 = bad），那是 U13 刻意的設計 —— `is_real_style` 會把紅綠對調，而且對調時 chip 自己的字跟著翻面（`real`／`nuisance`），還有第三個通道（框線樣式）給色覺缺陷者。改成 `leaf_color` 會把那整套拆掉。**真正的問題是語意**：均勻度那份 recipe 裡 `bin 0` 是「量到了、沒有異常」＝好消息。⚠ **需要使用者決定**：「哪一個 bin 是好消息」該由誰說 —— recipe？還是照 `is_real_style` 那樣由判定段宣告？ | ✅ `feature_text.py:356`（`tone = "good" if is_real_style else "bad"`）|  **已關（[F119](../history/plans/F119-which-bin-is-good-news.md) 五步）**：葉子自己標 `outcome`，膠囊的顏色／字／框線三條都吃它。⚠ **實測是三份出貨 recipe 全反**，不只均勻度那一條
 | ~~D3~~ | ~~`score 0.27895` 小數位多~~ | **撤回** —— 它**已經**走 `numbers.py`，而那 5 位是 F52 算過的：`%.4g` 會把 `99.995` 印成 `100`，於是同一顆在 Results 是 100、點進去是 99.995。縮短它等於把 F52 修掉的 bug 放回來。（移到下面的撤回表）| ✅ `core/numbers.py` 的模組說明 |
 | D4 | Decision / Verdict / bin / class / score 多種叫法 | 一張詞彙表 | ✅ |
 | E2 | 縮圖第一行是類別名（R5 的刻意設計），但 M 尺寸下被截成 `a spot stands …`；色條沒有圖例 | 截斷時用 tooltip；Results 放 bin 色圖例 | ✅ |
@@ -69,7 +72,7 @@
 | E7 | `12% real` 要想一下才懂 | `4 real (missed)` | ✅ |
 | F3 | CSV／報表預設不帶 KLARF 座標與原始欄位（機制 `carry_klarf_columns` 已有，是 recipe 沒開） | 出貨的 recipe 預設打開 | ✅ |
 | F5 | 均勻度 CSV 欄名 `cells_cells_area_px` —— 區域剛好叫 `cells`，又疊上 ROI 卡自己的 `cells_` 前綴 | 前綴規則遇到同名不疊，或出貨 recipe 換區域名 | ✅ |
-| F6 | `report.html` 標題用 recipe id；`glv_pixels` 顯示 `1.638e+04`；表格太寬 | 標題用檔名或描述；整數不用科學記號 | ✅ |
+| F6 | ~~標題用 recipe id~~（**做完**：改成「使用者打的字 → recipe 的描述 → recipe id」）、~~`glv_pixels` 顯示 `1.638e+04`~~（**I5 做完了**）；**剩下：表格太寬** | 標題用檔名或描述；整數不用科學記號 | ✅ |
 | F7 | `field.html` 四張圖單欄，寬頁右半空白 | 2×2 | ✅ |
 | F8 | 熱圖刻度 `27.50`；Box plot 標題靠左、其他置中；Position profile 虛線／點線無圖例；摘要表 `range` 為 `-` | 刻度取整；對齊統一；補圖例 | ✅ |
 | G2 | 歡迎頁畫三段（引擎軸），卡片庫是七段（使用者軸）。README 說兩軸刻意並存 | 歡迎頁加一句說明兩者關係即可 | ✅（既有設計，只是第一次見面沒講）|

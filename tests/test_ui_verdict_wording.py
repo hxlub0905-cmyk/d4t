@@ -1,10 +1,15 @@
 # U13 / X7：判定的意思寫在字上，不寄生在顏色與編號上 — authored 2026-09-08.
 """**同一個綠色 chip 在兩份 recipe 裡意思相反。**
 
-`VerdictChip` 有一個 `is_real_style` —— 它為真時紅綠對調（bin 1 = 抓到真缺陷
-= 壞消息）。而在這一輪之前，**兩種模式的文字一模一樣**，只有顏色換邊：畫面上
-沒有任何東西講得出現在是哪一種。再加上紅綠對色覺缺陷者不可分辨（男性約 8%），
-整張 chip 的意思等於押在一個有些人看不見、而且會反轉的通道上。
+`VerdictChip` 以前有一個 `is_real_style` —— 它為真時紅綠對調（bin 1 = 抓到
+真缺陷 = 壞消息）。而在那一輪之前，**兩種模式的文字一模一樣**，只有顏色換邊：
+畫面上沒有任何東西講得出現在是哪一種。再加上紅綠對色覺缺陷者不可分辨（男性約
+8%），整張 chip 的意思等於押在一個有些人看不見、而且會反轉的通道上。
+
+⚠ **F119（2026-09-20）把那個旗標刪了，而這幾條一條都沒有失效。** 刪的理由是
+它從來沒有呼叫端，而且它要解的「同一個綠色在兩份 recipe 裡意思相反」在
+`outcome`（寫 recipe 的人自己標）之後從根上不存在了。這一節守的東西沒有變：
+**顏色說了什麼，字就要說得出同一件事。**
 
 X7 是同一個根的另一半：使用者腦中的字彙是 **class**，不是 bin —— 而那些名字
 （`Rule.label` / `TreeLeaf.label` / `otherwise_label`）從 F21-D／F24 起就存得
@@ -85,21 +90,27 @@ def test_the_name_comes_first_and_the_bin_is_the_footnote(qapp):
 def test_when_the_colour_flips_the_word_flips_with_it(qapp):
     """**這是 U13 的整條命。**
 
-    以前 `is_real_style` 只換顏色不換字，於是綠色 chip 的意思要靠讀 recipe 才
-    知道。現在那個模式自己說出 real / nuisance。
+    顏色說了什麼，字就要說得出同一件事 —— 不然色覺缺陷者（男性約 8%）手上
+    只剩一條看不見的通道。
+
+    ⚠ **F119 改了顏色的來源，沒有改這條命。** 以前紅綠是 `is_real_style`
+    在翻（而那個旗標從來沒有呼叫端），現在是寫 recipe 的人自己標的
+    `outcome`。所以這一條問的變成：**同一個名字、同一個 bin，只有 `outcome`
+    不同的時候，字要不一樣。**
     """
     from d4t.ui.widgets import VerdictChip
     chip = VerdictChip()
     try:
-        chip.set_verdict(1, is_real_style=False)
-        plain_one = chip.text()
-        chip.set_verdict(1, is_real_style=True)
-        real_one = chip.text()
-        assert plain_one != real_one, \
-            "兩種模式的字一樣的話，顏色又變回唯一的通道了"
-        assert "real" in real_one
-        chip.set_verdict(0, is_real_style=True)
-        assert "nuisance" in chip.text()
+        chip.set_verdict(1, label="a spot stands out", outcome="good")
+        as_good = chip.text()
+        chip.set_verdict(1, label="a spot stands out", outcome="bad")
+        as_bad = chip.text()
+        assert as_good != as_bad, \
+            "只有顏色不一樣的話，顏色又變回唯一的通道了"
+        assert chip.tone() == "bad"
+        # 中性是**說了**沒有主張，所以它跟那兩個都不一樣（而且不加字）。
+        chip.set_verdict(1, label="a spot stands out", outcome="neutral")
+        assert chip.text() not in (as_good, as_bad)
     finally:
         chip.deleteLater()
 
@@ -107,8 +118,8 @@ def test_when_the_colour_flips_the_word_flips_with_it(qapp):
 def test_without_a_name_it_says_only_what_it_knows(qapp):
     """沒名字、也不知道 bin 1 是不是真缺陷 —— 那時候唯一知道的是門檻關係。
 
-    這一格不該假裝知道更多（不要預設 bin 1 就叫 real：那正是 `is_real_style`
-    存在的理由 —— 有些 recipe 反過來）。
+    這一格不該假裝知道更多（不要預設 bin 1 就叫 real —— 有些 recipe 反過來，
+    而那正是 F119 的 `outcome` 存在的理由）。
     """
     from d4t.ui.widgets import VerdictChip
     chip = VerdictChip()
@@ -124,12 +135,17 @@ def test_without_a_name_it_says_only_what_it_knows(qapp):
 
 
 def test_a_name_beats_the_real_wording(qapp):
-    """使用者自己打的字排在我們發明的字前面。"""
+    """使用者自己打的字**排在最前面**（X7）。
+
+    好壞那個詞接在後面而不是搶在前面：他要找的是「這一顆被判成什麼」，
+    而那是他自己取的名字。
+    """
     from d4t.ui.widgets import VerdictChip
     chip = VerdictChip()
     try:
-        chip.set_verdict(1, is_real_style=True, label="killer particle")
+        chip.set_verdict(1, label="killer particle", outcome="bad")
         assert chip.text().startswith("killer particle")
+        assert chip.text().endswith("review")
     finally:
         chip.deleteLater()
 
@@ -147,8 +163,8 @@ def test_each_tone_looks_different_without_colour(qapp):
     chip = VerdictChip()
     try:
         seen = set()
-        for b, real in ((1, False), (1, True), (None, False)):
-            chip.set_verdict(b, is_real_style=real)
+        for b, out in ((1, "good"), (1, "bad"), (None, "")):
+            chip.set_verdict(b, outcome=out)
             style = chip.styleSheet()
             seen.add(style[style.index("border:"):style.index("border-radius")])
         assert len(seen) == 3, "chip 真的畫出來的框線沒有三種：%s" % seen
@@ -167,9 +183,9 @@ def test_the_chip_does_not_lean_on_a_font_the_fab_may_not_have(qapp):
     risky = "●○◐◀▶▾△✓✗✕■□"
     chip = VerdictChip()
     try:
-        for b, real, label in ((1, False, ""), (0, True, ""), (1, True, "x"),
-                               (None, False, ""), (7, False, "")):
-            chip.set_verdict(b, is_real_style=real, label=label)
+        for b, out, label in ((1, "", ""), (0, "good", ""), (1, "bad", "x"),
+                              (None, "", ""), (7, "neutral", "")):
+            chip.set_verdict(b, label=label, outcome=out)
             hit = [ch for ch in chip.text() if ch in risky]
             assert not hit, "chip 的字用了不保證有字型的字元：%s" % hit
     finally:

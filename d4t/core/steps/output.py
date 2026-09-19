@@ -1030,8 +1030,22 @@ class OutputReportStep(_OutputStep):
         # 那是合併帶進來的、以前不存在的壞法。所以規則是：**一樣失敗就是一句
         # 話，不連坐**；勾了的全部失敗才 raise（那時候這張卡真的什麼都沒做，
         # 而「跑完了但資料夾是空的」比一個錯誤訊息糟得多）。
+        # 標題：使用者打的字 → recipe 的描述 → recipe id（F117 F6 的前半）。
+        # ⚠ **`recipe_id` 排最後**：它是 JSON 的鍵（`ebi_die_to_die`），不是
+        # 一份報表的標題 —— 而描述是使用者自己寫的一句話。
+        rd = (bctx.recipe.to_json_dict()
+              if hasattr(bctx.recipe, "to_json_dict") else {})
         title = (str(p["title"]).strip()
+                 or str(rd.get("description") or "").strip()
                  or str(getattr(bctx.recipe, "recipe_id", "") or "d4t results"))
+        # **這一次跑的身分**（F117 F2）：HTML 與 xlsx **同源**，所以算一次。
+        # 一份報表離開這台電腦之後，這幾行是唯一追得回來的東西。
+        ds = getattr(bctx, "dataset", None)
+        run = export_report.run_info(
+            bctx.recipe,
+            source=ds.source_label() if hasattr(ds, "source_label") else "",
+            n_rows=len(rows),
+            n_source=len(getattr(ds, "items", None) or []) or None)
         # tick → 寫入器。「哪一勾寫哪一個檔、叫什麼」住在 `planned_files`
         # （儀表的預覽跟這裡讀**同一張表** —— 各寫一份的那份會漂，儀表列的
         # 檔名跟真的寫出來的對不上）。這裡只補上寫入的動作。
@@ -1040,12 +1054,12 @@ class OutputReportStep(_OutputStep):
                 export_html.build_report(
                     rows, title, export_report.detail_feature_keys(rows),
                     decide=getattr(bctx.recipe, "decide", None),
-                    images=images),
+                    images=images, info=run),
                 path),
             CONTENT_TABLE: lambda path: export_report.write_csv(
                 rows, path, include_features=bool(p["include_features"])),
             CONTENT_EXCEL: lambda path: export_report.write_excel(
-                rows, path, recipe=bctx.recipe),
+                rows, path, recipe=bctx.recipe, run=run),
             CONTENT_BOXPLOT: lambda path: self._write_boxplot(bctx, p, path),
             CONTENT_LOTCHART: lambda path: self._write_lot_chart(
                 bctx, p, path),

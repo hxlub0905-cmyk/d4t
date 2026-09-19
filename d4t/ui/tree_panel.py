@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.pipeline.recipe import TreeLeaf, TreeStep
+from .chips import ChoiceChips
 from .decide_panel import _feature_combo, _insert_at_cursor
 from .number_picker import fill_number_picker, number_tips
 from .tree_scene import (
@@ -37,6 +38,22 @@ from .threshold_view import SplitBar, ThresholdHistogram
 from .widgets import (clear_layout_parked, glyph_icon,
                       small_button, split_labelled)
 from .viewmodel import MAX_BIN, is_a_constant_expression
+
+#: 「這一類是好消息嗎」那一排（F119）。值就是 recipe 裡的那個字
+#: （`recipe.OUTCOMES`），所以加一個選項不必再維護第二張表。
+#: ⚠ **``""`（還沒說）不是一個選項** —— 它是「一顆都沒亮」，而那個狀態
+#: 講的是「使用者還沒回答」，不是一個他選得出來的答案。
+OUTCOME_CHOICES = ("good", "bad", "neutral")
+OUTCOME_ICONS = ("news_good", "news_review", "news_none")
+OUTCOME_LABELS = {"good": "good news", "bad": "needs a look",
+                  "neutral": "neither"}
+OUTCOME_HELP = {
+    "good": "This class is the outcome you want - the verdict chip turns "
+            "green.",
+    "bad": "Somebody should look at these - the verdict chip turns red.",
+    "neutral": "Neither good nor bad (for example 'nothing to measure') - "
+               "the chip stays grey.",
+}
 
 __all__ = ["TreePanel"]
 
@@ -650,6 +667,7 @@ class TreePanel(QWidget):
         lay.addWidget(label, 1)
         lay.addWidget(spin)
         self.body_lay.addWidget(row)
+        self._add_outcome_chips(node)
 
         batch = self._batch_line()
         if batch:
@@ -660,6 +678,30 @@ class TreePanel(QWidget):
                          "the new step's no side.")
         split.clicked.connect(lambda: self._split(self._path))
         self.body_lay.addWidget(self._left(split))
+
+    def _add_outcome_chips(self, node: TreeLeaf) -> None:
+        """「這一類是好消息嗎」—— 一排膠囊（F119）。
+
+        **這一格決定判定膠囊的顏色**，而在它之前顏色是**看 bin 的號碼**猜的
+        （``bin 1`` 綠、``bin 0`` 紅）—— 三份出貨的 recipe 全反了（F117 D2）。
+        最高指導原則說站點差異封裝進 recipe，而「哪一類是好消息」正是站點
+        自己說了算的東西。
+
+        ⚠ **一顆都沒亮 = 還沒說**，而那時候判定膠囊是中性灰：一個很有把握的
+        錯顏色比沒有顏色糟得多。膠囊本身「恆有一顆選著」（`ChoiceChips` 的
+        既有契約），所以說了就不能收回 —— 要改就改成另一個，而 `neutral`
+        就是「我說了，而且我說它沒有好壞」。
+        """
+        self.body_lay.addWidget(self._section(
+            "Is this good news",
+            "" if str(node.outcome or "") else
+            "Not answered yet - the verdict chip stays grey."))
+        self.outcome_chips = ChoiceChips(
+            OUTCOME_CHOICES, OUTCOME_ICONS, str(node.outcome or ""),
+            helps=OUTCOME_HELP, labels=OUTCOME_LABELS, parent=self)
+        self.outcome_chips.changed.connect(
+            lambda v, p=self._path: self._model.set_tree_leaf(p, outcome=v))
+        self.body_lay.addWidget(self.outcome_chips)
 
     # ---- 動作 --------------------------------------------------------------
     def _split(self, path: str) -> None:

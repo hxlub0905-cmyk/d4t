@@ -116,11 +116,13 @@
       "when": "spread < 0",
       "yes": {
         "bin": 9,
-        "label": "nothing to measure"
+        "label": "nothing to measure",
+        "outcome": "neutral"
       },
       "no": {
         "bin": 0,
-        "label": "measured"
+        "label": "measured",
+        "outcome": "good"
       }
     },
     "score": "spread"

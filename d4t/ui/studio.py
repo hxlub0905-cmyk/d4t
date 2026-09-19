@@ -158,7 +158,7 @@ from .welcome import (
     welcome_disabled,
 )
 from .widgets import (
-    apply_button_cursors,
+    apply_button_cursors, verdict_words,
 )
 
 from .workers import (
@@ -3558,14 +3558,12 @@ class StudioWindow(QMainWindow):
         self.feature_panel.set_model(
             self.gauges._feature_model(result, highlight))
         score = getattr(result, "score", None)
-        # 判定的**名字**（recipe 自己取的）比 `bin 1` 有意義得多 —— 廠內講的是
-        # real / nuisance 或某個 class name（X7）。名字住在 `Rule.label` /
-        # `TreeLeaf.label` / `otherwise_label`，`bin_labels()` 把它們收成一張表。
+        # 名字（X7）與好壞（F119）**一起查** —— 兩張表分開查的那天，畫面上
+        # 那一行字與它的顏色會來自不同的葉子（`verdict_words` 的說明）。
         verdict_bin = getattr(result, "bin", None) if score is not None else None
-        decide = getattr(self.model, "decide", None)
-        names = decide.bin_labels() if decide is not None else {}
-        self.verdict.set_verdict(verdict_bin,
-                                 label=names.get(verdict_bin, ""))
+        name, outcome = verdict_words(getattr(self.model, "decide", None),
+                                      verdict_bin)
+        self.verdict.set_verdict(verdict_bin, label=name, outcome=outcome)
         self.verdict_score.setText("" if score is None
                                    else "score %s" % format_feature_value(score))
         self.verdict_note.setText(verdict_note(

@@ -36,6 +36,7 @@ from d4t.core.export import (  # noqa: E402
     apply_writeback, overlay_filename, overlay_label, pick_overlay_results,
     render_overlay, write_csv, write_excel, write_png,
 )
+from d4t.core.export.report import _SHEET_SUMMARY  # noqa: E402
 from d4t.core.ingest.dataset import load_dataset  # noqa: E402
 from d4t.core.pipeline import run_batch, run_batch_steps, run_defect  # noqa: E402
 from d4t.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec  # noqa: E402
@@ -116,6 +117,29 @@ def _sheets(path):
             for ws in wb.worksheets}
 
 
+#: 摘要頁上**只有卡片產得出來**的那一段（F117 F2）：跑的時間、資料從哪來、
+#: 哪一版程式。直接叫 `write_excel` 的人手上沒有 `BatchContext`，所以他那一
+#: 份沒有這一段 —— 而那不是不一致，是「卡片知道得比引擎多」。
+_RUN_SECTION = "This run"
+
+
+def _without_run_section(rows):
+    """把「This run」那一段整段拿掉（含它的段標）。"""
+    out, skipping = [], False
+    for row in rows:
+        if row and row[0] == _RUN_SECTION:
+            skipping = True
+            continue
+        if skipping:
+            # 下一個段標就是這一段的結尾（段標那一列只有第一格有字）。
+            if row and row[0] and row[1] is None:
+                skipping = False
+            else:
+                continue
+        out.append(row)
+    return out
+
+
 def test_the_report_card_writes_the_same_workbook_as_the_wizard(lot, tmp_path):
     recipe, rows, dataset, wiz, card = _both(lot, tmp_path, "output_report",
                                              "report.xlsx",
@@ -126,7 +150,24 @@ def test_the_report_card_writes_the_same_workbook_as_the_wizard(lot, tmp_path):
     a, b = _sheets(wiz), _sheets(card)
     assert list(a) == list(b), "工作表不一樣"
     for name in a:
-        assert a[name] == b[name], "工作表 %s 的內容不一樣" % name
+        assert a[name] == _without_run_section(b[name]),             "工作表 %s 的內容不一樣" % name
+
+
+def test_the_card_stamps_which_run_this_was(lot, tmp_path):
+    """⚠ **上面那一條會因為它而放寬，所以這一條要在。**
+
+    拿掉一段再比，等於對那一段完全不問 —— 而 F117 F2 記的正是「檔案一離開
+    電腦就追不回是哪一次跑的」。所以這裡問它真的在。
+    """
+    recipe, rows, dataset, _, card = _both(lot, tmp_path, "output_report",
+                                           "report.xlsx", contents="excel")
+    pytest.importorskip("openpyxl")
+    _run_card(recipe, dataset, rows)
+    flat = [str(c) for row in _sheets(card)[_SHEET_SUMMARY] for c in row]
+    assert _RUN_SECTION in flat
+    for label in ("Run at", "Source", "Defects", "Made with"):
+        assert label in flat, label
+    assert any(str(c).startswith("d4t ") and "build" in str(c) for c in flat),         "沒有 build id —— 公司機沒有 git，那是唯一答得出「我這台跑的是哪一版」的"
 
 
 # --------------------------------------------------------------------------- #
