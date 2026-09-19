@@ -516,31 +516,7 @@ class WelcomeDialog(QDialog):
 # --------------------------------------------------------------------------- #
 # 範例 recipe 庫
 # --------------------------------------------------------------------------- #
-class _RememberSize(QDialog):
-    """關掉時把大小位置存起來的 `QDialog`（F117 I16）。
-
-    ⚠ **`done` 而不是 `closeEvent`**：`QDialog` 的 `accept` / `reject` 兩條路
-    都走 `done`，而按 Esc 或按鈕關掉的對話框**不一定**會收到 `closeEvent`。
-    掛錯地方的症狀是「用滑鼠關掉會記得，按 Esc 關掉不會」—— 而那種不一致
-    使用者只會覺得它壞了。
-
-    子類把 :attr:`GEOMETRY_KEY` 設成自己的名字；空字串＝不記。
-    """
-
-    #: 存在 QSettings 的哪一格（`geometry.key_for`）。
-    GEOMETRY_KEY = ""
-
-    def done(self, result: int) -> None:   # Qt hook
-        # ⚠ **函式內 import**：`geometry` 讀這裡的 `app_settings`，兩邊在
-        # 模組層互相 import 會炸。
-        from . import geometry
-
-        if self.GEOMETRY_KEY:
-            geometry.remember(self, self.GEOMETRY_KEY)
-        super().done(int(result))
-
-
-class RecipeLibraryDialog(_RememberSize):
+class RecipeLibraryDialog(QDialog):
     """範例 recipe 庫：左邊列清單、右邊看細節，雙擊或按「載入」就套用。
 
     清單上顯示的每一個字（名稱、說明、route、步驟數、分數表達式）**都是從
@@ -557,7 +533,24 @@ class RecipeLibraryDialog(_RememberSize):
     那段說明，而每次回到預設等於每次重做一遍。
     """
 
+    #: 大小與位置存在 QSettings 的哪一格（F117 I16）。
     GEOMETRY_KEY = "recipe_library"
+
+    def done(self, result: int) -> None:   # Qt hook
+        """關掉時記住大小（F117 I16）。
+
+        ⚠ **`done` 而不是 `closeEvent`**：`accept` / `reject` 兩條路都走這
+        裡，而按 Esc 關掉的對話框不一定收得到 `closeEvent`。掛錯地方的症狀
+        是「用滑鼠關掉會記得，按 Esc 關掉不會」—— 那種不一致使用者只會覺得
+        它壞了。
+
+        ⚠ **函式內 import**：`geometry` 讀這裡的 `app_settings`，兩邊在模組
+        層互相 import 會炸。
+        """
+        from . import geometry
+
+        geometry.remember(self, self.GEOMETRY_KEY)
+        super().done(int(result))
 
     recipe_chosen = Signal(str)
 

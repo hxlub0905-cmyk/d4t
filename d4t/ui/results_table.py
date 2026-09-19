@@ -88,6 +88,7 @@ from PySide6.QtWidgets import (
 
 from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
+from . import frozen_column
 from .widgets import FilterChip, metric_face
 
 __all__ = [
@@ -1055,6 +1056,9 @@ class ResultsTablePane(QWidget):
             self.dim_buttons[kind] = b
 
         self.table = ResultsTable(self)
+        # **第一欄不跟著橫捲走**（F117 I15）：一列數字沒有 id 就只是一列
+        # 數字，而使用者正在做的事（「這一顆為什麼判成這樣」）在那一刻斷掉。
+        self.frozen = frozen_column.attach(self.table, 0)
         #: 轉出去給宿主接的訊號（跟以前 `ResultsTable` 的約定一字不變）。
         self.defect_activated = self.table.defect_activated
         self.defect_selected = self.table.defect_selected

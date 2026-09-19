@@ -89,7 +89,7 @@
 | I11 ✅ | 刪卡後狀態列只寫 `Removed "dn"`，沒有復原提示 | `已移除 Denoise · 復原（Ctrl+Z）` | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 1 步）**
 | I12 | 對話框主按鈕樣式不一（範本庫 `Load` 藍、Chart settings `OK` 白） | 統一 | ✅ |
 | I13 ✅ | **做完** —— `->` 全部改成 `→`（8 處；`→` 在 WGL4 裡，Segoe UI 蓋得到，而 repo 本來就有 25 處在用它）。`tests/test_ui_symbols.py` 擋回頭，配一條反向測試（把走查看到的那句話餵回去，確認判準會咬它）。原本記的：符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`）| 統一 | ✅ |
-| I15 | Results 表格橫向捲動時 defect 欄會跑掉（表頭本來就固定） | 凍結第一欄 | ✅ |
+| I15 ✅ | **做完** —— 新的 `ui/frozen_column.py`：疊第二個 view 上去（Qt 官方那個 frozen-column 的做法），**共用 model 與 selection model**（各自一份的話，點左邊選到的列跟右邊亮起來的不是同一列）。⚠ 主表那一欄照樣留著不藏 —— 藏起來的話它的寬度就不再參與版面，右邊的內容會滑到凍結欄底下。⚠ 接法是包住 `resizeEvent`，不是叫呼叫端記得呼叫 `sync()`。原本記的：Results 表格橫向捲動時 defect 欄會跑掉（表頭本來就固定）| 凍結第一欄 | ✅ |
 | I16 ✅ | **做完** —— 新的 `ui/geometry.py`（`remember`／`restore`），三個視窗都接上。⚠ 還原完一定過一次 `keep_on_screen`（拔掉第二個螢幕之後，存下來的位置會落在沒有螢幕的地方 —— 那是一個按了沒反應的按鈕）。⚠ 最小化／全螢幕時**不存**。⚠ 它是「第四個會寫磁碟的東西」，所以先做出覆寫點 `geometry.SETTINGS`（CLAUDE.md §4）。原本記的：Results、Chart settings、範本庫不記得視窗大小位置（`d4t/ui` 內沒有 `saveGeometry`）| QSettings 記住並經過 `keep_on_screen` | ✅ |
 | J4 | 刪掉中間的卡，上下游斷開 | 型別對得上時提供一鍵補線 | 建議 |
 | J6 ✅ | warning 太長 | 先講結論 | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 4 步）**

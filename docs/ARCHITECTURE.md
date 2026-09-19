@@ -372,6 +372,8 @@ d4t/
     │                         #     F50 拿掉了：「整批跑一次」變成卡片自己的一條腳帶
     ├── threshold_view.py     #   在挑門檻，就要看得到分布
     ├── results.py results_table.py why_panel.py  #   Results 視窗／結果表／三次點擊回溯（F45）
+    ├── frozen_column.py      #   表格的第一欄不跟著橫捲走（F117 I15）—— 疊第二個
+    │                         #     view，**共用 model 與 selection model**
     ├── feature_tree.py       #   卡 › 區域 › 統計量那棵樹 —— **結果表與 Preview 共用一份**（F76）
     ├── feature_panel.py      #   Preview 的特徵面板：四胞胎橫過來（一列一個統計量、一欄一個 variant）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
@@ -449,6 +451,9 @@ d4t/
     ├── fit_screen.py         #   視窗裝得進螢幕（F91 U1）。**不要寫死 resize**；
     │                         #     內容比螢幕高的用 `scroll_host` / `scrolled`，
     │                         #     而且只能在**建構時**用（事後搬版面是 segfault）
+    ├── geometry.py           #   子視窗記得上次多大、在哪（F117 I16）。還原完
+    │                         #     一定過一次 `keep_on_screen`；⚠ 它是第四個會寫
+    │                         #     磁碟的東西，所以有覆寫點 `geometry.SETTINGS`
     ├── numbers.py            #   一個特徵值印成字 —— **全 UI 只有這一支**（F52）
     ├── wording.py            #   node id／step key／參數名 → **畫面上的那個字**
     │                         #     —— 全 UI 只有這一支（F118；地位同 numbers.py）
