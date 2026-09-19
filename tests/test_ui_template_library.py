@@ -107,7 +107,7 @@ def test_both_entries_are_back_on_the_screen(qapp, window):
 
     `QToolBar.addWidget` 把 widget 包進一個 QWidgetAction，而 Qt 在工具列
     真的顯示出來以前把它們**全部**藏著 —— 沒有 show 的話每一顆都答 hidden，
-    這條測試就永遠是綠的而且什麼都沒問到（`_build_toolbar` 裡那段分隔線的
+    這條測試就永遠是綠的而且什麼都沒問到（`studio_layout.build_toolbar` 裡那段分隔線的
     註解記著同一件事）。
     """
     window.show()

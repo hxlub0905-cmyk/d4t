@@ -18,9 +18,12 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+if TYPE_CHECKING:                  # 只給型別看：這一支不 import studio
+    from .studio import StudioWindow
 
 #: 「一顆幾張」問不到頁數時滑桿的上限。
 _UNKNOWN_PAGE_CAP = 999
@@ -247,3 +250,52 @@ def _load_raw(window: Any, folder: str, spec: Any) -> bool:
                        % (type(e).__name__, e), "error")
         return False
     return bool(window._on_dataset_loaded(ds))
+
+
+# --------------------------------------------------------------------------- #
+# Recipe 的開與存（F116 第 4 步）
+# --------------------------------------------------------------------------- #
+# 跟上面那幾顆 Open 是**同一個契約**：只問路徑，做事交給 `window` 上那兩支
+# （`load_recipe_path` / `save_recipe_path`）。搬過來是因為它們本來就是這個
+# 形狀 —— 留在 `studio.py` 只是歷史。
+
+def open_recipe(window: "StudioWindow") -> None:
+    path, _ = QFileDialog.getOpenFileName(
+        window, "Open Recipe", "", "Recipe JSON (*.json);;All files (*)")
+    if not path:
+        return
+    window.load_recipe_path(path)
+
+
+#: 「另存」對話框的副檔名 —— 這一個常數是為了**下面那句 endswith**
+#: 而存在的，不是為了整齊：Windows 的另存對話框在使用者自己打了一個
+#: 沒有副檔名的名字時**不會**幫他補（`docs/NO-GIT-SETUP.md` 記過記事本
+#: 那個反例），而一份叫 `char` 的檔案下次打開時在「Recipe JSON」這個
+#: 篩選底下**看不見**。
+RECIPE_SUFFIX = ".json"
+
+
+def save_recipe(window: "StudioWindow") -> bool:
+    """`Ctrl+S` 與工具列那顆鈕：**存回原檔**，沒有原檔才問路徑。
+
+    回傳「真的存下去了嗎」—— 關窗前的確認要靠這個答案（F7-16）：
+    使用者在另存對話框按取消，意思是「先別關」，不是「丟掉」。
+    """
+    if window.recipe_path:
+        return bool(window.save_recipe_path(window.recipe_path))
+    return save_recipe_as(window)
+
+
+def save_recipe_as(window: "StudioWindow") -> bool:
+    """`Ctrl+Shift+S`：**一定問路徑**。"""
+    start = window.recipe_path or ("%s%s" % (
+        str(getattr(window.model, "recipe_id", "") or "recipe").strip()
+        or "recipe", RECIPE_SUFFIX))
+    path, _ = QFileDialog.getSaveFileName(
+        window, "Save Recipe", start,
+        "Recipe JSON (*%s);;All files (*)" % RECIPE_SUFFIX)
+    if not path:
+        return False
+    if not str(path).lower().endswith(RECIPE_SUFFIX):
+        path = "%s%s" % (path, RECIPE_SUFFIX)
+    return bool(window.save_recipe_path(path))

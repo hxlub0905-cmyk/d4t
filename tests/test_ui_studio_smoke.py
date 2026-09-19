@@ -496,7 +496,7 @@ def test_progress_bar_is_hidden_when_idle_and_tracks_a_run(window, synlot):
     _loaded(window, synlot)
     assert window.progress_visible() is False, "閒著時不該佔位子"
 
-    window._on_trial_progress(3, 8)
+    window.run_ctl._on_trial_progress(3, 8)
     assert window.progress_visible() is True
     assert window.progress.value() == 3
     assert window.progress.maximum() == 8

@@ -123,7 +123,8 @@ def test_before_anything_is_loaded_it_says_so(window):
 def test_the_attachment_card_opens_the_attachment(window, lot, monkeypatch):
     """`load_sidecar` 的鈕直接開 GLAS 匯出，不是一張選單 —— 它只有一條路。"""
     called = []
-    monkeypatch.setattr(window, "_on_open_gds", lambda: called.append(1))
+    monkeypatch.setattr(window.attach_ctl, "_on_open_gds",
+                        lambda: called.append(1))
     nid = window.model.add_step("load_sidecar")
     window.select_node(nid)
     assert window.param_form.source_button().text() == "Open GDS export…"

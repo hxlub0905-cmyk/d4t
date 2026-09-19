@@ -183,7 +183,37 @@ FILE_CEILINGS = {
     # `_on_open_<key>` 出來，不然那顆鈕按下去是 AttributeError。
     # 2026-09-18（F114）：7,717 → **7,686**（−31）。stack 拿掉，`load_stack_path`
     # 跟著走 —— 見下面 `HARD_CAPS` 那一段。
-    "d4t/ui/studio.py": 7686,
+    # 2026-09-18（F116 第 1 步）：7,686 → **7,388**（−298）。右下角那一族
+    # （卡片儀表：換儀表、一鍵校正、圖的視窗、曲線背景）整族搬進
+    # `ui/gauge_panel.py`，`studio.py` 只留三行門面與 `self.gauges = GaugePanel(self)`。
+    # 這是 F116「`StudioWindow` 只留組裝與接線」的第一步，見
+    # `docs/plans/F116-split-studio.md`。
+    # 2026-09-19（F116 第 1 步之 1b）：7,388 → **7,149**（−239）。`bottom_stack`
+    # 的另一頁（特徵表）跟著儀表進 `ui/gauge_panel.py`；區域跨顆檢視那四支進
+    # **既有的** `ui/region_check.py`（它用的每一個東西本來就在那裡，而那顆按鈕
+    # 住在預覽區，不在右下角）。
+    # 2026-09-19（F116 第 1 步之 1c）：7,149 → **6,782**（−367）。影像流選擇與
+    # 畫在圖上的東西（區域框、量測標記、熱色磚、並排比對、兩張圖互跟）整族進
+    # `ui/preview_overlays.py`。第 1 步做完：7,686 → 6,782，−904。
+    # 2026-09-19（F116 第 2 步）：6,782 → **5,792**（−990）。介面組裝那一族整族
+    # 進 `ui/studio_layout.py`（見下面 `HARD_CAPS` 那一段）。
+    # 2026-09-19（F116 第 3 步）：5,792 → **5,434**（−358）。Gallery／Results／
+    # 回溯那一族進 `ui/gallery_controller.py`，縮圖那一條鏈
+    # （`THUMB_CHANNEL_PRIORITY` → `thumb_channel` → `load_thumb` →
+    # `ThumbWorker`）跟著走 —— 它們的唯一使用者就是 Gallery。
+    # 2026-09-19（F116 第 4 步）：5,434 → **5,135**（−299）。「把第二份東西掛到
+    # 已經載入的這一份上」那一族（配對卡的第二份 lot ＋ GLAS 匯出）進
+    # `ui/attach_sources.py`；recipe 的開／存三支進**既有的** `ui/open_dialogs.py`
+    # （同一個「只問路徑、做事交給 window」的契約）。
+    # 2026-09-19（F116 第 5 步）：5,135 → **4,785**（−350）。「怎麼發動一次執行、
+    # 怎麼把結果寫出去」那一族（含鐵則 11 的三道關）進 `ui/run_controller.py`。
+    # ⚠ `_apply_trial_results` **留在這裡**：它叫的那一串 `_refresh_*` 跟訊息、
+    # 跟「要不要寫」是交織的，而且順序有守門的註解 —— 見那一支上面那一段。
+    # 2026-09-19（F116 第 6 步）：4,785 → **4,347**（−438）。畫布上拉一條線／
+    # 剪一條線在 model 上是什麼意思（鐵則 10 的主場）進 `ui/canvas_edges.py`。
+    # 計畫書把這一塊猜成「本質上就是接線」，量出來不是：437 行裡六支規則型的
+    # 方法就佔 284 行，真正的 handler 只有 67 行。
+    "d4t/ui/studio.py": 4347,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -246,7 +276,13 @@ FILE_CEILINGS = {
     # 一半是「某年某月使用者說了什麼」的故事 —— 規則留下、故事搬進
     # `docs/history/CLAUDE-2026-09-09.md`，瘦到 319 行。這一格擋它長回去：
     # 要加一條規矩可以，要加一段故事去 SESSION_LOG／history。
-    "CLAUDE.md": 323,
+    # 2026-09-19（F116）：323 → 332（+9），而且是**先砍掉故事才簽的**：第一版
+    # 寫了 +16（F116 的行數、七個模組的名字、六種漏法逐條列出）—— 那是故事，
+    # 被這一格擋下來之後改成三條**規則 ＋ 指標**：① 要再從 `studio.py` 搬東西
+    # 先讀那一份計畫的 §3／§6 ② 判準是 `tools/studio_surface.py`（它同時守
+    # 「測試找不找得到」與「別的 UI 模組還有沒有人在叫」）③ 家用機上黃金值
+    # 第三份是紅的而那不是行為變了。三條各自擋掉一次真的發生過的浪費。
+    "CLAUDE.md": 332,
 }
 
 #: 沒被列名的檔案共用的上限。
@@ -374,7 +410,34 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        293,
+        197,
+        # 2026-09-19（F116 第 6 步）：210 → 197。搬走 16 支，回來三支門面
+        # （`_on_edge_added` **191 處／21 個測試檔**、`_connect` 17／3、
+        # `_on_edge_removed` 16／5）——門面留**舊名字**，所以那 191 處一個字
+        # 都不用改。
+        # 2026-09-19（F116 第 5 步）：221 → 210。搬走 15 支，回來四支門面
+        # （`run_trial` 44 處／13 檔、`run_all` 12／4、`write_outputs` 10／2、
+        # `rerun` 4／1 ＋ Results 那顆鈕）—— 它們是這個視窗的**公開動詞**。
+        # 2026-09-19（F116 第 4 步）：235 → 221。搬走 14 支（attach 那一族 11 支
+        # ＋ recipe 的開存 3 支），**一支門面都沒留** —— 接線改成
+        # `partial(open_dialogs.save_recipe, win)`，同那三顆 Open 鈕的形狀。
+        # 2026-09-19（F116 第 3 步）：248 → 235。搬走 15 支，回來兩支門面
+        # （`show_gallery` —— 工具列那顆鈕與 Ctrl+Shift+R 都接它；
+        # `results_visible` —— 14 處／2 個測試檔）。
+        # 2026-09-19（F116 第 2 步）：256 → 248。七支 `_build_*` ＋ `_tool_button`
+        # 變成 `ui/studio_layout.py` 的模組層函式（沒有留門面 —— 沒有人從外面
+        # 叫它們，`__init__` 改成 `studio_layout.build_toolbar(self)`）。
+        # 2026-09-19（F116 第 1 步之 1c）：272 → 256。搬走 21 支，回來五支門面
+        # （`set_compare` / `compare_enabled` / `region_overlay_names` /
+        # `heat_tiles` / `_focus_box_index`）。`compare_enabled` 不只是給測試的：
+        # `GaugePanel` 要知道畫面上是一條流還是兩條，而 controller 之間不直接
+        # 互叫（F116 §3-2），它走的就是那一行。
+        # 2026-09-19（F116 第 1 步之 1b）：280 → 272。搬走 11 支，回來三支門面
+        # （`open_region_check` / `profile_panel` / `profile_panel_visible` ——
+        # 兩個測試檔都在用）。
+        # 2026-09-18（F116 第 1 步）：293 → 280。右下角那一族 16 支搬進
+        # `ui/gauge_panel.py`，回來三支門面（`inspector` / `bottom_page` /
+        # `_on_calibrated` —— 測試用得多的那幾個，見 F116 §3-3）。
         # 2026-09-18（F114）：294 → 293。使用者把 stack 拿掉（「我們用不到」），
         # `load_stack_path` 跟著走。**刪掉也要把尺調下來**（反向測試在守）。
         # 2026-09-09：294 → 298。`write_outputs`（跑與寫拆開）、`rerun`
@@ -387,7 +450,7 @@ COUNT_CEILINGS = {
         # 2026-09-08（U5 ＋ U8）：284 → 286。**淨值 +2，而它換掉了三支**：
         # 走的是 `open_canvas_window` / `_on_canvas_popout_closed` /
         # `canvas_popout_open`，來的是 `layout_mode` / `set_layout_mode` /
-        # `toggle_layout_mode` / `_sync_layout_button` / `_build_params_row`。
+        # `toggle_layout_mode` / `_sync_layout_button` / `_build_params_row`（F116 第 2 步起在 `ui/studio_layout.py`）。
         # 2026-09-08（U18 ＋ X3）：280 → 284。四支：`_delete_selected_on_canvas`
         # 與 `_clear_canvas_selection`（快捷鍵表上那兩格 → 畫布已經有的實作，
         # 刪除仍然只有一份）、`set_sample_mode`（換模式**並且**把工具列的字
@@ -417,7 +480,32 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        433,
+        266,
+        # 2026-09-19（F116 第 6 步）：279 → 266。這一族**沒有任何自己的狀態**
+        # （全部讀寫 `win.model`），掉的是那 437 行裡的 `self.*` 參照。
+        # 2026-09-19（F116 第 5 步）：292 → 279。只有 `_trial_t0` 與
+        # `_write_outputs_sync` 的家跟著走；`trial_worker` / `output_worker`
+        # （`stop_run` 也在用）、`trial_results` / `trial_scores`、`_last_run`
+        # / `_pending_warnings` / `_filtered_note` / `_write_outputs_this_run`
+        # （`_apply_trial_results` 在讀或在寫）全部留在視窗 —— §3-1。
+        # 2026-09-19（F116 第 4 步）：308 → 292。`pair_worker` / `_pending_pair`
+        # / `_pair_filled` 的家跟著 attach 那一族走；`_carry_filled` 留在視窗
+        # （換資料集時 `_on_dataset_loaded` 會清它 —— §3-1）。
+        # 2026-09-19（F116 第 3 步）：323 → 308。`thumb_worker` 的家跟著它唯一的
+        # 使用者走；`_items_by_id` **留在視窗**（`_on_dataset_loaded` 在寫它 ——
+        # §3-1：被別段也寫的留在視窗），進來的是 `gallery_ctl`。
+        # 2026-09-19（F116 第 2 步）：389 → 323。**不是視窗上的名字變少**：那一族
+        # 照舊在 `win` 上設同樣的 86 個名字，只是那一千行 `self.x = …` 住到
+        # `ui/studio_layout.py` 去了，而這一格數的是**這個檔案裡**的 `self.*`。
+        # 2026-09-19（F116 第 1 步之 1c）：409 → 389。`_compare_on` 與
+        # `_view_syncing` 的家跟著行為走；`_user_stream` / `_user_stream_b`
+        # 留在視窗（前者在換卡片時被別段重設 —— §3-1），進來的是 `overlays`。
+        # 2026-09-19（F116 第 1 步之 1b）：418 → 409。`_no_profile` 的家跟著
+        # `profile_panel` 走，`region_window` / `_region_regions` 仍然是視窗的
+        # （`ui/region_check.py` 的函式明寫 `win.xxx = ...`，同 `open_dialogs`）。
+        # 2026-09-18（F116 第 1 步）：433 → 418。儀表那一族用到的名字跟著它
+        # 的行為走（`_inspector` / `_charts_window` 的家搬進 `GaugePanel`），
+        # 進來的只有 `gauges` 一個。
         # 2026-09-18（F114）：434 → 433。同上 —— `load_stack_path` 帶走一個名字。
         # 2026-09-09（第二次）：431 → 437。`_last_run`（上一批的底稿：rows／
         # 量測簽章／被停掉／幾顆，一個 dict 不是四個名字）、`_tree_focus`
@@ -495,9 +583,38 @@ HARD_CAPS = {
     # 而 `load_stack_path` 是 `StudioWindow` 上的一支 —— 行 7,717 → 7,686、
     # 方法 294 → 293、`self.*` 434 → 433。**刪掉東西也要把尺跟著調** ——
     # 留著那段餘裕就是留給下一個人偷偷用掉的空間。
-    "d4t/ui/studio.py": 7686,
-    "studio_window_methods": 293,
-    "studio_window_attributes": 433,
+    # 2026-09-18（F116 第 1 步）：三格一起往下。右下角那一族整族搬進
+    # `ui/gauge_panel.py` —— 行 7,686 → 7,388、方法 293 → 280、`self.*`
+    # 433 → 418。這是 F116 六步裡的第一步（`docs/plans/F116-split-studio.md`），
+    # 而那一份的驗收正是「每一步都要讓這三格**明顯**往下」。
+    # 2026-09-19（F116 第 1 步之 1b）：行 7,388 → 7,149、方法 280 → 272、
+    # `self.*` 418 → 409。
+    # 2026-09-19（F116 第 1 步之 1c）：行 7,149 → 6,782、方法 272 → 256、
+    # `self.*` 409 → 389。**第 1 步整步做完**：7,686 → 6,782（−904）、
+    # 293 → 256（−37）、433 → 389（−44）。
+    # 2026-09-19（F116 第 2 步）：介面組裝那一族（工具列、主體、預覽區、進度列、
+    # 快捷鍵，七支 `_build_*` ＋ `_tool_button`）整族進 `ui/studio_layout.py`。
+    # 行 6,782 → 5,792、方法 248、`self.*` 389 → 323。
+    # ⚠ **`self.*` 這一格會掉是因為那一千行的 `self.x = …` 不在這個檔案裡了，
+    # 不是因為視窗上的名字變少** —— 那 86 個名字一個都沒動（計畫書 §4 寫著
+    # 這一步減的是行數與方法數）。`tools/studio_surface.py` 現在也讀
+    # `ui/*.py` 裡的 `win.x = …`，問「那個名字還在不在」要用它，不要用這一格。
+    # 2026-09-19（F116 第 3 步）：Gallery／Results／回溯那一族進
+    # `ui/gallery_controller.py`，縮圖那一條鏈跟著走。行 5,792 → 5,434、
+    # 方法 248 → 235、`self.*` 323 → 308。
+    # **前三步合計**：7,686 → 5,434（−2,252）、293 → 235（−58）、433 → 308。
+    # 2026-09-19（F116 第 4 步）：行 5,434 → 5,135、方法 235 → 221、
+    # `self.*` 308 → 292。**前四步合計**：7,686 → 5,135（−2,551）、
+    # 293 → 221（−72）、433 → 292（−141）。
+    # 2026-09-19（F116 第 5 步）：行 5,135 → 4,785、方法 221 → 210、
+    # `self.*` 292 → 279。**前五步合計**：7,686 → 4,785（−2,901）、
+    # 293 → 210（−83）、433 → 279（−154）。
+    # 2026-09-19（F116 第 6 步）：行 4,785 → 4,347、方法 210 → 197、
+    # `self.*` 279 → 266。**六步全部做完**：7,686 → 4,347（−3,339，−43%）、
+    # 293 → 197（−96）、433 → 266（−167）。
+    "d4t/ui/studio.py": 4347,
+    "studio_window_methods": 197,
+    "studio_window_attributes": 266,
 }
 
 

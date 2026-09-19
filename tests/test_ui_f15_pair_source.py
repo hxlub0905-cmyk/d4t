@@ -85,7 +85,7 @@ def test_the_card_carries_the_entry(window):
 def test_it_opens_the_second_lot_not_the_menu(window, monkeypatch):
     """Load 卡那顆鈕開的是「三條路」的選單；這一張只有一條路，直接開。"""
     called = []
-    monkeypatch.setattr(window, "_on_open_pair_source",
+    monkeypatch.setattr(window.attach_ctl, "_on_open_pair_source",
                         lambda nid: called.append(nid))
     nid = _pair_node(window)
     window._on_source_requested()
@@ -99,7 +99,7 @@ def test_without_a_main_lot_it_says_so(window, monkeypatch):
                         lambda msg, *a, **k: said.append(msg))
     nid = _pair_node(window)
     assert window.param_form._source_note.text() == "Load the main lot first"
-    window._on_open_pair_source(nid)
+    window.attach_ctl._on_open_pair_source(nid)
     assert said and "main lot" in said[0]
 
 
@@ -111,7 +111,7 @@ def test_attaching_names_the_source_and_says_what_it_is(window, lots):
     nid = _pair_node(window)
     assert window.param_form._source_note.text().startswith("No second lot")
 
-    msg = window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    msg = window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     assert "Paired source" in msg
 
     # 代號使用者沒打 → 從檔名推一個（而它要能當變數名）
@@ -135,7 +135,7 @@ def test_the_card_on_the_canvas_shows_its_own_lot_not_the_main_one(window, lots)
     """這張卡是 `is_source()`，所以什麼都不做的話它會印 main 的檔名。"""
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     parts = window.pipeline.node_item(nid).summary_parts()
     assert Path(lots["gt"]["klarf"]).name in parts, parts
     assert Path(lots["main"]["klarf"]).name not in parts, parts
@@ -147,7 +147,7 @@ def test_a_bad_path_is_reported_not_raised(window, lots, tmp_path):
     nid = _pair_node(window)
     bad = tmp_path / "not-a-klarf.001"
     bad.write_text("hello", encoding="utf-8")
-    msg = window.attach_pair_source(nid, str(bad), sync=True)
+    msg = window.attach_ctl.attach_pair_source(nid, str(bad), sync=True)
     assert msg and "Could not load" in msg or "no defect" in msg.lower()
     assert not window.dataset.sources
 
@@ -168,7 +168,9 @@ def test_an_unconfigured_card_is_flagged_on_the_canvas(window, lots):
 
 def test_the_source_id_rule_is_stable(window):
     """代號是**每次都一樣**的推導 —— 同一個檔名不會兩次得到不同的代號。"""
-    f = studio_mod._source_id_from
+    from d4t.ui.attach_sources import _source_id_from   # F116 第 4 步的新家
+
+    f = _source_id_from
     assert f("/x/y/LOT_SYN.001") == f("/z/LOT_SYN.001") == "LOT_SYN"
     assert f("/x/2026-lot.001") == "s2026_lot"       # 開頭是數字 → 補一個 s
     assert f("/x/ .001") == "src"                    # 推不出東西也要有個名字
@@ -294,16 +296,16 @@ def test_the_second_lot_loads_in_the_background(qapp, window, lots):
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
 
-    msg = window.attach_pair_source(nid, lots["gt"]["klarf"])   # 沒有 sync=True
+    msg = window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"])   # 沒有 sync=True
     # **立刻**回來（還沒載完），而且講得出正在做什麼
     assert "Loading" in msg and Path(lots["gt"]["klarf"]).name in msg
-    assert window._pending_pair is not None
+    assert window.attach_ctl._pending_pair is not None
     assert not window.dataset.sources                # 還沒掛上
 
     assert _pump(qapp, lambda: bool(window.dataset.sources)), "背景載入沒有完成"
     sid = window.model.nodes[nid].params["source"]
     assert sid in window.dataset.sources
-    assert window._pending_pair is None
+    assert window.attach_ctl._pending_pair is None
 
 
 def test_a_broken_file_in_the_background_is_reported_not_swallowed(qapp, window,
@@ -313,10 +315,10 @@ def test_a_broken_file_in_the_background_is_reported_not_swallowed(qapp, window,
     bad = tmp_path / "not-a-klarf.001"
     bad.write_text("hello", encoding="utf-8")
     said = []
-    window.pair_worker.failed.connect(lambda m: said.append(m))
+    window.attach_ctl.pair_worker.failed.connect(lambda m: said.append(m))
 
-    window.attach_pair_source(nid, str(bad))
-    assert _pump(qapp, lambda: bool(said) or window._pending_pair is None)
+    window.attach_ctl.attach_pair_source(nid, str(bad))
+    assert _pump(qapp, lambda: bool(said) or window.attach_ctl._pending_pair is None)
     assert not window.dataset.sources
 
 
@@ -328,7 +330,7 @@ def test_only_the_carried_columns_are_copied(window, lots):
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
     window.model.set_param(nid, "carry", "CLASSNUMBER")
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
 
     sid = window.model.nodes[nid].params["source"]
     fields = window.dataset.sources[sid].items[0].fields
@@ -340,7 +342,7 @@ def test_ticking_a_column_afterwards_refills_it(window, lots):
     欄位」—— 而那句話是錯的：欄位在，只是沒複製。"""
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     sid = window.model.nodes[nid].params["source"]
     assert window.dataset.sources[sid].items[0].fields == {}
 
@@ -355,7 +357,7 @@ def test_two_cards_on_the_same_source_both_get_their_columns(window, lots):
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     a = _pair_node(window)
     window.model.set_param(a, "carry", "DEFECTID")
-    window.attach_pair_source(a, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(a, lots["gt"]["klarf"], sync=True)
     sid = window.model.nodes[a].params["source"]
 
     b = window.model.add_step("pair_source")
@@ -377,7 +379,7 @@ def test_the_three_fields_are_pickers_not_free_text(window, lots):
 
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     window.select_node(nid)
 
     sid = window.model.nodes[nid].params["source"]
@@ -412,7 +414,7 @@ def test_pointing_at_a_source_that_is_not_attached_shows_nothing(window, lots):
     """拿「唯一掛著的那一份」去頂替是不行的 —— 那一格印的欄位就是另一份的。"""
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     window.model.set_param(nid, "source", "somewhere_else")
     window.select_node(nid)
     assert window.param_form._rows["carry"].editor.choice_names() == []
@@ -422,7 +424,7 @@ def test_a_half_typed_name_survives_the_lists_changing(window, lots):
     """換選單**不重建表單**，所以打到一半的字還在。"""
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     window.select_node(nid)
 
     src = window.param_form._rows["source"].editor
@@ -443,7 +445,7 @@ def test_the_field_you_are_typing_in_is_left_alone(window, lots):
     """
     window.load_dataset_path(lots["main"]["klarf"], sync=True)
     nid = _pair_node(window)
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
     window.select_node(nid)
 
     src = window.param_form._rows["source"].editor
@@ -472,7 +474,7 @@ def test_the_preview_sees_the_second_lot(window, lots):
     load = window.model.node_order[0]
     pair = window.model.add_step("pair_source")
     align = window.model.add_step("align_to")
-    window.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
     window._connect(load, align, "test", dst_in="template")
     window._connect(pair, align, "paired", dst_in="search")
 
@@ -496,7 +498,7 @@ def test_the_answer_to_which_second_lots_lives_in_one_place(window, lots):
     assert window.sources_for_run() == {}          # 載了 main，還沒掛第二份
 
     pair = window.model.add_step("pair_source")
-    window.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
     sid = window.model.nodes[pair].params["source"]
     got = window.sources_for_run()
     assert list(got) == [sid] and len(got[sid]) == 5
@@ -547,7 +549,7 @@ def test_the_image_shows_up_as_soon_as_the_second_lot_is_attached(qapp, window,
     assert "paired" not in names()
 
     nid = _pair_node(window)                     # 使用者按鈕之前一定先點了卡
-    window.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(nid, lots["gt"]["klarf"], sync=True)
 
     assert _pump(qapp, lambda: "paired" in names()), names()
     # 而且畫面直接跳到那張卡吐的那條流 —— 不用自己去下拉裡找
@@ -569,7 +571,7 @@ def test_the_aligned_image_needs_the_align_card_selected(qapp, window, lots):
     pair = window.model.add_step("pair_source")
     align = window.model.add_step("align_to")
     window.select_node(pair)
-    window.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
+    window.attach_ctl.attach_pair_source(pair, lots["gt"]["klarf"], sync=True)
     window._connect(load, align, "test", dst_in="template")
     window._connect(pair, align, "paired", dst_in="search")
 
@@ -614,10 +616,10 @@ def test_studio_asks_the_card_not_itself(window):
     """「幾條線算少」是卡片自己才知道的事。"""
     h2h = window.model.add_step("align_to")
     window.select_node(h2h)
-    assert window._marks_solid() is True
+    assert window.overlays._marks_solid() is True
     glv = window.model.add_step("glv_stats")
     window.select_node(glv)
-    assert window._marks_solid() is False
+    assert window.overlays._marks_solid() is False
 
 
 def test_the_two_marks_are_different_colours(qapp):

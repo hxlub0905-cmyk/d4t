@@ -309,12 +309,12 @@ def test_the_button_opens_one_window_not_a_pile_of_them(qapp, window):
     from d4t.ui import inspectors as insp_mod
 
     _pick_uniformity(window)
-    assert isinstance(window._inspector, insp_mod.UniformityPreviewInspector)
-    window._inspector.charts_requested.emit()
-    first = window._charts_window
+    assert isinstance(window.gauges._inspector, insp_mod.UniformityPreviewInspector)
+    window.gauges._inspector.charts_requested.emit()
+    first = window.gauges._charts_window
     assert first is not None and first.isVisible()
-    window._inspector.charts_requested.emit()
-    assert window._charts_window is first
+    window.gauges._inspector.charts_requested.emit()
+    assert window.gauges._charts_window is first
 
 
 def test_changing_the_style_in_the_window_writes_it_back_to_the_card(
@@ -326,7 +326,7 @@ def test_changing_the_style_in_the_window_writes_it_back_to_the_card(
     """
     nid = _pick_uniformity(window)
     before = str(window.model.nodes[nid].params.get("look", ""))
-    window._on_chart_style_changed('{"tick_size":18}')
+    window.gauges._on_chart_style_changed('{"tick_size":18}')
     assert window.model.nodes[nid].params["look"] == '{"tick_size":18}'
     window.undo()
     assert str(window.model.nodes[nid].params.get("look", "")) == before
@@ -342,7 +342,7 @@ def test_the_style_only_lands_on_a_uniformity_card(qapp, window):
     """
     nid = window.model.add_step("output_klarf")
     window.select_node(nid)
-    window._on_chart_style_changed('{"tick_size":18}')
+    window.gauges._on_chart_style_changed('{"tick_size":18}')
     assert "look" not in window.model.nodes[nid].params
 
 
@@ -352,7 +352,7 @@ def test_the_charts_window_does_not_write_to_the_report_card(qapp, window):
     nid = window.model.add_step("output_report")
     window.select_node(nid)
     before = str(window.model.nodes[nid].params.get("look", ""))
-    window._on_chart_style_changed('{"tick_size":18}')
+    window.gauges._on_chart_style_changed('{"tick_size":18}')
     assert str(window.model.nodes[nid].params.get("look", "")) == before
 
 

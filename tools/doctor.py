@@ -215,6 +215,14 @@ def _run_child(code: str, args: Sequence[str], timeout: float,
     env = dict(os.environ)
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     env["PYTHONIOENCODING"] = "utf-8"
+    # ⚠ Qt 開不了 platform plugin 是 **fatal**，而 Windows 上的 fatal 預設是
+    # 一個**跳出來的對話框**（"no Qt platform plugin could be initialized"，
+    # 一顆「確定」）—— 子行程就停在那裡等人按，而我們這邊只會等到 timeout。
+    # 症狀是螢幕上一直跳視窗、而且那一項要等滿 `timeout` 秒才有結論。
+    # 這個變數叫 Qt 把它寫到 stderr（我們本來就在收 stderr）就好。
+    # 沒有它的時候，`test_doctor_says_the_cli_still_works_when_qt_cannot_open_a_window`
+    # 每跑一次就在家用機上留一個按不完的對話框。
+    env["QT_ASSUME_STDERR_HAS_CONSOLE"] = "1"
     try:
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               timeout=timeout, cwd=cwd, env=env)

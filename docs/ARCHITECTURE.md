@@ -350,10 +350,16 @@ d4t/
     ├── viewmodel.py          #   RecipeModel（Qt-free、可 headless 測；含 edges）
     ├── edit_plan.py          #   接線／換線／剪線的**決定**（F93 U6；同樣 Qt-free）：
     │                         #     「這條線落在哪一格、要不要擠掉別條、擠掉哪幾條」
-    │                         #     ⚠ 只回答「應該發生什麼」；真的動 model 的仍然是
-    │                         #     studio.py —— 那一段的**順序**有意義（add_edge 會
-    │                         #     因為成環而失敗，而失敗的那條線不該留下痕跡）
-    ├── studio.py app.py      #   主視窗（**只做接線**）＋ 進入點
+    │                         #     ⚠ 只回答「應該發生什麼」；真的動 model 的是
+    │                         #     `canvas_edges.py`（F116 第 6 步之前在 studio.py）
+    │                         #     —— 那一段的**順序**有意義（add_edge 會因為成環
+    │                         #     而失敗，而失敗的那條線不該留下痕跡）
+    ├── studio.py app.py      #   主視窗（**只做組裝與接線**）＋ 進入點
+    │                         #     F116 把內容搬進上面那七支 controller／模組：
+    │                         #     `studio_layout` / `gauge_panel` / `preview_overlays`
+    │                         #     / `gallery_controller` / `attach_sources`
+    │                         #     / `run_controller` / `canvas_edges`
+    │                         #     留下的是 `model → UI`、signal 接線、狀態列、門面
     ├── canvas.py             #   節點畫布（n8n 式；純 UI，引擎零改動）
     ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
     ├── tree_scene.py tree_panel.py     #   判定樹住在畫布上／點一步就編輯那一步（F24）
@@ -367,7 +373,16 @@ d4t/
     ├── feature_tree.py       #   卡 › 區域 › 統計量那棵樹 —— **結果表與 Preview 共用一份**（F76）
     ├── feature_panel.py      #   Preview 的特徵面板：四胞胎橫過來（一列一個統計量、一欄一個 variant）
     ├── gallery.py region_check.py      #   縮圖網格（虛擬捲動，撐 10k+）／區域畫在很多顆上
+    ├── gallery_controller.py #   Gallery／Results 視窗／回溯的 controller，加上**縮圖那一條鏈**
+    │                         #     （哪個 channel → 讀圖 → `ThumbWorker` 背景解碼）（F116 第 3 步）
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
+    ├── studio_layout.py      #   `StudioWindow` 的**介面組裝**：工具列、主體、預覽區、
+    │                         #     進度列、快捷鍵（F116 第 2 步；模組層函式吃 `win`，
+    │                         #     照舊在 `win` 上設同樣那些名字）
+    ├── gauge_panel.py        #   右下角那一塊的 controller：儀表那頁與特徵表那頁
+    │                         #     （`bottom_stack` 的兩頁 ＋ 一鍵校正 ＋ 圖的視窗，F116）
+    ├── preview_overlays.py   #   預覽區的 controller：看哪一條流、區域框／量測標記／
+    │                         #     熱色磚怎麼畫、並排比對與兩張圖互跟（F116）
     ├── template_dialog.py    #   從大圖疊 Golden Cell 模板（模板存進 recipe）
     ├── crop_dialog.py        #   載入大圖時先框一塊（或整張）再疊（F102；F104 起每次都問）
     ├── lattice_dialog.py     #   「Grid」開關：把引擎真的用的格線鋪回原圖看週期對不對（F103/F104）
@@ -445,16 +460,30 @@ d4t/
     ├── card_menu.py          #   空白處右鍵、拖線到空白處的「加一張卡」選單（F99 P1-1）
     │                         #     —— 分組與相容性住這裡，畫布只發訊號
     ├── clipboard.py          #   Ctrl+C／V／D 的內容（F99 P1-8）：設定帶走、接線不帶
-    ├── open_dialogs.py       #   三顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110／F114-2）
+    ├── open_dialogs.py       #   三顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110／F114-2），
+    │                         #     加上 recipe 的開／存（F116 第 4 步 —— 同一個「只問路徑」的契約）
+    ├── canvas_edges.py       #   **畫布上拉一條線／剪一條線，在 model 上是什麼意思**
+    │                         #     （鐵則 10 的主場：一個輸入埠一條線、區域線住在 edges、
+    │                         #     拉一條線＝一步復原）（F116 第 6 步）
+    ├── run_controller.py     #   **怎麼發動一次執行、怎麼把結果寫出去**：試跑／整批／Re-run／
+    │                         #     Write outputs（鐵則 11 的三道關整條住在這裡）（F116 第 5 步）
+    ├── attach_sources.py     #   **把第二份東西掛到已載入的這一份上**：配對卡的第二份 lot（F15）
+    │                         #     與 GLAS 匯出的 layer 標註（F11 Region-3）（F116 第 4 步）
     │                         #   —— 加一個入口只要改 `scope.INPUT_SOURCES` 與這裡的 `OPENABLE`
     ├── windows_menu.py       #   Help 鈕的小箭頭列出開著的頂層視窗（F99 P2-6）——
     │                         #     工具列在 1366 上裝不下第十三顆鈕
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
 
-⚠ **新的 UI 面板一律開新模組**，不要塞進 `studio.py`（它是這個 repo 最大的一支，
-現在幾行看 `tests/test_size_ceilings.py` 的 `FILE_CEILINGS` / `HARD_CAPS`）——
+⚠ **新的 UI 面板一律開新模組**，不要塞進 `studio.py`（它仍然是這個 repo 最大的
+一支，現在幾行看 `tests/test_size_ceilings.py` 的 `FILE_CEILINGS` / `HARD_CAPS`）——
 `studio.py` 留給接線，不留給內容。理由與現況見 [`../CLAUDE.md`](../CLAUDE.md) §4。
+
+**要從 `studio.py` 搬東西出去**，先讀
+[`docs/history/plans/F116-split-studio.md`](history/plans/F116-split-studio.md)：
+那一份把整條路走完了（7,686 → 4,347 行），而它的 §6 是一張**這種搬家會安靜做錯
+的六件事**的清單 —— 每一件都是那一輪真的踩到的。工具是
+`python tools/studio_surface.py --save/--check`。
 
 ### `docs/`
 

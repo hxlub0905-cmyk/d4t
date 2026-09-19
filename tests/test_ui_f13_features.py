@@ -63,9 +63,13 @@ def ran(qapp, lot):
 # --------------------------------------------------------------------------- #
 def test_each_group_is_the_card_that_produced_it(ran):
     """組名 = 卡片的 label，而成員 = 引擎記的 owner —— 兩邊都不是猜的。"""
+    # 這個鍵的家在引擎（F116 之前是順手從 `ui.studio` 拿的 —— 那一支只是
+    # import 過它，不是它的出處）。
+    from d4t.core.pipeline.engine import FEATURE_OWNER_KEY
+
     ctx = ran._last_result.context
-    owner = ctx.meta[studio_mod.FEATURE_OWNER_KEY]
-    sections = ran._feature_sections(ran._last_result)
+    owner = ctx.meta[FEATURE_OWNER_KEY]
+    sections = ran.gauges._feature_sections(ran._last_result)
     assert sections, "有跑出特徵就要分得出組"
 
     by_title = {s["title"]: s for s in sections if s["title"] != "Diagnostics"}
@@ -78,7 +82,7 @@ def test_each_group_is_the_card_that_produced_it(ran):
 
 def test_the_diagnostics_are_the_ones_the_card_declared(ran):
     """`clip_frac` 那一類是卡片自己宣告的（`diagnostic_features`）。"""
-    sections = ran._feature_sections(ran._last_result)
+    sections = ran.gauges._feature_sections(ran._last_result)
     diag = next(s for s in sections if s["title"] == "Diagnostics")
     assert diag["collapsed"] is True, "它每張 Enhance 卡都會產出，攤開會擠掉量測值"
 
@@ -102,7 +106,7 @@ def test_a_rescued_feature_is_still_a_diagnostic(ran):
     """兩張 Enhance 卡都寫 `clip_frac`，engine 把先寫的留成
     `<節點名>_clip_frac`。不算進診斷的話，它會以「量測值」的身分排在最上面 ——
     而它量的是那張卡自己。"""
-    sections = ran._feature_sections(ran._last_result)
+    sections = ran.gauges._feature_sections(ran._last_result)
     diag = next(s for s in sections if s["title"] == "Diagnostics")
     rescued = [n for n in diag["names"] if n.endswith("_clip_frac")
                and n != "clip_frac"]
@@ -128,7 +132,7 @@ def test_two_cards_with_the_same_name_get_their_id(qapp, lot):
         win.select_node(win.model.node_order[-1])
         win.refresh_preview(sync=True)
 
-        titles = [s["title"] for s in win._feature_sections(win._last_result)]
+        titles = [s["title"] for s in win.gauges._feature_sections(win._last_result)]
         dupes = [t for t in titles if t.startswith(get_step("glv_stats").label)]
         assert len(dupes) >= 2 and len(set(dupes)) == len(dupes), titles
         assert all(" · " in t for t in dupes), dupes

@@ -114,7 +114,7 @@ def test_the_boxes_show_up_on_the_preview_without_opening_another_window(
 
     n = win.image_view.overlay_count()
     assert n > 4, "預覽影像上沒有框（只有 %d 個）" % n
-    assert len(win.region_overlay()) == n
+    assert len(win.overlays.region_overlay()) == n
 
 
 def test_the_overlay_follows_the_parameters_live(qapp, cross_window):
@@ -122,11 +122,11 @@ def test_the_overlay_follows_the_parameters_live(qapp, cross_window):
     win = cross_window
     nid = win.selected_node
     win.refresh_preview(sync=True)
-    before = list(win.region_overlay())
+    before = list(win.overlays.region_overlay())
 
     win.model.set_param(nid, "place", "between_vertical")
     win.refresh_preview(sync=True)
-    after = list(win.region_overlay())
+    after = list(win.overlays.region_overlay())
 
     assert before and after
     assert before != after, "換了放法，畫面上的框卻沒變"
@@ -137,7 +137,7 @@ def test_the_box_the_defect_sits_in_is_marked_out(qapp, cross_window):
     所以離中心最近的那個要畫得不一樣。"""
     win = cross_window
     win.refresh_preview(sync=True)
-    boxes = win.region_overlay()
+    boxes = win.overlays.region_overlay()
     focus = win._focus_box_index(boxes)
 
     assert 0 <= focus < len(boxes)
@@ -154,7 +154,7 @@ def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
     win = cross_window
     first = win.selected_node
     win.refresh_preview(sync=True)
-    mine = list(win.region_overlay())
+    mine = list(win.overlays.region_overlay())
     assert len(mine) > 4
 
     other = wire_up(win.model, add_region_step(win.model, "roi_cross"))
@@ -162,14 +162,14 @@ def test_only_the_selected_card_draws_its_boxes(qapp, cross_window):
     win.model.set_param(other, "place", "crossing")
     win.select_node(other)
     win.refresh_preview(sync=True)
-    theirs = list(win.region_overlay())
+    theirs = list(win.overlays.region_overlay())
 
     assert theirs, "選著第二張卡，畫的該是它自己的框"
     assert theirs != mine, "兩張卡的框應該不一樣（放法不同）"
 
     win.select_node(first)
     win.refresh_preview(sync=True)
-    assert win.region_overlay() == mine, "切回第一張，畫的要是第一張的框"
+    assert win.overlays.region_overlay() == mine, "切回第一張，畫的要是第一張的框"
 
 
 def test_each_region_gets_its_own_colour(qapp):
@@ -216,10 +216,10 @@ def test_the_names_line_up_with_the_boxes_in_the_studio(qapp, cross_window):
     nid = win.selected_node
     win.refresh_preview(sync=True)
 
-    boxes = win.region_overlay()
+    boxes = win.overlays.region_overlay()
     names = win.region_overlay_names()
     assert boxes and len(names) == len(boxes)
-    assert set(names) <= set(win._overlay_region_names(win.model.nodes[nid]))
+    assert set(names) <= set(win.overlays._overlay_region_names(win.model.nodes[nid]))
     assert win.image_view.overlay_count() == len(boxes)
 
 

@@ -124,8 +124,10 @@ def test_the_next_message_always_takes_the_button_away(qapp):
 def test_dropping_a_wire_offers_an_undo_right_there(qapp):
     """X6：`_say_fallout` 那句話旁邊要有一條反悔的路。"""
     win = _studio(qapp)
+    from d4t.ui import canvas_edges
+
     try:
-        win._say_fallout(["Two wires were removed."])
+        canvas_edges.say_fallout(win, ["Two wires were removed."])
         assert win.status_action.armed()
         assert win.status_action.label() == "Undo"
         assert win.status_level() == "error"
@@ -136,8 +138,10 @@ def test_dropping_a_wire_offers_an_undo_right_there(qapp):
 def test_nothing_to_say_means_no_button(qapp):
     """沒有連帶影響的時候那句話是「接好了」—— 那不需要反悔的入口。"""
     win = _studio(qapp)
+    from d4t.ui import canvas_edges
+
     try:
-        win._say_fallout([], "Connected a to b")
+        canvas_edges.say_fallout(win, [], "Connected a to b")
         assert not win.status_action.armed()
     finally:
         win.close()

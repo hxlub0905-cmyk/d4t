@@ -224,7 +224,7 @@ def test_side_by_side_never_shows_the_same_image_twice(window):
     assert (left, right) == ("test", "ref")
 
     # 使用者親手把右邊挑成 ref 之後，再點別張卡也不可以變成左右都是 ref
-    window._on_stream_b_changed("ref")
+    window.overlays._on_stream_b_changed("ref")
     for node_id in ("norm", "sub", "dn"):
         window.select_node(node_id)
         window.refresh_preview(sync=True)

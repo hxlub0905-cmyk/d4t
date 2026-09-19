@@ -123,8 +123,10 @@ def test_a_wire_dropped_on_nothing_grows_a_connected_card(window, qapp):
     src = first_source(window)
     qapp.processEvents()
     before = set(window.model.node_order)
-    nid = window._on_link_dropped(src, "image", "test", 640.0, 300.0,
-                                  pick="denoise")
+    from d4t.ui import canvas_edges
+
+    nid = canvas_edges.on_link_dropped(window, src, "image", "test",
+                                       640.0, 300.0, pick="denoise")
     qapp.processEvents()
     assert nid and nid not in before
     assert window.model.nodes[nid].step == "denoise"

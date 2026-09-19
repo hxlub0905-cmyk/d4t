@@ -80,31 +80,17 @@ import math
 import os
 import sys
 import copy
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QKeySequence, QShortcut
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
-    QComboBox,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPushButton,
-    QSizePolicy,
-    QProgressBar,
-    QSpinBox,
-    QStackedWidget,
     QStatusBar,
-    QToolBar,
-    QToolButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -112,96 +98,78 @@ import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from d4t.core.pipeline import ParamError, Recipe, get_step, list_steps
 from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline import sampling
-from d4t.core.pipeline.engine import (
-    FEATURE_OWNER_KEY, feature_prefixes,
-)
-from d4t.core.pipeline.step import REGISTRY, SCALE_DEFECT, SCALE_LOT
+from d4t.core.pipeline.step import SCALE_DEFECT, SCALE_LOT
 from d4t.core.pipeline.recipe import (
     describe_migration, is_region_edge, version_skew,
 )
-from d4t.core.pipeline import verdict_features
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from . import autosave
-from .splitters import HairlineSplitter
 from . import card_menu
 from functools import partial
 
 from . import clipboard
 from . import open_dialogs
-from . import windows_menu
 from . import baseline
 from . import fit_screen
-from . import edit_plan
 from .canvas import NODE_H, NODE_W, SUMMARY_SEP, PipelineCanvas, run_status_from
-from .inspectors import inspector_for
-from .problems_bar import ProblemsBar
-from .why_panel import WhyPanel
+from .gauge_panel import GaugePanel
+from .preview_overlays import PreviewOverlays
+from . import studio_layout
+from .gallery_controller import GalleryController
+from .attach_sources import AttachSources
+from .run_controller import RunController
+from . import canvas_edges
+# ⚠ 這個常數的家在 `ui/run_controller.py`（F116 第 5 步跟著用它的程式碼
+# 搬過去了）。這裡拿回來是因為它在下面的 `__all__` 裡（ruff 認得 ——
+# 所以不必 noqa）：它是對外的名字，不是實作細節。
+from .run_controller import DEFAULT_CACHE_DIR
+# ⚠ 縮圖那一條鏈的家在 `ui/gallery_controller.py`（F116 第 3 步）。這裡拿
+# 回來是因為前兩個在下面的 `__all__` 裡、而三個都有測試用 `studio_mod.`
+# 拿 —— 它們是對外的名字，不是實作細節。
+from .gallery_controller import (  # noqa: F401
+    THUMB_CHANNEL_PRIORITY, ThumbWorker, thumb_channel,
+)
+# ⚠ 這兩個常數的家在 `ui/studio_layout.py`（F116 第 2 步跟著用它們的
+# 程式碼搬過去了）。這裡拿回來是因為 **`studio.DEFAULT_TRIAL_N` 與
+# `studio.COLUMN_SIZES` 是對外的名字**：載入資料集時要夾那個預設值
+# （下面用得到），而測試兩個都從這個模組拿。
+from .studio_layout import COLUMN_SIZES, DEFAULT_TRIAL_N  # noqa: F401
 from . import strings
-from .status_action import StatusAction, open_folder
+from .status_action import StatusAction
 from .status_log import StatusHistory
-from .gallery import make_thumb
-from .region_check import MAX_CHECK, RegionCheckWindow, regions_of_node
+from .region_check import regions_of_node
+from . import region_check
 from .template_dialog import TemplateDialog
-from .results import ResultsWindow, extra_only, summarize_run
-from . import results_table
+from .results import extra_only, summarize_run
 from . import scope
 from . import truth_marks
 from .scope import (
     is_supported_kind, no_klarf_message, unsupported_kind_message, visible_steps,
 )
-from .decide_panel import DecidePanel
-from .feature_panel import FeaturePanel
 from .numbers import format_feature_value
 from .viewmodel import (GLV_INTENTS, RecipeModel,
                         is_a_constant_expression, accuracy_at, histogram,
                         rebin)
-from . import theme
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .workbench import MODES as LAYOUT_MODE_NAMES
-from .workbench import WorkbenchLayout
 from .welcome import (
     RecipeLibraryDialog, WelcomeDialog, app_settings, save_theme,
     welcome_disabled,
 )
 from .widgets import (
-    IconButton,
-    ImageView,
-    LibraryPanel,
-    ParamForm,
-    ProfilePanel,
-    VerdictChip,
-    _GlyphMixin,
     apply_button_cursors,
-    column_header,
-    small_button,
 )
 
 from .workers import (
     CalibrateWorker, DatasetLoadWorker, OutputWorker, PreviewWorker,
     RegionCheckWorker, TrialWorker,
-    _ThreadedWorker,
 )
-
-
-class _GlyphToolButton(_GlyphMixin, QToolButton):
-    """工具列上會自己畫圖示的 QToolButton（``_tool_button(icon=…)`` 用）。"""
 
 
 __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
            "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
            "DEMO_DIR", "DEMO_DEFECTS", "DEMO_SEED", "generate_demo_lot"]
-
-#: 區域跨顆檢視的縮圖邊長（px）。
-REGION_THUMB = 120
-
-#: 預覽區那兩個下拉框的寬度上限（px）。
-#:
-#: 它們裝的是 defect id 與影像流名字，都很短。以前兩個都吃 ``stretch 1``，
-#: 於是在寬螢幕上各自變成一個八百多 px、裡面只寫著「1」或「diff」的框 ——
-#: 版面把最多的空間給了資訊量最少的東西。
-DEFECT_COMBO_MAX = 220
-STREAM_COMBO_MAX = 180
 
 #: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
@@ -234,46 +202,19 @@ _SCORE_LIBRARY_ENTRY = {
 TEMPLATE_RECIPE = Path(__file__).resolve().parents[2] / "recipes" \
     / "ebi-die-to-die.json"
 
-#: 試跑用的影像段快取位置（跨次試跑重用，第二次調參會明顯變快）。
-DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".d4t", "cache")
-
 #: 「用範例資料試一次」把合成 lot 產在哪（使用者自己的檔案一律不碰）。
 DEMO_DIR = os.path.join(os.path.expanduser("~"), ".d4t", "demo_lot")
 
 #: 範例資料的 defect 數與 seed（少到一分鐘內跑得完，多到直方圖看得出形狀）。
 DEMO_DEFECTS = 24
 DEMO_SEED = 7
-
-#: GUI 試跑用幾個 worker。None = 依 CPU 核心數自動。
-#:
-#: 歷史：這裡一度必須寫死 1 —— ``run_batch(workers>1)`` 會開
-#: ``ProcessPoolExecutor``，而在 fork 為預設啟動法的平台（Linux）上，從
-#: :class:`~PySide6.QtCore.QThread`（``TrialWorker`` 就是）裡 fork 會**穩定死鎖**
-#: （子行程繼承其他執行緒持有的鎖，卡在啟動階段，progress 一筆都不發）。
-#: 已於 ``batch._pool_context()`` 修正：主執行緒仍用 fork（CLI/script 免寫
-#: ``if __name__ == "__main__"`` 保護），非主執行緒自動改用 spawn。
-#: 迴歸測試見 ``tests/test_batch_thread_safety.py``。
-TRIAL_WORKERS = None
-
 #: model 變動 → 重算預覽 的去抖動間隔（毫秒）。拖 spinbox 不會每格都重算。
 PREVIEW_DEBOUNCE_MS = 300
-
-#: 主視窗三欄的出廠寬度：卡片庫 | 主欄（畫布在上、設定區與儀表在下）| 單顆預覽。
-#: F100 v2（`ui/workbench.py`）：影像回到右欄、全高——調參數的迴圈是
-#: 「改一格 → 看影像」，那一刻影像是主角；畫布在 Tune 裡是導覽，要全貌有 Build。
-COLUMN_SIZES = (256, 660, 450)
-
-#: 「試跑筆數」的出廠值。載入資料集時會再夾成 ``min(這個值, 資料集顆數)`` ——
-#: 對一份只有 24 顆的 lot 顯示 200 沒有任何意義，只會讓人以為自己看錯了。
-DEFAULT_TRIAL_N = 200
 
 #: 右欄分頁的索引 —— F7-5 之後右欄只剩單顆預覽，Gallery 搬進 Results 視窗。
 #: 常數保留是為了不打壞外部呼叫端；``TAB_GALLERY`` 現在等同「開 Results 視窗」。
 TAB_PREVIEW = 0
 TAB_GALLERY = 1
-
-#: Gallery 縮圖要用哪個 channel（依序找第一個有的；都沒有就用第一個 channel）。
-THUMB_CHANNEL_PRIORITY = ("test", "single")
 
 _FEATURE_PLACEHOLDER = "Insert feature ▾"
 _SCORE_HELP = ("The score is an expression whose variables are the feature names "
@@ -290,45 +231,6 @@ def _fmt(value: Any) -> str:
         return ("%g" % value)
     return str(value)
 
-
-def thumb_channel(item: Any) -> Optional[str]:
-    """這顆 defect 的縮圖要讀哪個 channel：``test`` → ``single`` → 第一個有的。"""
-    images = dict(getattr(item, "images", {}) or {})
-    for name in THUMB_CHANNEL_PRIORITY:
-        if name in images:
-            return name
-    for name in images:
-        return str(name)
-    return None
-
-
-def load_thumb(item: Any, size: int) -> Optional[Any]:
-    """一顆 defect → ``size`` × ``size`` 的縮圖 ndarray（**Qt-free**，可跑在背景）。
-
-    讀不到圖（沒有 channel / 檔案不見了 / TIFF 壞頁）一律回 ``None`` ——
-    Gallery 會繼續畫「載入中…」的佔位磚，不會有人看到 traceback（鐵則 7 的精神）。
-    """
-    channel = thumb_channel(item)
-    if channel is None:
-        return None
-    arr = item.load(channel)
-    return make_thumb(arr, int(size))
-
-
-def _source_id_from(path: Any) -> str:
-    """檔名 → 一個能當變數名的代號（F15）。
-
-    規則刻意很笨，因為它要**每次都一樣**：非變數字元換成 `_`、頭尾的 `_` 去掉、
-    開頭是數字就補一個 `s`、空的就叫 `src`。（跟 `glas_export.region_name_for`
-    同一條路 —— 那裡也是「一個給人取的名字必須先能當變數名」。）
-    """
-    import re as _re
-
-    stem = os.path.splitext(os.path.basename(str(path)))[0]
-    name = _re.sub(r"[^A-Za-z0-9_]", "_", stem).strip("_")
-    if not name:
-        return "src"
-    return name if name[0].isalpha() or name[0] == "_" else "s" + name
 
 
 def _running_under_pytest() -> bool:
@@ -410,92 +312,6 @@ def generate_demo_lot(out_dir: Any = None, n: int = DEMO_DEFECTS,
     return generate(out, n=int(n), seed=int(seed))
 
 
-class ThumbWorker(_ThreadedWorker):
-    """Gallery 縮圖的背景解碼工（沿用 ``workers.py`` 的一次性 QThread 樣式）。
-
-    為什麼要有它：``make_thumb`` 前面那一步是**讀檔 + 解 TIFF 頁**，在 GUI
-    執行緒上做會讓捲動一格一格卡。所以 Gallery 只發「我要這些 id 的縮圖」，
-    真正的解碼在這裡。
-
-    **請求合併**：忙碌時 :meth:`request` 只是把 id 併進待跑集合（不排隊、
-    不阻塞、也不會為每次捲動各開一條執行緒），目前這批做完再一次做掉。
-    正在做的那批用 ``_inflight`` 記著，重複請求不會做第二次。
-
-    訊號：``ready(dict)``（``{defect_id: ndarray}``，回到 GUI 執行緒）、
-    ``failed(str)``（整批都讀不出來時才發，單顆失敗只是靜靜略過）。
-    """
-
-    ready = Signal(object)
-    failed = Signal(str)
-
-    #: 一批最多做幾張（做完立刻回 UI，剩下的下一批繼續 —— 縮圖要「陸續」出現）。
-    BATCH = 48
-
-    def __init__(self, parent: Optional[Any] = None) -> None:
-        super().__init__(parent)
-        self._pending: Dict[str, Any] = {}      # defect_id -> DefectItem
-        self._inflight: List[str] = []
-        self._size = 96
-
-    # ---- 對外 -------------------------------------------------------------
-    def request(self, jobs: Sequence[Any], size: int) -> None:
-        """要求做這些縮圖；``jobs`` 是 ``(defect_id, DefectItem)`` 的序列。"""
-        self._size = int(size)
-        for did, item in jobs or ():
-            did = str(did)
-            if did in self._inflight:
-                continue
-            self._pending[did] = item
-        if not self.is_running():
-            self._launch()
-
-    def pending_count(self) -> int:
-        """還沒開始做的縮圖張數（測試 / statusbar 用）。"""
-        return len(self._pending)
-
-    @staticmethod
-    def run_sync(jobs: Sequence[Any], size: int) -> Dict[str, Any]:
-        """同步做一批縮圖（不開執行緒），回傳 ``{defect_id: ndarray}``。"""
-        out: Dict[str, Any] = {}
-        for did, item in jobs or ():
-            try:
-                arr = load_thumb(item, int(size))
-            except Exception:  # 單顆壞掉不該殺整批
-                swallowed("studio.run_sync")
-                continue
-            if arr is not None:
-                out[str(did)] = arr
-        return out
-
-    # ---- 內部 -------------------------------------------------------------
-    def _launch(self) -> None:
-        if not self._pending:
-            return
-        ids = list(self._pending)[:self.BATCH]
-        batch = [(i, self._pending.pop(i)) for i in ids]
-        self._inflight = [i for i, _ in batch]
-        size = int(self._size)
-
-        def work() -> None:
-            out = ThumbWorker.run_sync(batch, size)
-            if out:
-                self.ready.emit(out)
-            elif batch:
-                self.failed.emit("Could not read thumbnails for %d defects "
-                                 "(the image files may be missing)." % len(batch))
-
-        self._start_job(work)
-
-    def _job_finished(self) -> None:
-        """一批做完（GUI 執行緒）：還有待做的就接著做。"""
-        self._inflight = []
-        if self._pending:
-            self._launch()
-
-    def _before_stop(self) -> None:
-        self._pending = {}                  # 關窗：待做的縮圖全部作廢
-        self._inflight = []
-
 
 
 def verdict_note(selected_node: Optional[str], verdict_bin: Any,
@@ -560,8 +376,6 @@ class StudioWindow(QMainWindow):
         self._last_result: Optional[Any] = None
         self._user_stream: Optional[str] = None   # 使用者親手挑的影像流（會被保留）
         self._user_stream_b: Optional[str] = None  # 同上，並排的右邊那張
-        self._compare_on = False         # 並排比對開著嗎（F7-8）
-        self._view_syncing = False       # 正在把檢視狀態推給另一張圖
         self._syncing = False            # 程式在寫 widget（別回頭觸發 model）
         self._trial_t0 = 0.0
         self._items_by_id: Dict[str, Any] = {}    # defect_id -> DefectItem（縮圖用）
@@ -578,13 +392,6 @@ class StudioWindow(QMainWindow):
 
         # ---- 背景工作 ------------------------------------------------------
         self.dataset_worker = DatasetLoadWorker(self)
-        #: 第二份 lot 用**另一個** worker（F15-2）：跟 main 那一份是兩件可以同時
-        #: 發生的事，共用一個的話「已經有工作在跑」會把其中一個默默擋掉。
-        self.pair_worker = DatasetLoadWorker(self)
-        #: 正在載的第二份是**哪一張卡**要的（載完才知道要掛到哪）。
-        self._pending_pair: Optional[Tuple[str, str]] = None
-        #: 每一份第二 source 上次填了哪幾欄（`carry` 沒變就不用重填）。
-        self._pair_filled: Dict[str, Tuple[str, ...]] = {}
         self.preview_worker = PreviewWorker(self)
         self.trial_worker = TrialWorker(self)
         # Output 段的卡（F16 Stage 5c）。**只有 `run_all()` 叫得到它** ——
@@ -593,7 +400,6 @@ class StudioWindow(QMainWindow):
         #: 這一次執行要不要寫出輸出。**跟著那一次執行走**，不是讀當下的 UI
         #: 狀態 —— 使用者按了 Run all 之後可以馬上去改別的東西。
         self._write_outputs_this_run = False
-        self.thumb_worker = ThumbWorker(self)
         self.region_check_worker = RegionCheckWorker(self)
         self.calibrate_worker = CalibrateWorker(self)
         self.calibrate_worker.ready.connect(self._on_calibrated)
@@ -608,8 +414,8 @@ class StudioWindow(QMainWindow):
         self._preview_timer.timeout.connect(self._on_preview_timeout)
 
         # ---- 介面 ----------------------------------------------------------
-        self._build_toolbar()
-        self._build_body()
+        studio_layout.build_toolbar(self)
+        studio_layout.build_body(self)
         self.setStatusBar(QStatusBar(self))
         # ⚠ **一定要在 `setStatusBar` 之後**（U2 後半）：`statusBar()` 會自己
         # 建一個，而下一行的 `setStatusBar` 把那一個整個換掉 —— 掛在舊的那個
@@ -621,11 +427,21 @@ class StudioWindow(QMainWindow):
         self.status_action = StatusAction(self)
         self.statusBar().addPermanentWidget(self.status_action)
         self.statusBar().addPermanentWidget(self.status_history)
-        self._build_progress()
+        studio_layout.build_progress(self)
+
+        # ---- controller（F116）---------------------------------------------
+        # ⚠ 順序：**介面組裝之後**（它讀 `bottom_stack`、`inspector_host` 那些
+        # 東西）、**接線之前**（`_wire_widgets` / `_wire_workers` 要接得到它的
+        # slot）。
+        self.gauges = GaugePanel(self)
+        self.overlays = PreviewOverlays(self)
+        self.gallery_ctl = GalleryController(self)
+        self.attach_ctl = AttachSources(self)
+        self.run_ctl = RunController(self)
 
         self._wire_widgets()
         self._wire_workers()
-        self._build_shortcuts()
+        studio_layout.build_shortcuts(self)
         # 「滑過去變手指」以前是每個呼叫端自己記得要做的事，於是只做到一半。
         # 現在改成視窗建好之後掃一次（見 widgets.apply_button_cursors）。
         apply_button_cursors(self)
@@ -691,284 +507,12 @@ class StudioWindow(QMainWindow):
             QTimer.singleShot(0, lambda: self.show_welcome(force=False))
 
     # ==================================================================== #
-    # 介面組裝
+    # 介面的表與動作（**組裝本身在 `ui/studio_layout.py`**，F116 第 2 步）
     # ==================================================================== #
-    def _build_toolbar(self) -> None:
-        """工具列（M7 精簡；F7-22 分組）。
-
-        兩處刻意的取捨：
-
-        * **「載入範本」併進「Templates…」** —— 舊版兩顆鈕做的是同一件事
-          （都在載 ``examples/recipes/`` 底下的 JSON），而 die-to-die 對第一次
-          用的人是行話。現在只留一個入口，範本庫自己把 die-to-die 排第一。
-        * **「全跑」收進「Run trial」的下拉** —— 兩顆長得一樣的 ▶ 鈕擺在一起，
-          新手分不出差別也不知道該按哪顆。主要動作只留一顆，破壞性比較大的
-          「跑整批」降級成選單項目。⚠ 這一條後來被 F16 Stage 5c 悄悄破壞了
-          （「Export…」空出來的那一格改成整批入口，於是同一支 `run_all()`
-          在工具列上有兩顆鈕）—— 2026-08-24 使用者指出來之後拿掉那一顆，
-          這條規矩恢復成唯一的答案。
-
-        分組（F7-22）
-        -------------
-        以前是七顆長得一模一樣的鈕排成一列，沒有任何分隔 —— 讀起來是一串等權重
-        的東西，使用者得逐顆讀完才知道哪顆是自己要的。現在照**做什麼事**分四段，
-        中間用分隔線：
-
-            檔案（開/存） │ 起手與輸出 │ 復原 │ ……… │ 說明・主題 │ 試跑
-
-        `Help` 與主題移到右邊：它們是**隨時可用但不屬於流程**的東西，混在檔案
-        操作裡只會讓左邊那段變長。試跑仍然在最右邊 —— 它是這個畫面的主要動作。
-
-        **復原／重做這一輪才長出按鈕。** F7-16 給了 Ctrl+Z / Ctrl+Shift+Z，
-        但工具列上沒有對應的鈕 —— 而目標使用者是不寫 code 的工程師，
-        「這個軟體能不能反悔」這件事不該只寫在快捷鍵裡。
-        """
-        bar = QToolBar("Main actions", self)
-        bar.setMovable(False)
-        bar.setFloatable(False)
-        self.toolbar = bar
-        self.addToolBar(bar)
-
-        # **資料的入口不在工具列上**（F14-1，2026-08-19 使用者定調：
-        # 「工具列拿掉吧（會混淆）」）。
-        #
-        # 它現在長在**讀那份資料的那張卡上**（`ParamForm.set_source_action`）。
-        # 理由跟這幾輪一直在講的是同一條：以前檔案在工具列上選，而畫布上那張
-        # Load 卡完全不會說它讀的是哪個檔案 —— 同一件事兩個地方，而畫布是說謊
-        # 的那一個。之後一份 recipe 要掛好幾個 source 的時候，入口也已經在對的
-        # 地方了。
-        #
-        # **入口沒有變少，只是搬家**：畫面最大的那一塊（沒有資料時的空白狀態）
-        # 仍然一種 source 一列（`empty_source_buttons`，從同一張 `INPUT_SOURCES`
-        # 長出來），而那是第一次進來的人真的會看的地方。
-        self.btn_open_recipe = self._tool_button(
-            "Open recipe…", "Load a recipe JSON", self._on_open_recipe,
-            icon="document")
-        # **存檔回來了**（2026-08-26）。2026-08-16 拿掉的理由是「先把整個
-        # engine 用好，再來支援」，而 Phase 1 同一天就收斂了 —— 那個前提到期。
-        #
-        # 一顆鈕、兩個快捷鍵：`Ctrl+S` 存回原檔（第一次沒有原檔就問），
-        # `Ctrl+Shift+S` 一定問。鈕接的是 `Ctrl+S` 那一支 —— 使用者按工具列上
-        # 那顆鈕的意思是「存起來」，不是「我要選一個路徑」。
-        self.btn_save_recipe = self._tool_button(
-            "Save recipe…", "Save this pipeline as a recipe JSON",
-            self._on_save_recipe, icon="save")
-        self.btn_examples = self._tool_button(
-            "Templates…",
-            "Open the template library — every entry is a complete, runnable "
-            "pipeline. Start here rather than from an empty pipeline.",
-            self.open_recipe_library, icon="templates")
-        # **2026-09-08（F91 X4）：這顆鈕回來了。** 它收起來的理由是「範本庫是
-        # 空的」（``examples/`` 已移除），而 `recipes/` 現在有出貨的 recipe、
-        # 逐份有測試跑過 —— 那個理由到期了。開關在
-        # ``scope.SHOW_TEMPLATE_LIBRARY``。
-        self.btn_examples.setVisible(bool(scope.SHOW_TEMPLATE_LIBRARY))
-        # ⚠ **這裡以前還有一顆「Run all & write」**，而它跟 `Run trial ▾` 選單
-        # 裡的「跑整批」是**同一支函式**（兩邊都是 `run_all()`，一個位元的
-        # 差別都沒有）。兩個決定各自都對，只是沒有互相看到：M7 把「全跑」收進
-        # 下拉（見這支的說明），而 F16 Stage 5c 把「Export…」空出來的那一格
-        # 改成整批入口。合起來就是同一個動作在工具列上有兩顆鈕。
-        #
-        # 使用者 2026-08-24：「若沒差或差不多 請留一個即可（傾向 trial）」。
-        # 留下的是下拉裡那一項 —— 而**「跑完之後要做的那件事」搬到它真的會
-        # 發生的地方**：Results 視窗（使用者正在看試跑結果，下一步才是整批）。
-        # 工具列因此只剩一顆有顏色的鈕，而那正是這個畫面唯一的主要動作。
-        self.btn_undo = self._tool_button(
-            "", "Undo the last change", self.undo, icon="undo")
-        self.btn_redo = self._tool_button(
-            "", "Redo the change you just undid", self.redo, icon="redo")
-        # **第三級：純圖示、沒有框**（F13-2）。工具列上「有框的字」是按鈕、
-        # 「沒框的字」讀起來是選單列（那條規矩沒有變，見 theme.py）——
-        # 但這幾顆**沒有字**，所以那個顧慮不成立，而它們也不該跟 `Open KLARF…`
-        # 搶同一級的視覺重量：它們是隨時在旁邊的工具，不是流程上的一步。
-        for b in (self.btn_undo, self.btn_redo):
-            b.setProperty("variant", "ghost")
-        # **Results 視窗的入口**（F48，2026-08-28，使用者：「可以改成加一個
-        # 按鈕獨立呼叫一個視窗嗎（目前是跑完才會出來）」）。
-        #
-        # 以前只有兩條路會開它：跑完自動彈出、或在直方圖上點一根長條 ——
-        # 兩條都要**先跑過一批**。關掉之後想再看一次，唯一的辦法是再跑一次
-        # （而 `results.py` 的檔頭一直寫著「關掉它不會丟掉結果」：結果確實
-        # 還在，只是沒有一顆鈕叫得出來，所以那句話描述著一個不存在的入口）。
-        #
-        # **跟 Help／主題同一段**，而不是接在 `Run trial` 右邊。動線上「跑 →
-        # 看結果」確實是那個順序，但工具列的最後一格是留給那顆藍鈕的
-        # （`test_the_toolbar_is_grouped_not_one_long_row` 守著：試跑在最後
-        # 面）—— 而這一段的定義正好就是它：**不屬於流程、但要隨時找得到**。
-        self.btn_results = self._tool_button(
-            "Results", "Open the Results window - score distribution, "
-                       "thumbnails and the per-defect table (Ctrl+Shift+R)",
-            self.show_gallery, icon="popout")
-        # **這顆鈕以前不會說裡面有沒有東西**（U21）。`ResultsWindow` 是先建好、
-        # 跑完才 show，關掉不丟結果 —— 機制是對的，但使用者的心智模型裡「關掉
-        # 視窗」通常等於「丟掉」，而鈕上沒有任何東西反駁那個猜測。
-        self._refresh_results_button()
-        self.btn_help = self._tool_button(
-            "Help", "Reopen the getting-started tour (includes “Try it with "
-                    "sample data”)",
-            lambda: self.show_welcome(force=True))
-        # 那顆鈕的小箭頭：現在開著哪些視窗（F99 P2-6；內容在 `windows_menu`）。
-        windows_menu.attach(self.btn_help, self._open_windows)
-        # 主題切換：一顆字元鈕，不佔位子也找得到（偏好存 QSettings）
-        self.btn_theme = self._tool_button(
-            "", "Switch between the light and dark theme",
-            self.toggle_theme, icon="theme")
-        self.btn_theme.setProperty("variant", "ghost")
-
-        # 一段 = 一種事情；段與段之間一條分隔線。
-        #
-        # ⚠ **整段都看不見的時候不要放那條分隔線。** 「Templates…」曾經是藏著的
-        # （`scope.SHOW_TEMPLATE_LIBRARY`，2026-09-08 打開），而它那一段以前
-        # 還有「Run all & write」
-        # 撐著；那顆鈕 2026-08-24 拿掉之後，那一段變成空的 —— 工具列上因此出現
-        # 兩條連在一起的分隔線，中間夾著什麼都沒有。分隔線講的是「這裡換一種
-        # 事情」，而一條隔開空氣的線只是雜訊。
-        for group in ((self.btn_open_recipe, self.btn_save_recipe),
-                      (self.btn_examples,),
-                      (self.btn_undo, self.btn_redo)):
-            # ⚠ **鈕還是要 addWidget**（藏著的也要）：建了卻沒加進工具列的
-            # widget 會以工具列為 parent 疊在左上角
-            # （`test_every_button_built_for_the_toolbar_is_actually_on_it`
-            # 在第一版就抓到了）。跳過的只有那條**分隔線**。
-            #
-            # ⚠ 而「這一段看不看得見」**要在 addWidget 之前問**，用的也不是
-            # `isHidden()`：`addWidget` 會把 widget 包進一個 QWidgetAction，
-            # 而 Qt 在工具列真的顯示出來以前把它們**全部**藏著 —— 那時候
-            # 每一顆都答 hidden，於是一條分隔線都不會加。要問的是「**我們**
-            # 有沒有明講要藏它」（`setVisible(False)` 留下的那兩個屬性）。
-            visible = [b for b in group
-                       if not (b.testAttribute(Qt.WA_WState_ExplicitShowHide)
-                               and b.testAttribute(Qt.WA_WState_Hidden))]
-            for b in group:
-                bar.addWidget(b)
-            if visible:
-                bar.addSeparator()
-
-        # 分流的 route 切換器（F23 期2）：`RecipeModel` 一次編一條 route
-        # （§6 第一期不動的那條），切換是「換一條來編」—— 畫布跟著換。
-        # 只有一條 route 時整組收起來（多數 recipe 用不到它）。
-        self.lbl_route = QLabel("Route ", bar)
-        self.route_combo = QComboBox(bar)
-        self.route_combo.setToolTip(
-            "Which route (which set of cards) the canvas is editing. "
-            "With route_by, each defect picks its own route at run time.")
-        self.route_combo.activated.connect(self._on_route_combo)
-        # ⚠ 工具列上的顯示/隱藏要走 **addWidget 回傳的 QAction**：直接
-        # `widget.setVisible(False)` 會被 QToolBar 的排版蓋回去 —— 症狀是
-        # 單 route 的 recipe 工具列上掛著一個空的下拉。
-        self._route_actions = [bar.addWidget(self.lbl_route),
-                               bar.addWidget(self.route_combo)]
-        for act in self._route_actions:
-            act.setVisible(False)
-
-        spacer = QWidget(bar)
-        spacer.setObjectName("toolbarSpacer")
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        bar.addWidget(spacer)
-
-        # 右邊：不屬於流程、但要隨時找得到的那幾顆。
-        bar.addWidget(self.btn_results)
-        bar.addWidget(self.btn_help)
-        bar.addWidget(self.btn_theme)
-        bar.addSeparator()
-
-        # **工具列的字要跟著抽樣方式換**（X3）。以前這裡寫死是「First」，
-        # 而如果換了抽樣方式畫面卻沒有變，就是這個功能最危險的失敗方式：
-        # 跑的東西變了、看的人不知道。字從 `sampling.describe()` 來。
-        #
-        # ⚠ **那個字自己就是那顆鈕。** 第一版是「一個 QLabel ＋ 旁邊一顆
-        # 『…』」，而那多花 56 px —— 工具列在 1366×768 上量出來 1,285 px，
-        # 超過那台機器的 1,229 px，尾巴幾顆會被收進 » 溢位選單
-        # （`test_ui_small_screen` 當場抓到）。合成一顆之後既省了寬度，
-        # 也比較誠實：會變的那個字就是可以點的那個東西。
-        self.lbl_trial_n = QToolButton(bar)
-        self.lbl_trial_n.setCursor(Qt.PointingHandCursor)
-        self.lbl_trial_n.setPopupMode(QToolButton.InstantPopup)
-        bar.addWidget(self.lbl_trial_n)
-        self.spin_trial_n = QSpinBox(bar)
-        self.spin_trial_n.setRange(10, 5000)
-        # 「First 200」旁邊沒有單位時，200 可以是任何東西（秒？百分比？）。
-        self.spin_trial_n.setSuffix(" defects")
-        self.spin_trial_n.setValue(DEFAULT_TRIAL_N)
-        self.spin_trial_n.setToolTip(
-            "How many defects a trial run covers (keep it small while tuning)")
-        bar.addWidget(self.spin_trial_n)
-
-        # 抽樣方式（X3）：**一個下拉，掛在上面那個會變的字上**（見上）。
-        menu_s = QMenu(self.lbl_trial_n)
-        self._sample_actions = {}
-        for mode in sampling.MODES:
-            word, why = sampling.describe(mode)
-            act = menu_s.addAction(word)
-            act.setToolTip(why)
-            act.setCheckable(True)
-            act.setChecked(mode == self.sample_mode)
-            act.triggered.connect(
-                lambda _c=False, m=mode: self.set_sample_mode(m))
-            self._sample_actions[mode] = act
-        self.lbl_trial_n.setMenu(menu_s)
-        self.set_sample_mode(self.sample_mode, say=False)
-
-        self.btn_trial = self._tool_button(
-            "Run trial", "Run the current pipeline over the first N defects "
-                         "and show the score distribution",
-            self._on_trial_clicked, primary=True, icon="play")
-        # 「跑整批」是同一顆鈕的次要動作：點主體 = 試跑，點箭頭才看得到它。
-        menu = QMenu(self.btn_trial)
-        # ⚠ ``&&`` 不是筆誤：Qt 把單一個 ``&`` 當成助憶鍵的記號吃掉，畫出來
-        # 是 **``Run all _write``**（使用者就是這樣叫它的）。要顯示一個真的
-        # ``&`` 就得寫兩個。
-        #
-        # 名字跟 Results 視窗那顆**逐字相同** —— 同一個動作在兩個地方叫兩個
-        # 名字，正是上面那兩顆鈕變成兩顆的第一步。
-        # 2026-09-09 起它**只跑，不寫**：寫是 Results 視窗上另一顆鈕
-        # （「Write outputs」）—— 使用者要先看過結果再決定要不要寫。
-        self.act_run_all = QAction("Run all", menu)
-        self.act_run_all.setToolTip(
-            "Run every defect, not just the first N. Nothing is written - "
-            "press “Write outputs” in Results when the numbers look right.")
-        self.act_run_all.triggered.connect(self._on_full_clicked)
-        menu.addAction(self.act_run_all)
-        self.trial_menu = menu
-
-        # 箭頭是**第二顆真的按鈕**，不是 ``MenuButtonPopup``（F7-23 第二輪）。
-        #
-        # 以前這兩個動作是同一顆 QToolButton 的兩半，而那半邊的外觀完全歸 Qt
-        # 管：它用自己的淺色按鈕樣式畫在我們的藍底上，也不理會圓角 —— 全 UI
-        # 最重要的一顆鈕，右邊掛著一塊跟主題無關的東西。
-        #
-        # 補樣式補不起來：只要給 ``::menu-button`` 一個盒子（背景、邊框、圓角
-        # **任一**），Qt 就把繪製整個交給 stylesheet，而 stylesheet 沒有
-        # ``image`` 就不畫箭頭 —— 這個 repo 是純文字的（docs/FAB-VALIDATION.md）塞不了
-        # 圖檔。實測只有 ``width`` 是安全的。同一條坑 F7-13 在
-        # ``QComboBox::drop-down`` 上踩過，這次量到 ``::menu-button`` 上。
-        #
-        # 所以拆成兩顆普通按鈕，兩顆都是我們控制得了的。這顆**不設 menu**：
-        # 設了 Qt 又會自己加一個下拉指示器，等於畫兩個箭頭。
-        self.btn_trial_more = self._tool_button(
-            "", "More ways to run — including the whole dataset",
-            self._popup_trial_menu, primary=True, icon="chevron_down")
-
-        # 兩顆**放進同一個容器**，中間只留 1px（F7-24 第二輪）。
-        #
-        # 分開放在工具列上時它們吃全域的 6px 間距，讀起來像兩顆不相干的按鈕 ——
-        # 而箭頭是 ``Run trial`` 的次要動作，不是另一個功能。1px 的縫加上內側
-        # 拉直的圓角（QSS 的 ``[seg]``）就是一個分段控制項：**一件事，兩個半邊**。
-        #
-        # 注意這跟 F7-23 拆掉 ``MenuButtonPopup`` 不衝突：那一輪要的是「這半邊的
-        # 外觀歸我們管」，而這裡正是在管它 —— 差別在現在兩個半邊都是真的按鈕。
-        self.btn_trial.setProperty("seg", "left")
-        self.btn_trial_more.setProperty("seg", "right")
-        group = QWidget(bar)
-        group.setObjectName("toolbarGroup")
-        glay = QHBoxLayout(group)
-        glay.setContentsMargins(0, 0, 0, 0)
-        glay.setSpacing(1)
-        glay.addWidget(self.btn_trial)
-        glay.addWidget(self.btn_trial_more)
-        self.trial_group = group
-        bar.addWidget(group)
-
+    # 這一段留下的是兩種東西：`StudioWindow` 身上的**表**（快捷鍵那一張，
+    # `studio_layout.build_shortcuts` 讀 `win.SHORTCUTS`），以及那些鈕**按下去
+    # 會發生什麼**（undo／redo／停止／進度列）。擺東西的那一千行搬走了 ——
+    # 段名跟著改，不然它會是這個檔案裡第一個說謊的標題。
     #: 鍵盤快捷鍵（F7-16）。以前一個都沒有 —— 而這是一個「一直在試」的工具，
     #: 存檔、跑一次、退回上一步是每分鐘都在做的事，每一次都要把手移到滑鼠、
     #: 找到那顆鈕、按下去。
@@ -1007,65 +551,6 @@ class StudioWindow(QMainWindow):
                                    "copy_cards", "paste_cards",
                                    "duplicate_cards"))
 
-    def _build_shortcuts(self) -> None:
-        handlers = {
-            "open_klarf": partial(open_dialogs.open_source, self,
-                                  "klarf"),
-            "open_recipe": self._on_open_recipe,
-            "save_recipe": self._on_save_recipe,
-            "save_recipe_as": self._on_save_recipe_as,
-            "run": self._on_trial_clicked,
-            "results": self.show_gallery,
-            "undo": self.undo,
-            "redo": self.redo,
-            "zoom_reset": self.pipeline.reset_zoom,
-            "zoom_in": lambda: self.pipeline.zoom_by(1.25),
-            "zoom_out": lambda: self.pipeline.zoom_by(1 / 1.25),
-            "zoom_fit": self.pipeline.fit,
-            "find_card": self.focus_card_search,
-            "prev_defect": lambda: self.step_defect(-1),
-            "next_defect": lambda: self.step_defect(+1),
-            "layout_mode": self.toggle_layout_mode,
-            "delete_selected": self._delete_selected_on_canvas,
-            "clear_selection": self._clear_canvas_selection,
-            "copy_cards": self.copy_cards,
-            "paste_cards": self.paste_cards,
-            "duplicate_cards": self.duplicate_cards,
-        }
-        self._shortcuts = []
-        for keys, name in self.SHORTCUTS:
-            # 畫布專用的那幾個掛在畫布上、而且是 `WidgetWithChildrenShortcut`
-            # —— 焦點不在畫布裡的時候它們根本不會被叫到（U18）。
-            host = self.pipeline if name in self._WIDGET_SHORTCUTS else self
-            sc = QShortcut(QKeySequence(keys), host)
-            if name in self._WIDGET_SHORTCUTS:
-                sc.setContext(Qt.WidgetWithChildrenShortcut)
-            sc.activated.connect(handlers[name])
-            self._shortcuts.append(sc)
-
-        # 按鍵存在還不夠 —— 使用者要**發現得到**。工具列的 tooltip 是他唯一
-        # 會停留的地方，所以把快捷鍵寫進去（作業系統慣例：括號附在後面）。
-        #
-        # 註冊而不是「設一次」：``_update_action_states`` 每次 refresh 都會重寫
-        # 這幾顆的 tooltip（「還沒有東西可以存」之類的原因），設一次的話第一次
-        # refresh 就被蓋掉了。所以改成**設 tooltip 的那個動作自己會補上快捷鍵**。
-        self._tip_keys = {
-            id(self.btn_open_recipe): "Ctrl+Shift+O",
-            id(self.btn_save_recipe): "Ctrl+S",
-            id(self.btn_trial): "Ctrl+R",
-            # F14-1：`Ctrl+O` 的鈕搬到空白狀態與入口卡上了（工具列那幾顆
-            # 拿掉了），而快捷鍵一個字都沒變 —— 它要在**還看得到的**那顆鈕上
-            # 講出來，不然它就只活在原始碼裡。
-            id(self.btn_empty_open): "Ctrl+O",
-            # F7-22：這兩顆這一輪才長出來，快捷鍵 F7-16 就有了。
-            id(self.btn_undo): "Ctrl+Z",
-            id(self.btn_redo): "Ctrl+Shift+Z",
-        }
-        for w in (self.btn_open_recipe, self.btn_save_recipe,
-                  self.btn_trial, self.btn_empty_open,
-                  self.btn_undo, self.btn_redo):
-            self._set_tip(w, w.toolTip())
-
     def _set_tip(self, widget: Any, text: str) -> None:
         """設 tooltip，並自動補上這顆鈕的快捷鍵。"""
         keys = getattr(self, "_tip_keys", {}).get(id(widget))
@@ -1091,40 +576,6 @@ class StudioWindow(QMainWindow):
             return False
         self._status("Redone.")
         return True
-
-    def _build_progress(self) -> None:
-        """狀態列右側的進度條（F7-7）。
-
-        以前載入資料集與試跑都只有狀態列的一行字，那對「跑一批一萬顆」這種
-        會等好幾分鐘的動作是不夠的 —— 使用者看不出還要多久、也看不出它到底
-        在不在動。這條進度條在**閒著時完全隱藏**，不佔位子也不製造噪音。
-
-        載入 KLARF 沒有可回報的百分比（``load_dataset`` 是一次呼叫），所以那個
-        情況用**不定型**（range 0–0）的跑馬燈：它回答的是「還在動嗎」，
-        而不是「還剩多久」——謊報一個假的百分比比不報還糟。
-        """
-        self.progress = QProgressBar(self)
-        self.progress.setFixedWidth(220)
-        self.progress.setTextVisible(True)
-        self.progress.setVisible(False)
-        # 明確狀態：``isVisible()`` 在視窗 show() 之前一律 False，
-        # headless 測試會全部誤判（同 LibraryPanel 的 badge，見 widgets.py）。
-        self._progress_on = False
-        self.statusBar().addPermanentWidget(self.progress)
-
-        # 「跑到一半發現參數設錯」是最常見的情況，而一萬顆要好幾分鐘（F7-16）。
-        # 引擎本來就支援中止（``run_batch`` 的 ``abort_check``、
-        # ``TrialWorker.abort``）—— 只是以前沒有任何地方按得到它，
-        # 於是使用者唯一的中止方式是把整個視窗關掉。
-        self.btn_stop = QPushButton("Stop", self)
-        self.btn_stop.setProperty("variant", "danger")
-        self.btn_stop.setToolTip(
-            "Stop this run. Defects already finished are kept — you get the "
-            "results for them, not nothing.")
-        self.btn_stop.setVisible(False)
-        self.btn_stop.clicked.connect(self.stop_run)
-        self.statusBar().addPermanentWidget(self.btn_stop)
-        self._stop_on = False
 
     def _progress_busy(self, label: str) -> None:
         """不定型跑馬燈（不知道總量時用）。"""
@@ -1175,589 +626,6 @@ class StudioWindow(QMainWindow):
         b = self.btn_trial_more
         self.trial_menu.popup(b.mapToGlobal(QPoint(0, b.height())))
 
-    def _tool_button(self, text: str, tip: str, slot: Any,
-                     primary: bool = False,
-                     icon: Optional[str] = None) -> QToolButton:
-        """工具列上的一顆鈕。``icon`` 給的是**自繪**圖示的名字（不是字元）。
-
-        有文字又有圖示時（只有 ``Run trial``），圖示畫在左邊那一格 ——
-        QSS 的 ``[hasGlyph="true"]`` 把左邊 padding 撐開，文字才不會疊上去。
-        """
-        b = _GlyphToolButton(self) if icon else QToolButton(self)
-        # **翻譯層擺在共用的那一支**（U14）：工具列的每一顆鈕都流過這裡，所以
-        # 包這一次就涵蓋整條工具列 —— 而呼叫端一個字都不用改。那正是「之後
-        # 不必改 38 個檔案」那句話成立的方式。
-        b.setText(strings.tr(text))
-        b.setToolTip(strings.tr(tip))
-        b.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        b.setCursor(Qt.PointingHandCursor)
-        if primary:
-            b.setObjectName("primary")
-        if icon:
-            b._init_glyph(icon, "left" if text else "center")
-        b.clicked.connect(slot)
-        return b
-
-    def _build_body(self) -> None:
-        # 左：卡片庫
-        self.library = LibraryPanel(self)
-        self.library.panel_toggled.connect(self._on_library_panel_toggled)
-
-        # 中：流程畫布（上）+ 參數表單／分數編輯（下）。
-        #
-        # 版面史，因為它繞了一圈（F7-22 → F8-UI 抽屜 → 現在）：F7-22 讓參數
-        # 預設收起、雙擊才攤開（畫布是主體）；F8-UI 第一輪改成畫布右緣的
-        # 抽屜 —— 使用者當天就退了它：「pipeline 往右長，抽屜也吃右邊，兩個
-        # 在搶同一個方向」。他拍板的形狀（D 案）是：**畫布會 zoom、又有
-        # 彈出視窗，所以平面上只需要中上一塊**；大空間還給設定與影像。
-        # 所以：上下切回來、比例反過來（畫布 2 / 設定 3）、設定**預設攤開**，
-        # 「看全貌」由 zoom bar 的彈出視窗鈕承接（open_canvas_window）。
-        self.pipeline = PipelineCanvas(self)
-        # 主畫布是概覽條（D 案）：fit 的「全部看得完」贏過「副標讀得出」。
-        # 讀細節的地方是下方設定區與彈出視窗（那份維持類別預設 0.7）。
-        self.pipeline.MIN_FIT_SCALE = 0.5
-        self.param_form = ParamForm(self)
-        # 「插入數字 ▾」每一項的說明與顏色點（`number_picker`，2026-09-09）。
-        self.param_form.number_info_provider = self._number_info
-        self.score_pane = self._build_score_pane()
-        # 判定樹一步的編輯面板（F24 ③）—— 點畫布上的菱形時換到它。
-        from .tree_panel import TreePanel
-
-        self.tree_pane = TreePanel(self)
-        self.tree_pane.set_model(self.model)
-        self.tree_pane.step_requested.connect(self._on_tree_step_clicked)
-        self.stack = QStackedWidget(self)
-        self.stack.addWidget(self.param_form)     # index 0
-        self.stack.addWidget(self.score_pane)     # index 1
-        self.stack.addWidget(self.tree_pane)      # index 2
-
-        middle = HairlineSplitter(Qt.Vertical, self)
-        middle.addWidget(self.pipeline)
-        # 下半在 `_build_preview_pane` 跑完之後才接得起來（儀表是在那裡建的）
-        # —— 見 `_build_params_row`。
-        self.canvas_column = middle
-
-        # 「為什麼還不能跑」的常駐清單（U2）—— **整個視窗最下面一條，橫跨三欄**
-        # （見下面 `setCentralWidget` 那一段）。它不在任何一個 splitter 裡：
-        # 它是使用者在畫布上找不到路時唯一的答案，而一個拖得掉的東西答不到
-        # 那件事。
-        self.problems = ProblemsBar(self)
-        self.problems.problem_activated.connect(self._on_problem_activated)
-        # **開窗時沒有選任何卡片，所以設定區是收起來的**（F13-1）。
-        # 以前它一律攤開，於是畫面最大的一塊（中欄下半，1600×1000 上量到
-        # 551px 高）裝的是一行灰字「(Pick a card from the library…)」——
-        # 一塊叫人去別的地方點東西的空白，而它同時把畫布壓到 50% 縮放，
-        # 卡片的副標（「這張卡吃什麼吐什麼」）當場讀不出來。
-        # F100：那個狀態現在住在 `WorkbenchLayout.open`（工作台攤開著嗎）——
-        # 而 Tune 模式開窗就是攤開的，因為影像住在工作台裡。
-        # 比例在 showEvent 才真的套 —— setSizes 要有實際高度才算得出來
-        #（isVisible 之前那些數字沒有意義，docs/PITFALLS.md 的老坑）。
-        self._layout_ratio_applied = False
-        # 右：單顆預覽（F7-5：Gallery 與直方圖搬到 Results 視窗，
-        #     主視窗只留「編流程 + 看單顆」，影像因此拿得到整欄高度）
-        self.preview_pane = self._build_preview_pane()
-        # 參數 ＋ 儀表同欄同框（U8）。要在 preview pane 之後 —— 儀表那幾個
-        # widget 是在那一支裡建的。
-        middle.addWidget(self._build_params_row())
-        middle.setStretchFactor(0, 2)
-        middle.setStretchFactor(1, 3)
-        # 版面模式的狀態與幾何（F100）—— 邏輯在 `ui/workbench.py`，這裡只接。
-        # 主欄 = 畫布/工作台那根 splitter（F100 v2：Verdict 列搬進右欄影像下面）。
-        self.main_column = middle
-
-        # Results 視窗（跑完才 show；先建好讓 histogram / gallery 一直有實體，
-        # 這樣所有既有接線與測試都不用管它現在開著沒有）
-        self.results = ResultsWindow(self)
-        self.histogram = self.results.histogram
-        self.gallery = self.results.gallery
-        self.results.rerun_requested.connect(self.rerun)
-        self.results.write_requested.connect(self.write_outputs)
-        self.results.class_selected.connect(self._on_verdict_class)
-
-        # 右欄：影像在上、儀表在下（F100 v3），一根直向 splitter，比例記得住。
-        self.right_column = HairlineSplitter(Qt.Vertical, self)
-        self.right_column.addWidget(self.preview_pane)
-        self.right_column.addWidget(self.gauge_pane)
-        self.right_column.setStretchFactor(0, 3)
-        self.right_column.setStretchFactor(1, 2)
-        self.right_column.setCollapsible(0, False)
-        root = HairlineSplitter(Qt.Horizontal, self)
-        root.addWidget(self.library)
-        root.addWidget(self.main_column)
-        root.addWidget(self.right_column)
-        root.setStretchFactor(0, 0)
-        root.setStretchFactor(1, 3)
-        root.setStretchFactor(2, 2)
-        root.setCollapsible(1, False)
-        # 出廠欄寬；上一次關窗的欄寬由 `WorkbenchLayout`（F100 v2）在 showEvent
-        # 套（只記 Tune 的：Build 的右欄是 0，不是使用者調出來的）。
-        root.setSizes(list(COLUMN_SIZES))
-        # 版面模式的狀態與幾何（F100）—— 邏輯在 `ui/workbench.py`，這裡只接。
-        self.layout_modes = WorkbenchLayout(
-            middle, self.params_row, self.pipeline, self.library,
-            root=root, preview_index=2, right=self.right_column,
-            load=_load_sizes, save=_save_sizes)
-        self.top_splitter = root
-        self.root_splitter = root
-
-        # Problems 列住在**三欄的下面、狀態列的上面**（U2）—— 橫跨整個視窗。
-        #
-        # ⚠ 位置換過兩次，而兩次都是**現有的不變量把它推到這裡**：
-        #   1. 包在畫布外面 → `canvas_column.widget(0)` 不再是畫布
-        #      （`canvas.py::_build_header` 的說明就寫著誰靠著它，
-        #      `test_ui_f8_ui_polish` 當場紅）；
-        #   2. 包住整個中欄 → `root_splitter` 的三個子項不再是
-        #      `[library, canvas_column, preview_pane]`
-        #      （`test_ui_results::test_main_window_keeps_only_the_editing_surface`）。
-        # 包 central widget 誰都不礙著 —— 而且**這一塊本來就是視窗層級的答案**
-        # （「這份 pipeline 現在能不能跑」不是中欄自己的事）。
-        host = QWidget(self)
-        hl = QVBoxLayout(host)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(0)
-        hl.addWidget(root, 1)
-        hl.addWidget(self.problems)
-        self.setCentralWidget(host)
-
-    def _build_score_pane(self) -> QWidget:
-        """判定段那一欄 —— 內容全部住在 `DecidePanel`（F22-UI）。
-
-        為什麼搬出去：這一欄現在有兩種樣子（一個門檻／一串規則），而規則那一種
-        是逐列生出來的。留在 `studio.py`（已經 5000 多行）的話，這一欄會是這個
-        檔案裡最長的一段，而它跟視窗的其他部分沒有任何共用的東西。
-        """
-        self.decide_panel = DecidePanel(self)
-        self.decide_panel.set_model(self.model)
-        self.decide_panel.mode_changed.connect(self._on_decide_mode)
-        self.decide_panel.decision_requested.connect(self.add_decision)
-        # 分流的編輯區塊（F23 期2）—— 判定欄**上方**：它在跑之前就決定每一顆
-        # 走哪條 route，判定是跑完之後的事，由上往下讀正好是時間順序。
-        from .route_panel import RouteByBox
-
-        self.route_box = RouteByBox(self)
-        self.route_box.set_model(self.model)
-        # ⚠ **建出來再藏，不是不建**（同 `btn_examples` 那一顆）：版面量測、
-        # 既有測試、`_refresh_*` 都還指得到它，回復只要改一個字串。
-        #
-        # ⚠ 而且**它跟畫布上的徽章要同進同出**（`scope.SHOW_ROUTE_BY`）。
-        # 只藏徽章的話，使用者仍然編得出一份會分流的 recipe，而畫布上一個字
-        # 都不會說 —— 那正是這個 repo 一直在消滅的「畫布說謊」。
-        self.route_box.setVisible(bool(scope.SHOW_ROUTE_BY))
-        pane = QWidget(self)
-        lay = QVBoxLayout(pane)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self.route_box)
-        lay.addWidget(self.decide_panel, 1)
-        return pane
-
-    def _build_params_row(self) -> QWidget:
-        """中欄的下半：**參數在左、這張卡的儀表在右，同一個框裡**（U8）。
-
-        為什麼它們必須挨著
-        ------------------
-        調參數的迴圈是「改一個數字 → 看那個數字怎麼變」。儀表以前住在右欄
-        下半，中間隔著整張影像 —— 每改一格眼睛就要橫跨半個螢幕來回一趟，而那
-        件事在一個 1366×768 的螢幕上尤其貴。
-
-        **卡名與階段色只出現一次**：ParamForm 自己的標頭就是那一次，儀表這一
-        邊只留 Card / Features 兩顆切換鈕。兩邊各畫一次的話，同一張卡的名字在
-        同一個框裡出現兩遍，而使用者要花一秒鐘確認那是不是兩張卡。
-
-        影像**不搬**：它是另一種迴圈（改參數 → 看圖），而且它要的是高度 ——
-        把它擠進這一列只會讓兩件事都變小。
-        """
-        row = HairlineSplitter(Qt.Horizontal, self)
-        row.addWidget(self.stack)
-        # F100 v3：儀表搬到**右欄影像下面**（使用者：「最一開始的排版最好，儀表
-        # 換到影像下方」）。設定區於是拿到整個中欄的寬度，儀表拿到右欄的寬度
-        # ——兩個要寬的東西各一整欄，只有影像付出高度。「儀表挨著參數」（U8）
-        # 沒有破：中欄下半與右欄下半左右相鄰，同一條視線。
-        self.workbench = row
-        # 參數那一邊寬一點：它裝的是一排排可以拖的滑桿（F7-8），而儀表是
-        # 讀的東西。3:2 是量出來的 —— 再窄一點，`Borrow range from` 那種
-        # 兩行的 label 會開始折行。
-        row.setStretchFactor(0, 3)
-        row.setStretchFactor(1, 2)
-        row.setCollapsible(0, False)
-        self.params_row = row
-        return row
-
-    def _build_preview_pane(self) -> QWidget:
-        pane = QWidget(self)
-        lay = QVBoxLayout(pane)
-        # 間距走 8px 節奏（F8-UI）：這一欄以前是 2/4/6px 各處自己挑，
-        # 排在一起就是「差一點對齊」—— 比完全沒對齊更讓人覺得亂。
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(8)
-        # 這一欄叫什麼（F13-4）—— 四個直欄以前只靠 splitter 隔開，
-        # 沒有任何東西說得出「這一欄是什麼」。它自己不帶左右內距，
-        # 靠這一欄的 8px 邊界對齊（那個節奏是 F8-UI 定的，不要為了一個
-        # 地標破壞它）。
-        lay.addWidget(column_header("Preview", pane))
-
-        nav = QHBoxLayout()
-        nav.setSpacing(8)
-        self.btn_prev = IconButton("prev", "Previous defect", pane, kind="icon")
-        self.btn_next = IconButton("next", "Next defect", pane, kind="icon")
-        self.defect_combo = QComboBox(pane)
-        self.defect_combo.setToolTip("Jump straight to a defect")
-        self.defect_label = QLabel("(no dataset loaded)", pane)
-        self.defect_label.setObjectName("paramHint")
-        # 下拉框**不吃 stretch**。它裝的是一個 defect id，而以前它拿了
-        # ``stretch 1``，於是在寬螢幕上是一個 800px 寬、裡面寫著「1」的框，
-        # 而真正有資訊的那句（``ebi_patch · defect 1 / 24``）被擠到最右邊。
-        # 空間給誰，就是在說什麼比較重要。
-        self.defect_combo.setMaximumWidth(DEFECT_COMBO_MAX)
-        self.defect_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        nav.addWidget(self.btn_prev)
-        nav.addWidget(self.btn_next)
-        nav.addWidget(self.defect_combo)
-        nav.addWidget(self.defect_label, 1)
-        lay.addLayout(nav)
-
-        srow = QHBoxLayout()
-        srow.setSpacing(8)
-        lbl_stream = QLabel("Image stream", pane)
-        lbl_stream.setObjectName("paramLabel")
-        self.stream_combo = QComboBox(pane)
-        self.stream_combo.setToolTip(
-            "Which image stream to look at (test / ref / diff / snr_map …)")
-        # 同上：影像流的名字是 ``test`` / ``ref`` / ``diff`` / ``snr_map``，
-        # 最長也就那樣，不需要整列。
-        self.stream_combo.setMaximumWidth(STREAM_COMBO_MAX)
-        srow.addWidget(lbl_stream)
-        srow.addWidget(self.stream_combo)
-
-        # 並排比對（F7-8）—— 預設關著，見 _set_compare 的說明
-        self.compare_check = QCheckBox("Compare", pane)
-        self.compare_check.setToolTip(
-            "Show a second image stream side by side, with linked zoom and pan "
-            "— useful when tuning Enhance cards, to check test and ref still "
-            "match")
-        self.stream_combo_b = QComboBox(pane)
-        self.stream_combo_b.setToolTip("The stream shown on the right")
-        self.stream_combo_b.setVisible(False)
-        self.stream_combo_b.setMaximumWidth(STREAM_COMBO_MAX)
-        srow.addWidget(self.compare_check)
-        srow.addWidget(self.stream_combo_b)
-        srow.addStretch(1)
-        # 游標讀數有自己的位置（M7）。以前它是寫進狀態列的，於是滑鼠只要飄過
-        # 影像，剛才那句「Trial run finished: …」就被 x/y/gray 洗掉了 ——
-        # 狀態列該留給「使用者要讀的事件」，一直在刷的東西不該跟它搶同一格。
-        self.cursor_label = QLabel("", pane)
-        self.cursor_label.setObjectName("paramHint")
-        # F100：這一列住在工作台的一格裡（1366 上約 420 px），150 的保留寬度
-        # 是那一格硬最小寬度的最大來源之一。讀數最長是「x 1234, y 1234 · 255」，
-        # 100 夠；不夠的那一瞬間它會被擠成省略號，而不是把整個視窗撐寬。
-        self.cursor_label.setMinimumWidth(100)
-        self.cursor_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.cursor_label.setToolTip("Cursor position and gray level")
-        srow.addWidget(self.cursor_label)
-        lay.addLayout(srow)
-
-        self.image_view = ImageView(pane)
-        self.image_view_b = ImageView(pane)
-        self.image_view_b.setVisible(False)
-        images = QWidget(pane)
-        irow = QHBoxLayout(images)
-        irow.setContentsMargins(0, 0, 0, 0)
-        irow.setSpacing(8)
-        irow.addWidget(self.image_view, 1)
-        irow.addWidget(self.image_view_b, 1)
-
-        # 還沒載資料時，畫面上最大的一塊是**一片黑**，角落有一行極小的
-        # 「(no dataset loaded)」（F7-15）。首啟導覽關掉之後就沒有任何東西告訴
-        # 使用者下一步要做什麼 —— 而「下一步」只有兩個，就把那兩個放在這裡。
-        # F100：影像現在是工作台的一格（1366 上約 480 px 寬、380 px 高），而這
-        # 一塊空白狀態是四列「鈕 ＋ 一句話」—— 塞不下的時候要**捲**，不是疊在
-        # 一起（第一版就是疊的）。用 `fit_screen.scrolled` 在**建構時**包，
-        # 事後搬是 segfault（`CLAUDE.md` §4）。捲軸還有第二個好處：
-        # `QStackedWidget` 的最小寬度是它每一頁的最大值——**藏起來的那一頁也
-        # 算**——而以前這一頁的 468 px 就是右欄硬最小寬度的來源。
-        self.empty_state_host, self.empty_state = fit_screen.scrolled(pane)
-        estack = QVBoxLayout(self.empty_state)
-        estack.addStretch(1)
-        title = QLabel("No data loaded yet", self.empty_state)
-        title.setObjectName("paramTitle")
-        title.setAlignment(Qt.AlignCenter)
-        estack.addWidget(title)
-        # 這句話要跟旁邊實際看得到的鈕一致 —— 範例資料那顆收起來的時候還講
-        # 「or try the tool with generated sample data」，使用者會去找一顆不在
-        # 畫面上的鈕。
-        why = QLabel("d4t reads four kinds of data. Pick the one you have."
-                     if not scope.SHOW_SAMPLE_DATA else
-                     "d4t reads four kinds of data. Pick the one you have, "
-                     "or try the tool with generated sample data first.",
-                     self.empty_state)
-        why.setObjectName("paramHint")
-        why.setAlignment(Qt.AlignCenter)
-        why.setWordWrap(True)
-        # 留一個名字：這句話必須跟旁邊看得到的鈕一致，而那是測得出來的
-        # （`test_nothing_on_screen_points_at_a_button_that_is_not_there`）。
-        self.empty_state_hint = why
-        estack.addWidget(why)
-
-        # **每一種 source 一列，而那幾列是從 `scope.INPUT_SOURCES` 長出來的**
-        # （F11 Input-5，使用者：「各種 image source 資料流是否改成個別入口比較
-        # 好（但同時 UI 一開始進去的地方顯示也要改）」）。
-        #
-        # 以前這裡只有一顆 ``Open KLARF…``，而工具列上有三顆 —— 於是帶著一個
-        # 資料夾的圖片、或一個多頁 TIFF 進來的人，在**整個畫面最大的那一塊**上
-        # 看到的是「Open a KLARF to see your patches here」。他要嘛以為 d4t
-        # 讀不了他的東西，要嘛得自己去工具列上一顆一顆讀過去。
-        #
-        # 一列一句話，說的是**這條路吃什麼樣的檔案**，不是它會做什麼 ——
-        # 使用者站在這個畫面前面時，手上已經有檔案了，他要回答的問題是
-        # 「我這一堆算哪一種」。
-        self.empty_source_buttons: Dict[str, QPushButton] = {}
-        rows = QVBoxLayout()
-        rows.setSpacing(6)
-        for i, src in enumerate(scope.INPUT_SOURCES):
-            row = QHBoxLayout()
-            row.setSpacing(10)
-            row.addStretch(1)
-            b = QPushButton(src.title, self.empty_state)
-            if i == 0:
-                b.setObjectName("primary")     # 最常見的那一條是主要動作
-            b.setMinimumWidth(140)
-            b.clicked.connect(
-                partial(open_dialogs.open_source, self, src.key))
-            self.empty_source_buttons[src.key] = b
-            row.addWidget(b)
-            what = QLabel(src.what if src.has_klarf else
-                          "%s No KLARF, so no write-back." % src.what,
-                          self.empty_state)
-            what.setObjectName("paramHint")
-            what.setWordWrap(True)
-            what.setMinimumWidth(200)
-            row.addWidget(what, 2)
-            row.addStretch(1)
-            rows.addLayout(row)
-        estack.addLayout(rows)
-
-        # 第一顆保留原本的名字：既有測試與 ``_build_shortcuts``（Ctrl+O）
-        # 都指得到它，而它做的事一個字都沒變。
-        self.btn_empty_open = self.empty_source_buttons[
-            scope.INPUT_SOURCES[0].key]
-
-        # 附加檔不是第五條路，所以它不是一顆鈕，是**一句說明它什麼時候才出現**
-        # 的話。這正是使用者問的那一句「Load layout labels 要怎麼 load，好像
-        # 沒有 load 的地方」—— 卡片在卡片庫裡看得到，而它的入口要等 lot 載進來
-        # 才亮，於是這個畫面上必須說得出那個順序。
-        att_bits = ["%s — %s %s" % (a.title, a.what, a.needs)
-                    for a in scope.ATTACHMENTS]
-        self.empty_state_attachments = QLabel(
-            "  ·  ".join(att_bits), self.empty_state)
-        self.empty_state_attachments.setObjectName("paramHint")
-        self.empty_state_attachments.setAlignment(Qt.AlignCenter)
-        self.empty_state_attachments.setWordWrap(True)
-        self.empty_state_attachments.setVisible(bool(scope.ATTACHMENTS))
-        estack.addSpacing(6)
-        estack.addWidget(self.empty_state_attachments)
-
-        brow = QHBoxLayout()
-        brow.addStretch(1)
-        self.btn_empty_sample = QPushButton("Try it with sample data",
-                                            self.empty_state)
-        self.btn_empty_sample.setProperty("variant", "secondary")
-        # ⚠ **這顆跟 `btn_examples` 看的不是同一個旗標了**（F91 X4）：
-        # demo 產得出資料，但**不載 pipeline** —— 按完看到的是一批資料配一張
-        # 空白畫布。範本庫那個理由修好了，這個沒有。
-        self.btn_empty_sample.setVisible(bool(scope.SHOW_SAMPLE_DATA))
-        brow.addWidget(self.btn_empty_sample)
-        brow.addStretch(1)
-        estack.addSpacing(8)
-        estack.addLayout(brow)
-        estack.addStretch(1)
-
-        self.image_stack = QStackedWidget(pane)
-        self.image_stack.addWidget(self.empty_state_host)  # index 0
-        self.image_stack.addWidget(images)                # index 1
-        lay.addWidget(self.image_stack, 3)
-
-        # 模板定位卡的入口在**參數列裡**（F7-13），不在這裡。它是那個參數的值
-        # 從哪來，不是一個預覽動作 —— 放在影像下方等於把「這個欄位怎麼填」的
-        # 答案擺到半個螢幕外，而欄位本身看起來只是「還沒填」。
-
-        # 「這個區域在整批上都對嗎」（F7-11）。跟曲線面板一樣平常收起來，
-        # 只有選到會定義區域的卡片時才出現。
-        self.btn_region_check = QPushButton("Check this region across defects…",
-                                            pane)
-        self.btn_region_check.setProperty("variant", "secondary")
-        self.btn_region_check.setToolTip(
-            "Draw this region on many defects at once. A setting that looks "
-            "right on defect 1 can be completely off on defect 50 — the "
-            "structure sits in a different place on every patch.")
-        self.btn_region_check.setVisible(False)
-        lay.addWidget(self.btn_region_check)
-
-        # 投影曲線面板（F7-11）。**平常收起來** —— 它只有在編輯投影定位卡的
-        # 時候才有意義，常駐會把好不容易爭取到的影像高度又吃掉一塊。
-        # 投影曲線面板搬進卡片儀表（F7-17）：它本來就是「這張卡自己的儀表」，
-        # 只是 F7-11 當時直接掛在這裡，變成一條跟儀表機制平行的路。兩條並存的
-        # 下場是加新面板的人不知道走哪一條，然後兩邊各長一半。
-
-        # 右下角那一塊：**選哪張卡就換成那張卡的儀表**（F7-17）。
-        # 原本固定是一張「特徵 / 數值」表 —— 問題不是它佔位子，是那些數字沒有
-        # 辦法判讀（`glv_snr 11.170` 是大還是小？），而且使用者在問的
-        # 問題**每張卡都不一樣**。特徵表仍然留著，用切換列回去。
-        # F76 刀 4：這一塊從 `widgets.FeatureTable`（一條平的清單）換成
-        # `feature_panel.FeaturePanel`（卡 › 區域 分段、四胞胎橫過來）。
-        # 名字仍叫 `feature_panel`，取用口跟舊的那張表同名同義。
-        self.feature_panel = FeaturePanel(self)
-        self.feature_panel.setMinimumHeight(120)
-
-        self.inspector_host = QWidget(self)
-        ihost = QVBoxLayout(self.inspector_host)
-        ihost.setContentsMargins(0, 0, 0, 0)
-        ihost.setSpacing(2)
-        self.inspector_summary = QLabel("", self.inspector_host)
-        self.inspector_summary.setObjectName("paramHint")
-        self.inspector_summary.setWordWrap(True)
-        self.inspector_slot = QVBoxLayout()
-        self.inspector_slot.setContentsMargins(0, 0, 0, 0)
-        ihost.addLayout(self.inspector_slot, 1)
-        ihost.addWidget(self.inspector_summary)
-        self._inspector: Optional[Any] = None
-
-        self.bottom_stack = QStackedWidget(self)
-        self.bottom_stack.addWidget(self.inspector_host)      # index 0
-        self.bottom_stack.addWidget(self.feature_panel)       # index 1
-
-        # ---- 儀表搬到參數旁邊（U8，2026-09-08）--------------------------
-        #
-        # 這一塊（Card 儀表 / Features）以前住在**右欄下半**，而參數住在
-        # 中欄下半 —— 中間隔著整張影像。調參數的迴圈是「改一個數字 → 看那個
-        # 數字怎麼變」，而那兩件事每一次都要橫跨半個螢幕，眼睛來回一趟。
-        #
-        # 現在它跟參數同欄同框（見 `_build_params_row`）。**影像維持獨立**：
-        # 它是另一種迴圈（改參數 → 看圖），而且它需要的是高度。
-        self.gauge_pane = QWidget(self)
-        glay = QVBoxLayout(self.gauge_pane)
-        glay.setContentsMargins(0, 0, 0, 0)
-        glay.setSpacing(2)
-        tabs = QHBoxLayout()
-        tabs.setContentsMargins(0, 0, 0, 0)
-        tabs.setSpacing(4)
-        self.btn_tab_card = small_button("Card", parent=self.gauge_pane,
-                                         shape="wide")
-        self.btn_tab_features = small_button("Features", parent=self.gauge_pane,
-                                             shape="wide")
-        for i, b in enumerate((self.btn_tab_card, self.btn_tab_features)):
-            b.setCheckable(True)
-            b.clicked.connect(lambda _c=False, k=i: self.show_bottom_page(k))
-            tabs.addWidget(b)
-        # 選到判定樹的一步時，這一塊裝的還是**上一張卡**的儀表（F99 P1-7）——
-        # 以前畫面上沒有任何東西講這件事，左邊寫著 Decision、右邊寫著 GLV。
-        # 現在它淡掉，而且這一句說出它是誰的。
-        self.gauge_note = QLabel("", self.gauge_pane)
-        self.gauge_note.setObjectName("paramHint")
-        tabs.addWidget(self.gauge_note, 1)
-        glay.addLayout(tabs)
-        glay.addWidget(self.bottom_stack, 1)
-
-        # ---- 判定那一塊（F76 刀 5，2026-09-02）----------------------------
-        #
-        # **沒有判定就不畫它。** 使用者 2026-09-02：「大部分人應該建立
-        # Pipeline 時 ADC 不會放到第一個」—— 而在那段時間裡，這一塊永遠是一個
-        # 寫著 `—` 的 chip 加一片空白。它不是壞的，它是**什麼都沒說**，而那塊
-        # 面積正好是量測卡最需要的地方（同 F7-15「空白狀態要說得出下一步」、
-        # 以及 scope.SHOW_SAMPLE_DATA 那條「按了撞牆的鈕比沒有那顆鈕更糟」
-        # 的鏡像 —— 這裡是「說不出話的那一格比沒有那一格更佔位」）。
-        # Verdict 是一條**常駐的結論列**（F100）：橫跨在工作台下面，不在任何
-        # splitter 裡，所以 Build 模式收掉工作台之後它還在。
-        self.verdict_strip = QWidget(self)
-        strip = QVBoxLayout(self.verdict_strip)
-        strip.setContentsMargins(8, 4, 8, 4)
-        strip.setSpacing(0)
-        self.verdict_live = QWidget(self.verdict_strip)
-        # **兩行，不是一行**（F100 v2）：這一塊住在右欄（1366 上約 460 px），
-        # 一行排「Verdict ＋ 膠囊 ＋ score ＋ 那句為什麼 ＋ 路徑」的最小寬度是
-        # 五百多 px，整欄被它撐開。膠囊（類別名）跟 Verdict 一行、數字與說明
-        # 第二行、路徑第三行（會換行）。
-        vcol = QVBoxLayout(self.verdict_live)
-        vcol.setContentsMargins(0, 0, 0, 0)
-        vcol.setSpacing(2)
-        vrow = QHBoxLayout()
-        vrow.setContentsMargins(0, 0, 0, 0)
-        vrow.setSpacing(8)
-        self.verdict = VerdictChip(self.verdict_live)
-        vrow.addWidget(QLabel("Verdict", self.verdict_live))
-        vrow.addWidget(self.verdict)
-        vrow.addStretch(1)
-        vcol.addLayout(vrow)
-        vrow2 = QHBoxLayout()
-        vrow2.setContentsMargins(0, 0, 0, 0)
-        vrow2.setSpacing(8)
-        # **score 那個數字跟 bin 一起常駐**（F76 刀 4 之後）。以前它是特徵表
-        # 最後一列、粗體、永遠不被收合走的那一格 —— 理由是「它是這張表的
-        # 結論」。新面板把它歸進 `Score / Bin` 那一段，而那一段收得起來，
-        # 所以那條不變量搬到這裡：結論跟判定在同一塊，永遠看得到。
-        self.verdict_score = QLabel("", self.verdict_live)
-        self.verdict_score.setStyleSheet("font-weight:700;")
-        vrow2.addWidget(self.verdict_score)
-        # **膠囊寫著「—」的時候要說為什麼**（F99 P1-2）。預覽停在選到的那張卡
-        # 是對的（F7 定調），但那一刻 Verdict 從「more than one box is off」
-        # 變成一個破折號，而畫面上沒有任何東西講它為什麼不見 —— 看起來像剛剛
-        # 還有判定、現在壞了。這一句住在膠囊旁邊，不住在狀態列。
-        self.verdict_note = QLabel("", self.verdict_live)
-        self.verdict_note.setObjectName("paramHint")
-        self.verdict_note.setWordWrap(True)
-        vrow2.addWidget(self.verdict_note, 1)
-        vcol.addLayout(vrow2)
-        # **那一行點得下去**（U11）：走過的路旁邊沒有別的入口，而回溯以前只有
-        # 「跑一整批 → Results → 點 score/bin」那一條路 —— 使用者手上明明就有
-        # 這一顆的每一個數字。做成連結而不是另加一顆鈕：底線本來就是
-        # 「這個字可以點」的意思。
-        self.decide_path = QLabel("", self.verdict_live)
-        self.decide_path.setObjectName("paramHint")
-        self.decide_path.setWordWrap(True)      # 右欄裝不下一整條路徑
-        self.decide_path.setTextFormat(Qt.RichText)
-        self.decide_path.setOpenExternalLinks(False)
-        self.decide_path.linkActivated.connect(
-            lambda _href: self.toggle_preview_why())
-        vcol.addWidget(self.decide_path)
-        strip.addWidget(self.verdict_live)
-
-        # 這一顆為什麼判成這樣（U11）—— **跟 Results 那一份是同一個 widget**
-        # （`why_panel.WhyPanel`），只是住在單顆預覽這一欄。跑整批之前它就答得
-        # 出來，因為 `verdict_trace` 吃的是特徵、不是一批結果。
-        #
-        # ⚠ 高度有上限：它是回答一個問題的東西，不是這一欄的主角 ——
-        # 把影像擠掉的話，使用者為了讀它得先關掉它。
-        self.why_preview = WhyPanel(pane)
-        self.why_preview.setMaximumHeight(220)
-        self.why_preview.hide()
-        self.why_preview.item_activated.connect(
-            lambda name: self._on_why_item(self.why_preview.defect_id(),
-                                           str(name)))
-        lay.addWidget(self.why_preview)
-        # Verdict 列住在影像下面（F100 v2）：這一顆判成什麼，跟這一顆的圖挨著。
-        lay.addWidget(self.verdict_strip)
-
-        # 還沒有判定的時候換成**一句可以照做的話 ＋ 那顆鈕**（推廣鐵則：
-        # 講得出下一步，而那一步就在旁邊）。
-        self.verdict_empty = QWidget(self.verdict_strip)
-        erow = QHBoxLayout(self.verdict_empty)
-        erow.setContentsMargins(0, 0, 0, 0)
-        erow.setSpacing(8)
-        hint = QLabel("No decision yet — these numbers are measured, but "
-                      "nothing is drawing a conclusion from them.",
-                      self.verdict_empty)
-        hint.setObjectName("paramHint")
-        hint.setWordWrap(True)
-        erow.addWidget(hint, 1)
-        self.btn_add_decision = QPushButton("Add a decision…",
-                                            self.verdict_empty)
-        self.btn_add_decision.setProperty("variant", "secondary")
-        self.btn_add_decision.clicked.connect(self.show_score_page)
-        erow.addWidget(self.btn_add_decision)
-        strip.addWidget(self.verdict_empty)
-        self._sync_verdict_block()
-
-        return pane
-
     def _sync_verdict_block(self) -> None:
         """有判定才畫 Verdict 那一塊，沒有就畫「怎麼加一個」（F76 刀 5）。
 
@@ -1795,7 +663,8 @@ class StudioWindow(QMainWindow):
         view.node_activated.connect(self._on_node_activated)
         view.card_dropped.connect(self._on_card_dropped)
         view.add_menu_requested.connect(self._on_add_menu)
-        view.link_dropped.connect(self._on_link_dropped)
+        view.link_dropped.connect(
+            lambda *a: canvas_edges.on_link_dropped(self, *a))
         view.node_toggled.connect(self._on_node_toggled)
         view.move_requested.connect(self._on_move_requested)
         view.remove_requested.connect(self._on_remove_requested)
@@ -1831,7 +700,7 @@ class StudioWindow(QMainWindow):
         self.btn_next.clicked.connect(lambda: self.step_defect(+1))
         self.defect_combo.currentIndexChanged.connect(self._on_defect_combo)
         self.btn_region_check.clicked.connect(lambda: self.open_region_check())
-        # ``btn_empty_open`` 在 ``_build_body`` 建它的時候就接好了（那一列是
+        # ``btn_empty_open`` 在 ``studio_layout.build_body`` 建它的時候就接好了（那一列是
         # 從 ``scope.INPUT_SOURCES`` 長出來的，接線跟著一起長）——
         # 在這裡再接一次會變成按一下開兩個檔案對話框。
         self.btn_empty_sample.clicked.connect(self._on_demo_requested)
@@ -1841,34 +710,44 @@ class StudioWindow(QMainWindow):
         # 設定區的插槽（F68）—— 走的是跟畫布拉線**完全同一條路**。
         self.param_form.wire_requested.connect(self._on_slot_wire)
         self.param_form.wire_show_requested.connect(self._on_slot_show)
-        self.stream_combo.currentTextChanged.connect(self._on_stream_changed)
-        self.stream_combo_b.currentTextChanged.connect(self._on_stream_b_changed)
+        self.stream_combo.currentTextChanged.connect(
+            self.overlays._on_stream_changed)
+        self.stream_combo_b.currentTextChanged.connect(
+            self.overlays._on_stream_b_changed)
         self.compare_check.toggled.connect(self.set_compare)
 
         self.image_view.cursor_info.connect(self._on_cursor_info)
         self.image_view_b.cursor_info.connect(self._on_cursor_info)
         self.image_view.view_changed.connect(
-            lambda s, o: self._link_views(self.image_view, self.image_view_b, s, o))
+            lambda s, o: self.overlays._link_views(
+                self.image_view, self.image_view_b, s, o))
         self.image_view_b.view_changed.connect(
-            lambda s, o: self._link_views(self.image_view_b, self.image_view, s, o))
+            lambda s, o: self.overlays._link_views(
+                self.image_view_b, self.image_view, s, o))
 
         self.results.shown_feature_changed.connect(self._on_spread_feature_changed)
         self.histogram.threshold_changed.connect(self._on_threshold_changed)
         self.histogram.threshold_committed.connect(self._on_threshold_committed)
-        self.histogram.bar_clicked.connect(self._on_bar_clicked)
+        self.histogram.bar_clicked.connect(self.gallery_ctl._on_bar_clicked)
 
-        self.gallery.thumbs_requested.connect(self._on_thumbs_requested)
-        self.gallery.defect_activated.connect(self._on_defect_activated)
+        self.gallery.thumbs_requested.connect(
+            self.gallery_ctl._on_thumbs_requested)
+        self.gallery.defect_activated.connect(
+            self.gallery_ctl._on_defect_activated)
         # 表格上雙擊一列跟縮圖上雙擊一張是同一件事（R7）—— 同一支處理常式。
-        self.results.table.defect_activated.connect(self._on_defect_activated)
+        self.results.table.defect_activated.connect(
+            self.gallery_ctl._on_defect_activated)
         # 單擊（或方向鍵）一顆 → 主畫面帶過去，但**不搶焦點**（2026-09-09）。
-        self.results.defect_selected.connect(self._on_defect_selected)
-        self.gallery.selection_changed.connect(self._on_gallery_selection)
+        self.results.defect_selected.connect(
+            self.gallery_ctl._on_defect_selected)
+        self.gallery.selection_changed.connect(
+            self.gallery_ctl._on_gallery_selection)
         # 回溯（PR-3）：點 score/bin/class → 算 trace 開面板；點面板上一項 →
         # 跳到產出它的卡（有區域就把那一塊亮起來）。
-        self.results.trace_requested.connect(self._on_trace_requested)
+        self.results.trace_requested.connect(
+            self.gallery_ctl._on_trace_requested)
         self.results.truth_marked.connect(self._on_truth_marked)
-        self.results.why_item_activated.connect(self._on_why_item)
+        self.results.why_item_activated.connect(self.gallery_ctl._on_why_item)
 
     def _wire_workers(self) -> None:
         self.dataset_worker.loaded.connect(self._on_dataset_loaded)
@@ -1876,27 +755,23 @@ class StudioWindow(QMainWindow):
             lambda msg: (self._progress_done(),
                          self._status("Could not load dataset: %s" % msg, "error")))
 
-        self.pair_worker.loaded.connect(self._on_pair_source_loaded)
-        self.pair_worker.failed.connect(self._on_pair_source_failed)
-
         self.preview_worker.ready.connect(self._on_async_preview_ready)
         self.preview_worker.busy.connect(self._on_preview_busy)
-        self.region_check_worker.ready.connect(self._on_region_ready)
+        self.region_check_worker.ready.connect(
+            lambda results: region_check.on_region_ready(self, results))
         self.region_check_worker.failed.connect(
             lambda msg: self._status("Region check failed: %s" % msg, "error"))
         self.preview_worker.failed.connect(
             lambda msg: self._status("Preview failed: %s" % msg, "error"))
 
-        self.trial_worker.progress.connect(self._on_trial_progress)
-        self.trial_worker.done.connect(self._on_trial_done_async)
-        self.output_worker.done.connect(self._on_outputs_done)
-        self.output_worker.failed.connect(self._on_outputs_failed)
+        self.trial_worker.progress.connect(self.run_ctl._on_trial_progress)
+        self.trial_worker.done.connect(self.run_ctl._on_trial_done_async)
+        self.output_worker.done.connect(self.run_ctl._on_outputs_done)
+        self.output_worker.failed.connect(self.run_ctl._on_outputs_failed)
         self.trial_worker.failed.connect(
             lambda msg: (self._progress_done(),
                          self._status("Trial run failed: %s" % msg, "error")))
 
-        self.thumb_worker.ready.connect(self._on_thumbs_ready)
-        self.thumb_worker.failed.connect(self._status)
 
     # ==================================================================== #
     # 狀態列
@@ -2094,7 +969,7 @@ class StudioWindow(QMainWindow):
         return self.cursor_label.text()
 
     def _on_cursor_info(self, text: str) -> None:
-        """游標讀數 → 預覽區自己的標籤（**不碰狀態列**，見 ``_build_preview_pane``）。"""
+        """游標讀數 → 預覽區自己的標籤（**不碰狀態列**，見 ``studio_layout.build_preview_pane``）。"""
         self.cursor_label.setText(str(text or ""))
 
     # ==================================================================== #
@@ -2113,7 +988,7 @@ class StudioWindow(QMainWindow):
         self._sync_threshold_line()
         self._update_action_states()
         self._refresh_library_badges()
-        self._refresh_region_button()
+        region_check.refresh_region_button(self)
         self._schedule_preview()
 
     def _refresh_all(self) -> None:
@@ -3047,7 +1922,8 @@ class StudioWindow(QMainWindow):
             self._status("Could not add card: %s" % e, "error")
             return
         self._autofill_new_card(node_id)
-        self._status("Added “%s”%s" % (node_id, self._unmet_needs(node_id)))
+        self._status("Added “%s”%s"
+             % (node_id, canvas_edges.unmet_needs(self, node_id)))
         self.select_node(node_id)
 
     def add_card_after(self, node_id: str, step_key: str) -> Optional[str]:
@@ -3078,7 +1954,8 @@ class StudioWindow(QMainWindow):
             self._autofill_new_card(new_id)
         self._status("Added “%s” after “%s” — drag a line into it to say which "
                      "image stream it works on.%s"
-                     % (new_id, nid, self._unmet_needs(new_id)))
+                     % (new_id, nid,
+                        canvas_edges.unmet_needs(self, new_id)))
         self.select_node(new_id)
         return new_id
 
@@ -3187,135 +2064,6 @@ class StudioWindow(QMainWindow):
             return ""
         return str(writes[0]) if writes else ""
 
-    def _point_at_stream(self, node_id: str, stream: str,
-                         accumulate: bool = False, param: str = "") -> str:
-        """把 ``node_id`` 的輸入接上 ``stream``（回一句給狀態列的話）。
-
-        這是「用節點表達要對哪一張圖做」的實作點：使用者從 ``ref`` 那顆輸出埠
-        拉一條線過來，講的就是**這張卡也做 ref**。以前那句話只能在控制列的
-        下拉裡講，畫布只表達得出先後順序 —— 於是 test 是主角、ref 是附帶。
-
-        **累加還是取代，看參數型別**（F7-19）：
-
-        - ``image_keys``（一串流，例如 Enhance 卡的 ``streams``）且
-          ``accumulate=True`` → **累加**。先拉 test 再拉 ref 的意思是「兩張都
-          做」，不是「改成只做 ref」。這正是使用者說的「希望是能夠互相連動
-          的」—— 以前第二條線把第一條的設定蓋掉，於是畫布上做不出「兩條都
-          接」，得回控制列去勾。
-        - ``image_key``（單一具名角色，例如 ``subtract`` 的 ``a`` / ``b``）→
-          **取代**。往 ``a`` 再拉一條是「改接別的」，不是「a 有兩條」。
-
-        ``accumulate`` 由呼叫端決定，而它的判準是**這條線是不是新的依賴**：
-
-        - **第一條線**（``add_edge`` 成功）→ 取代。卡片預設的 ``streams="test"``
-          是規格的預設值，不是使用者拉的線；把 ref 累加上去的話，他拉了一條卻
-          得到兩條，而畫布就說謊了。
-        - **同一對節點的第二條線**（``has_edge``）→ 累加。那才是「這條也接上」。
-        - 從卡片庫加一張新卡（``add_card_after``）→ 取代，理由同第一條。
-
-        累加不必回頭處理畫線：畫布的線數是從「兩端共用的影像流」推出來的
-        （``_ports_between``），``streams`` 一多一條，那條線就自己出現了。
-        """
-        node = self.model.nodes.get(str(node_id))
-        if node is None or not stream:
-            return ""
-        try:
-            specs = {p.name: p for p in get_step(node.step).params}
-        except KeyError:                       # pragma: no cover
-            return ""
-        # F10：落點由呼叫端給（使用者放開滑鼠的那一格）。沒給才自己挑。
-        names = [param] if param else [
-            sp.name for sp in get_step(node.step).input_specs()]
-        for name in names:
-            spec = specs.get(name)
-            if spec is None or spec.type not in ("image_key", "image_keys"):
-                continue
-            # 這就是這張卡吃影像流的那個參數 = 這條線的 ``dst_in``（F9-5b）。
-            #
-            # ⚠ **那件事不在這一支做**：`_connect` 早就把它交給 `add_edge` 了
-            # （`dst_in=plan.param`），而且是在呼叫這裡**之前**。順序有意義 ——
-            # 參數的預設值本來就等於那條流時，下面會提早 return（沒有東西要
-            # 改），但線還是接在這個參數上。落在這一支的話那條線在引擎眼裡就是
-            # 「沒指定」，於是退回用「執行順序上最後一個寫它的人」推 ——
-            # 分支當場失效。
-            #
-            # 這裡以前還有一個 `self._bound_param = name`（上下各一次）——
-            # 那是那個舊機制的殘留：**寫了三次、一次都沒有被讀過**。真相搬到
-            # 邊上之後它就只是一個會讓人以為「有人在用它」的欄位。2026-09-08 刪。
-            current = str(node.params.get(name, "") or "")
-            if spec.type == "image_keys" and accumulate:
-                keys = [k.strip() for k in current.split(",") if k.strip()]
-                if stream in keys:
-                    return ""
-                keys.append(stream)
-                value, joined = ",".join(keys), True
-            else:
-                if current == stream:
-                    return ""
-                value, joined = stream, False
-            try:
-                self.model.set_param(str(node_id), name, value)
-            except ParamError:                 # pragma: no cover — 值就是流名
-                return ""
-            if joined and "," in value:
-                return (" — “%s” now works on %s (same settings for both)"
-                        % (node_id, " and ".join(value.split(","))))
-            return " — “%s” now works on %s" % (node_id, stream)
-        return ""
-
-    def _producers_of(self, stream: str) -> List[str]:
-        """哪些卡片（用預設參數）會產出 ``stream``。
-
-        ⚠ **實作住 `ui/edit_plan.py`**（U6）：它是圖編輯語意的一部分，而那一族
-        必須在沒有 QApplication 的情況下問得出來。這裡只是轉呼叫。
-        """
-        return edit_plan.producers_of(self.model, stream)
-
-    def _unmet_needs(self, node_id: str) -> str:
-        """剛加的卡少了什麼上游 —— 講成一句可以照做的話（含前導空白）。
-
-        ⚠ 實作住 `ui/edit_plan.py`（同上）。
-        """
-        return edit_plan.unmet_needs(self.model, node_id)
-
-    def _drop_conflicting_edges(self, src: str, dst: str, stream: str,
-                                param: str) -> str:
-        """拿掉「跟這條新線搶同一個輸入」的舊線；回一句給狀態列的話。
-
-        ⚠ **判準住 `edit_plan.conflicting_edges`**（U6）—— 那是引擎正確性的
-        一半（F9-7「一個輸入埠只能有一條線」），而它現在問得起來而不必開視窗。
-        這裡只剩「真的拿掉」與「說一句話」。
-        """
-        return self._drop_edges(
-            edit_plan.conflicting_edges(self.model, src, dst, stream, param))
-
-    def _drop_edges(self, losers: Sequence[Any]) -> str:
-        """把讓位的那幾條線真的拿掉；回一句給狀態列的話（沒有就回空字串）。
-
-        ⚠ **兩個埠都要指名**（B1，2026-08-24）。兩張卡之間可以有好幾條並排的
-        線（F9-9），而它們可能落在**不同的輸入格**上 —— 只帶 `src_out` 的話
-        `remove_edge` 的語意是「符合這個 src_out 的**全部**」，於是剪一條會剪掉
-        一整排。
-
-        實測：`load.test → subtract.a` 與 `load.test → subtract.b` 兩條並存時，
-        把別的卡接到 `b` 會**連 `a` 那條一起剪掉** —— 沒有人碰過 `a`，而 `a` 的
-        參數還留著 `test`：畫布上沒有線、卡片卻還指著那條流，於是引擎退回
-        「執行順序上最後一個寫它的人」用猜的。線性時猜得中、分岔時猜錯，
-        而且跑得完、有數字（F9／F10 整整兩輪在防的形狀）。
-
-        ⚠ **不可以寫 `e.src_out or None`。** 空字串在 `remove_edge` 裡本來就是
-        「精確比對空埠」，`or None` 會把它變成「全部」—— 那正是上面那個洞的
-        第二階。
-        """
-        losers = list(losers or [])
-        for e in losers:
-            self.model.remove_edge(e.src, e.dst, src_out=e.src_out,
-                                   dst_in=e.dst_in)
-        if not losers:
-            return ""
-        return (" (replacing the line from %s)"
-                % ", ".join(sorted({e.src for e in losers})))
-
     def _on_node_toggled(self, node_id: str, enabled: bool) -> None:
         self.model.set_enabled(str(node_id), bool(enabled))
 
@@ -3323,305 +2071,6 @@ class StudioWindow(QMainWindow):
         self.model.move(str(node_id), int(delta))
 
     # ---- 畫布連線（F7-6；F7-18 起帶著影像流）-------------------------------
-    def _on_edge_added(self, src: str, dst: str, stream: str = "",
-                       dst_in: str = "") -> None:
-        """拉一條線。會造成循環時 model 回 False —— 那條線就不會出現。
-
-        擋在這裡（而不是等執行時報錯）是刻意的：使用者看到的是「這條線拉不
-        起來」，不是「拉起來之後整條 pipeline 壞掉」。
-
-        ``stream`` 是**線從哪個輸出埠出發**（F7-18）。從 ref 那顆埠拉過去，
-        意思就是「這張卡做在 ref 上」，所以下游那張卡的主要輸入跟著改。
-        以前這件事只能在控制列的下拉裡講，於是同一個動作在畫布上做不完。
-
-        兩個節點之間**已經有線**也照樣要處理那句話：先從 test 拉、再從 ref 拉
-        是很正常的操作（「我改變主意了，這張卡要做在 ref 上」），而以前它只會
-        得到一句「already connected」然後什麼都沒發生 —— 看起來就像畫布不准
-        你碰 ref。
-
-        **拉一條線 = 一步復原**（F9-7）。在 model 上它其實是三個動作
-        （add_edge → set_param →（有時）拿掉搶同一個輸入的舊線），各記一步
-        的話按一次 Ctrl+Z 會停在「線接上了但那張卡還沒改成處理它」這種中間
-        狀態 —— 使用者從來沒有做出過那個畫面。
-
-        ⚠ 這一段以前寫著 ``add_edge → set_param → set_edge_ports → …``，
-        而 `set_edge_ports` 從 F9-9 起就沒有人叫了（那一輪改成「加線的時候
-        就把埠一起帶進去」，因為補埠只找得到一對節點之間的第一條線，
-        兩條並排的線會補錯）。留著一個描述不存在流程的說明比沒有說明更糟 ——
-        它就寫在那段程式碼的正上方。
-        """
-        src, dst, stream = str(src), str(dst), str(stream or "")
-        with self.model.compound("connect"):
-            self._connect(src, dst, stream, str(dst_in or ""))
-
-    def _connect(self, src: str, dst: str, stream: str,
-                 dst_in: str = "") -> None:
-        """使用者拉了一條線 —— **決定住 `edit_plan`，這裡只負責做與說**（U6）。
-
-        ⚠ **順序有意義，所以它留在這裡**：`add_edge` 會因為成環而失敗，而
-        失敗的那條線**不該留下任何痕跡** —— 尤其不是「那張卡安靜地改成做 ref
-        了」。把 mutation 也包進計畫裡就得在那邊把 model 模擬一遍，那是把一個
-        難的東西換成兩份會漂的東西。
-        """
-        plan = edit_plan.plan_connect(self.model, src, dst, stream, dst_in)
-        if plan.kind == edit_plan.REJECT:
-            self._status(plan.reject, "error")
-            return
-        # **「已經接過了」兩側共用一關**（U6）：以前影像那一側問的是
-        # `has_line`、區域那一側問的是「這個名字在不在那一格裡」，兩句話寫在
-        # 兩個地方。現在兩個都由 `plan.already` 回答 —— 而它們本來就是同一個
-        # 問題（使用者剛做的這個動作有沒有改變任何東西）。
-        if plan.already:
-            self._status(plan.already)
-            return
-        if plan.kind == edit_plan.REGION:
-            self._connect_region(src, dst, stream, plan)
-            return
-        if not self.model.add_edge(src, dst, src_out=stream,
-                                   dst_in=plan.param):
-            self._status("Cannot connect %s → %s — that would make the "
-                         "pipeline loop back on itself." % (src, dst), "error")
-            return
-        # 影像流在**線真的接起來之後**才改（見上面那段 ⚠）。同一對節點的第二
-        # 條線是「這條也接上」（累加），不是「改接別的」。
-        note = self._point_at_stream(dst, stream, accumulate=plan.accumulate,
-                                     param=plan.param)
-        # **一個輸入埠只能有一條線**：新的這條贏，舊的那條拿掉（F9-7）。
-        dropped = self._drop_edges(plan.conflicts)
-        # **接完線就把這張卡填到「看得到結果」為止**（F11 Region-3 第五輪）。
-        # 加卡的時候也跑過一次，但那時候還沒有線 —— 而「接上 layout labels」
-        # 正是使用者期待畫面上出現東西的那一刻。
-        self._autofill_new_card(dst)
-        self._resync_params(dst)
-        self._status("Connected %s → %s%s%s" % (src, dst, note, dropped))
-
-    # ---- 區域線（F12）-----------------------------------------------------
-    def _is_region_param(self, node_id: str, param: str) -> bool:
-        """``node_id`` 的 ``param`` 那一格吃的是具名區域嗎。
-
-        ⚠ 實作住 `ui/edit_plan.py`（U6）—— 這裡只是轉呼叫。
-        """
-        return edit_plan.is_region_param(self.model, node_id, param)
-
-    def _line_kind(self, node_id: str, name: str) -> str:
-        """從 ``node_id`` 的哪一顆埠拉出來的 —— 影像還是區域。
-
-        ⚠ 實作住 `ui/edit_plan.py`（同上）。
-        """
-        return edit_plan.line_kind(self.model, node_id, name)
-
-    def _connect_region(self, src: str, dst: str, name: str,
-                        plan: Any) -> None:
-        """把 ``dst`` 的區域那一格接上 ``src`` 定義的區域 ``name``。
-
-        **擋得住什麼、哪幾條舊線讓位，全部由 `edit_plan.plan_connect` 決定**
-        （U6）—— 這裡只剩「真的動 model」與「說一句話」，而那兩件事的順序
-        有意義（見 `_connect` 那段 ⚠）。
-        """
-        param = plan.param
-        node = self.model.nodes.get(dst)
-        spec = next((sp for sp in get_step(node.step).region_input_specs()
-                     if sp.name == param), None)
-        current = str(node.params.get(param, "") or "")
-        keys = [k.strip() for k in current.split(",") if k.strip()]
-        # **從一個變成兩個時，把自動填的那個名字收回**（F13-⑥）。
-        # 接第一條線時 `_autofill_output_prefix` 會把輸出名填成那個區域
-        # （F7-11），而第二條線一來，每個數字本來就會帶自己的區域名 ——
-        # 兩個加起來是 `epi_epi_glv_mean`。判準是「它正好等於原本那一個
-        # 區域的名字」＝ 那正是自動填會寫的值；使用者自己打過的字不動。
-        multi = spec is not None and spec.type == "region_keys"
-        if multi and len(keys) == 1 and \
-                str(node.params.get("output_prefix", "")) == keys[0]:
-            try:
-                self.model.set_param(dst, "output_prefix", "")
-            except ParamError:                 # pragma: no cover
-                pass
-        # **改名的連帶影響要在值變之前先記下來**（F37 A2）。以前它是
-        # `set_param` 的回傳值，而 F42 B2 之後值是**水合**出來的 —— 那一格不再
-        # 由這裡寫，所以「動之前長什麼樣」也要由這裡自己抱著。
-        before = dict(node.params)
-        if not self.model.add_edge(src, dst, src_out=name, dst_in=param):
-            self._status("Cannot connect %s → %s — that would make the "
-                         "pipeline loop back on itself." % (src, dst), "error")
-            return
-        # **單一角色的區域埠一條線**（F12 §7-②）：`region_key` 那一格只放得下
-        # 一個名字，所以第二條線是「改接別的」不是「這個也算」。判準住
-        # `edit_plan.region_conflicts`。
-        self._drop_edges(plan.conflicts)
-        value = str(self.model.nodes[dst].params.get(param, "") or "")
-        # 挑了區域就順手把輸出名填成區域的名字（F7-11）—— 拉線跟在設定區挑
-        # 是同一個動作，所以走同一條路。
-        self._autofill_output_prefix(dst, param, value)
-        says = self.model.rename_fallout(dst, before,
-                                         self.model.nodes[dst].params)
-        self._resync_params(dst)
-        self._say_fallout(says, "“%s” now measures %s (defined by “%s”)."
-                          % (dst, value.replace(",", " and "), src))
-
-    def _say_fallout(self, says: List[str], otherwise: str = "") -> None:
-        """改名的連帶影響優先於「接好了」那句話（F37 A2）。
-
-        量測卡的前綴是條件式的，所以在一張既有的卡上多接一條區域線，它寫的
-        每一個名字都會改（``glv_median`` → ``epi_glv_median`` ＋
-        ``mg_glv_median``），而分數表達式、判定樹、Output 卡的 ``rank_by``
-        裡指著舊名字的字不會跟著改。
-
-        使用者只做了一個動作，下游三個地方同時失效 —— 而在這之前，畫面上唯一
-        的訊息是「接好了」。所以有連帶影響的時候，**那句話蓋過成功訊息**
-        （紅字），沒有的時候才報成功。
-
-        ⚠ 這一句是**當下**的提醒，不是唯一的防線：`stale-feature-ref` 這條
-        lint 會讓那張卡在畫布上一直掛著警示標記，直到有人處理它。狀態列的字
-        會被下一個動作蓋掉，而那正是它不能是唯一防線的理由。
-        """
-        if says:
-            # **誤操作後的三秒鐘，是使用者最不想去找 Ctrl+Z 的三秒鐘**（X6）。
-            # 他正在讀這句話，所以反悔的路要在這句話旁邊。Ctrl+Z 照樣在 ——
-            # 這顆鈕只是把已經做得到的事縮短成一次點擊。
-            self._status_next_step(
-                " ".join(says), "Undo", self.undo, "error",
-                "Undo that change (Ctrl+Z)")
-        elif otherwise:
-            self._status(otherwise)
-
-    def _param_for_stream(self, node_id: str) -> str:
-        """線沒有指定落點時，這條線該接哪一格輸入（沒有輸入回空字串）。
-
-        F10 起**正常路徑不會走到這裡** —— 使用者放開滑鼠的位置就是落點。
-        這是給程式化拉線（測試、之後可能的自動排版）用的退路，判準是
-        「第一個**還空著**的輸入」：接第二條線時它自然落到還沒接的那一格，
-        而不是又去蓋掉第一格。
-
-        以前這裡是一張寫死的名單（``streams`` → ``target`` → ``source``），
-        於是 ``subtract`` 的 ``a`` / ``b`` 永遠只挑得到 —— 兩顆輸入的卡在畫布上
-        根本分不開。名單也不會自己認得之後加的卡。
-        """
-        node = self.model.nodes.get(str(node_id))
-        if node is None:
-            return ""
-        try:
-            specs = [sp for sp in get_step(node.step).input_specs()
-                     if sp.visible_for(node.params)]
-        except KeyError:                       # pragma: no cover
-            return ""
-        if not specs:
-            return ""
-        for spec in specs:
-            if not str(node.params.get(spec.name, "") or "").strip():
-                return spec.name
-        return specs[0].name
-
-    def _on_edge_removed(self, src: str, dst: str, stream: str = "",
-                         dst_in: str = "") -> None:
-        """剪掉一條線 —— **收尾一定要重讀設定欄**（見 :meth:`_resync_params`）。
-
-        用一層外殼而不是在每個 ``return`` 前面加一行：這支底下有五條分支
-        （區域線／瞄得到那一條／退回整對／舊格式…），而漏掉其中一條的症狀是
-        「大部分時候會跟上」—— 那種 bug 查起來最貴。
-        """
-        try:
-            self._apply_edge_removed(src, dst, stream, dst_in)
-        finally:
-            self._resync_params(dst)
-
-    def _apply_edge_removed(self, src: str, dst: str, stream: str = "",
-                            dst_in: str = "") -> None:
-        """剪掉一條線。``stream`` 是剪刀瞄的那一條（F9-9），``dst_in`` 是它
-        進到下游的哪一格（F10）。
-
-        兩張卡之間可以有兩條並排的線，所以**剪一條**跟剪掉整個依賴是兩件事。
-        瞄不到特定那條（舊格式的線沒有埠）就退回拿掉整對。
-
-        **剪掉線就是拿掉來源**（F10）：線是唯一的來源，所以那一格要跟著空掉。
-        不空的話畫布會反過來說謊 —— 畫面上線沒了，卡片卻還指著那條流，而且
-        照樣跑得出數字。使用者回報的原話是「把線按 X 清掉，後方卡片的 Node
-        不會跟著清掉」。
-        """
-        src, dst, stream = str(src), str(dst), str(stream or "")
-        dst_in = str(dst_in or "")
-        # 剪之前先問清楚這條線落在哪一格 —— 剪完就查不到了。
-        # **這一段要排在區域那條岔路前面**（F42 B2）：區域線現在也是一條真的
-        # Edge，所以「這是不是區域線」的答案就藏在剛問出來的那個 ``dst_in`` 裡。
-        if not dst_in:
-            for e in self.model.edges:
-                if (e.src == src and e.dst == dst
-                        and (not stream or e.src_out == stream)):
-                    dst_in = e.dst_in
-                    break
-        # **區域線現在是一條真的 Edge**（F42 B2）：剪它跟剪影像線一樣，
-        # 而「那一格跟著空掉」是水合的自然結果（`RecipeModel._hydrate_regions`）
-        # —— 不必在這裡另外清一次。以前它沒有 Edge 可刪，所以清參數就是全部。
-        if self._is_region_param(dst, dst_in):
-            node = self.model.nodes.get(dst)
-            before = dict(node.params) if node is not None else {}
-            with self.model.compound("disconnect"):
-                gone = self.model.remove_edge(
-                    src, dst, src_out=stream or None, dst_in=dst_in)
-            if not gone:
-                self._status("%s → %s is not connected on %s."
-                             % (src, dst, stream or "that region"))
-                return
-            says = self.model.rename_fallout(
-                dst, before, self.model.nodes[dst].params)
-            left = str(self.model.nodes[dst].params.get(dst_in, "") or "")
-            note = ((" — “%s” has no region on “%s” now" % (dst, dst_in))
-                    if not left else
-                    " — “%s” now measures %s" % (dst, left.replace(",", " and ")))
-            note += ("  " + " ".join(says)) if says else ""
-            self._status("Disconnected %s → %s on %s%s"
-                         % (src, dst, stream or "that region", note))
-            return
-        with self.model.compound("disconnect"):
-            one = stream and self.model.remove_edge(
-                src, dst, src_out=stream, dst_in=dst_in or None)
-            # **知道是哪一格就用它**（B5，2026-08-24）。上面那一段已經從線本身
-            # 問出了 ``dst_in``，但沒有流名時 ``stream and …`` 整條短路掉，於是
-            # 直接跳到最後那個「拿掉整對」—— 兩張卡之間有兩條並排的線時
-            # （F9-9 起是正常的接法），使用者按一把剪刀會斷兩條。
-            if not one and dst_in:
-                one = self.model.remove_edge(src, dst, dst_in=dst_in)
-                if one:
-                    note = self._unpoint_stream(dst, stream, dst_in)
-                    self._status("Disconnected %s → %s%s" % (src, dst, note))
-                    return
-            if one:
-                note = self._unpoint_stream(dst, stream, dst_in)
-                self._status("Disconnected %s → %s on %s%s"
-                             % (src, dst, stream, note))
-            # 兩個埠都問不出來（舊格式的線沒有埠）→ 拿掉整對。那是刻意的：
-            # 瞄不到特定那一條的時候，「全部拿掉」至少是可預期的。
-            elif self.model.remove_edge(src, dst):
-                note = self._unpoint_stream(dst, stream, dst_in)
-                self._status("Disconnected %s → %s%s" % (src, dst, note))
-
-    def _unpoint_stream(self, node_id: str, stream: str,
-                        param: str = "") -> str:
-        """線剪掉了 → 那條流也要從下游卡的參數裡拿掉（回一句給狀態列的話）。
-
-        不拿掉的話畫布會**反過來說謊**：畫面上那條線沒了，卡片卻還在處理它
-        （`streams=test,ref` 一個字都沒變）。這是 F9-7「接線時參數跟著改」的
-        另一半。
-
-        ⚠ **「那一格會變成什麼」住 `edit_plan.plan_unpoint`**（U6）—— 含那兩個
-        F10 拿掉的保留條款、以及「區域那一格不歸這裡管」。這裡只剩寫值與說話。
-        """
-        plan = edit_plan.plan_unpoint(self.model, node_id, stream, param)
-        if not plan.change:
-            return ""
-        try:
-            says = self.model.set_param(str(node_id), plan.param, plan.value)
-        except ParamError:                     # pragma: no cover — 值就是流名
-            return ""
-        # 影像流那一側同理（接第二條流也會把名字加上流名前綴）。這一支回的是
-        # 一段**接在成功訊息後面**的字，所以連帶影響也接在同一句話上 ——
-        # 而不是另外開一個要有人記得去消費的欄位。
-        tail = ("  " + " ".join(says)) if says else ""
-        if not plan.value:
-            return " — “%s” has no input on “%s” now%s" % (
-                node_id, plan.label, tail)
-        return " — “%s” now works on %s%s" % (node_id, " and ".join(
-            plan.value.split(",")), tail)
-
     def _on_remove_requested(self, node_id: str) -> None:
         node_id = str(node_id)
         # 刪掉一張卡 = 把它餵出去的每一條線都剪掉（F10-5）。下游那幾格要跟著
@@ -3635,7 +2084,7 @@ class StudioWindow(QMainWindow):
                 # `model.remove` 拿掉線之後水合會把它空出來，這裡不必動它。
                 if is_region_edge(e, self.model.nodes):
                     continue
-                self._unpoint_stream(e.dst, e.src_out, e.dst_in)
+                canvas_edges.unpoint_stream(self, e.dst, e.src_out, e.dst_in)
             # 區域線**不必**在這裡處理了（F42 B2）：它現在是一條真的 Edge，
             # 而 `RecipeModel.remove` 刪卡時本來就會把它兩端的線一起拿掉 ——
             # 拿掉之後水合就把下游那幾格空出來。以前它是從參數推導的，
@@ -3667,11 +2116,11 @@ class StudioWindow(QMainWindow):
         self.gauge_note.setText("")              # 儀表又是這張卡的了（P1-7）
         self.bottom_stack.setEnabled(True)
         self._sync_params_pane()
-        self._refresh_region_button()
+        region_check.refresh_region_button(self)
         # 右下角換成這張卡的儀表（F7-17）。**參數要一起給**：`roi_reference`
         # 一個 key 有四種面板，由 ``method`` 決定（F30）。
-        self._install_inspector(node.step, node.params)
-        self._refresh_inspector(self._last_result)
+        self.gauges._install_inspector(node.step, node.params)
+        self.gauges._refresh_inspector(self._last_result)
         self._refresh_kernel_hint()            # 核心大小畫在影像上（F11 UI-A）
         self._schedule_preview()
         return True
@@ -3847,11 +2296,11 @@ class StudioWindow(QMainWindow):
                 # **走 `_connect` 那條共用的路**（U6）：以前這裡直接呼叫
                 # `_connect_region`，於是「已經接過了」與型別守門那幾關在這條
                 # 路上是缺的 —— 同一個動作兩個入口，而只有一個有守門。
-                self._connect(src, nid, name, str(param))
+                canvas_edges.connect(self, src, nid, name, str(param))
             return
         src = self.model.stream_producer(name, before_node=nid)
         if src:
-            self._connect(src, nid, name, str(param))
+            canvas_edges.connect(self, src, nid, name, str(param))
 
     def _on_slot_show(self, param: str) -> None:
         """「在畫布上指給我看」—— 把**這一格接的那張卡**在畫布上亮起來。
@@ -3901,10 +2350,14 @@ class StudioWindow(QMainWindow):
             return
         att_key = self._ATTACHMENT_CARDS.get(node.step)
         if att_key:
-            getattr(self, "_on_open_%s" % att_key)()
+            # ⚠ 名字是**組出來的**（`_on_open_` ＋ 表裡那個 key），所以沒有任何
+            # 靜態掃描找得到它 —— F116 第 4 步搬走 `_on_open_gds` 的時候，
+            # `ruff`、`studio_surface --check`、`import` 全部是綠的，只有
+            # 「選到 layout(GDS) 卡再按那顆鈕」那一條路會 AttributeError。
+            getattr(self.attach_ctl, "_on_open_%s" % att_key)()
             return
         if node.step in self._PAIR_CARDS:
-            self._on_open_pair_source(nid)
+            self.attach_ctl._on_open_pair_source(nid)
             return
         menu = QMenu(self)
         for src in scope.INPUT_SOURCES:
@@ -4012,32 +2465,6 @@ class StudioWindow(QMainWindow):
         menu = card_menu.build_menu(
             self, keys, lambda k: self._on_card_dropped(k, float(x), float(y)),
             title="Add a card here")
-        card_menu.pick_at(menu, QCursor.pos())
-        return None
-
-    def _on_link_dropped(self, src: str, kind: str, stream: str,
-                         x: float, y: float,
-                         pick: Optional[str] = None) -> Optional[str]:
-        """線拖到空白處放開 → 只列接得上的卡；挑了就加在那裡並把線接上
-        （F99 P1-1）。線是使用者拉的，所以這不是「加卡順手接線」。
-        """
-        keys = card_menu.compatible(self.library.step_keys(), kind)
-
-        def add(step_key: str) -> None:
-            self._on_card_dropped(str(step_key), float(x), float(y))
-            nid = self.selected_node
-            if not nid:
-                return
-            dst_in = card_menu.input_param_for(str(step_key), kind)
-            self._on_edge_added(str(src), nid, str(stream), dst_in)
-
-        if pick is not None:
-            add(str(pick))
-            return self.selected_node
-        from PySide6.QtGui import QCursor
-        menu = card_menu.build_menu(
-            self, keys, add, flat=True,
-            title="Connect “%s” to a new card" % (stream or kind))
         card_menu.pick_at(menu, QCursor.pos())
         return None
 
@@ -4420,8 +2847,8 @@ class StudioWindow(QMainWindow):
             self._after_pair_param(node_id, str(name))
             # 在設定區少勾一個統計量也是改名（那個數字從此不存在）——
             # 跟拉線同一件事，所以講同一句話。
-            self._say_fallout(says)
-            self._after_carry_param(node_id, str(name))
+            canvas_edges.say_fallout(self, says)
+            self.attach_ctl._after_carry_param(node_id, str(name))
             # 拖滑桿的時候框要跟著變 —— 那正是這個輔助的全部意義（F7-8：
             # 使用者是一邊看影像一邊決定值的）。
             self._refresh_kernel_hint()
@@ -4441,7 +2868,8 @@ class StudioWindow(QMainWindow):
             return
         if name not in ("source", "carry", "rank_within", "rank_by"):
             return
-        self._sync_pair_fields(str(node.params.get("source", "") or ""))
+        self.attach_ctl._sync_pair_fields(
+            str(node.params.get("source", "") or ""))
         if name == "source" and self.selected_node == str(node_id):
             self.param_form.set_dynamic_choices(self._dynamic_choices_for(node))
 
@@ -4604,7 +3032,7 @@ class StudioWindow(QMainWindow):
         # 換一份資料 = 那幾欄的值全變了。忘了填的下場是**上一份的欄位值**
         # 留在這一份的每一顆上，跑得完、有數字、而且是別人的。
         self._carry_filled = None
-        self._carry_main_columns()
+        self.attach_ctl._carry_main_columns()
         # 分流（F23 期2）：編輯區塊的欄位下拉要吃這一份的欄名；route_by 的
         # 那一欄也趁現在填進每一顆（換一份資料＝值全變了，同 carry 的理由）。
         from d4t.core.ingest.dataset import columns_of as _cols
@@ -5122,12 +3550,13 @@ class StudioWindow(QMainWindow):
             images = {}
         self._preview_images = images
 
-        self._populate_streams(images)
-        self._show_current_stream()
+        self.overlays._populate_streams(images)
+        self.overlays._show_current_stream()
 
-        self._refresh_inspector(result)
-        highlight = self._highlight_features(result)
-        self.feature_panel.set_model(self._feature_model(result, highlight))
+        self.gauges._refresh_inspector(result)
+        highlight = self.gauges._highlight_features(result)
+        self.feature_panel.set_model(
+            self.gauges._feature_model(result, highlight))
         score = getattr(result, "score", None)
         # 判定的**名字**（recipe 自己取的）比 `bin 1` 有意義得多 —— 廠內講的是
         # real / nuisance 或某個 class name（X7）。名字住在 `Rule.label` /
@@ -5423,1334 +3852,13 @@ class StudioWindow(QMainWindow):
         """
         return bool(self.selected_regions()) and bool(self._items())
 
-    # ---- 右下角：卡片儀表（F7-17）------------------------------------------
-    def show_bottom_page(self, index: int) -> None:
-        """0 = 這張卡的儀表，1 = 特徵表。"""
-        index = 1 if int(index) else 0
-        if index == 0 and self._inspector is None:
-            index = 1          # 這張卡沒有儀表 —— 不要給一片空白
-        self.bottom_stack.setCurrentIndex(index)
-        self.btn_tab_card.setChecked(index == 0)
-        self.btn_tab_features.setChecked(index == 1)
-        self.btn_tab_card.setEnabled(self._inspector is not None)
-
-    def bottom_page(self) -> int:
-        return int(self.bottom_stack.currentIndex())
-
-    def inspector(self) -> Optional[Any]:
-        """目前掛著的卡片儀表（沒有就 None）。"""
-        return self._inspector
-
-    def _install_inspector(self, step_key: str,
-                           params: Optional[Dict[str, Any]] = None) -> None:
-        """換卡片時換儀表。沒有註冊儀表的卡就只剩特徵表。"""
-        cls = inspector_for(step_key, params)
-        current = type(self._inspector) if self._inspector is not None else None
-        if cls is not current:
-            if self._inspector is not None:
-                # 面板被拆掉就不會再有「放開」——影像上的綠帶會永遠留著。
-                self._on_measure_ended()
-                self.inspector_slot.removeWidget(self._inspector)
-                self._inspector.setParent(None)
-                self._inspector.deleteLater()
-                self._inspector = None
-            if cls is not None:
-                self._inspector = cls(self.inspector_host)
-                self.inspector_slot.addWidget(self._inspector)
-                self._connect_inspector(self._inspector)
-            # 字在 `_refresh_inspector` 餵完資料之後才定案（儀表要看得到
-            # 現在畫的是什麼才說得出「誰跟誰比」）—— 這裡先給一個保底。
-            self.btn_tab_card.setText(str(getattr(cls, "title", "Card"))
-                                      if cls is not None else "Card")
-        # **每次都要同步頁面**，不能因為「儀表類別沒變」就跳過：兩張都沒有儀表
-        # 的卡片連續選下去時，類別確實沒變（都是 None），但畫面若停在儀表那一頁
-        # 就是一片空白 —— 而那比原本的特徵表還糟。
-        self.show_bottom_page(0 if cls is not None else 1)
-
-    def _connect_inspector(self, insp: Any) -> None:
-        """儀表能發的選配訊號在這裡接起來。
-
-        用 ``getattr`` 探而不是 ``isinstance``：加一個會量測的儀表時，這裡不必
-        跟著改（F7-17 那條「加新卡不必動 UI」的延伸）。
-        """
-        sig = getattr(insp, "measure_changed", None)
-        if sig is not None:
-            sig.connect(self._on_measure)
-        sig = getattr(insp, "measure_ended", None)
-        if sig is not None:
-            sig.connect(self._on_measure_ended)
-        sig = getattr(insp, "param_requested", None)
-        if sig is not None:
-            sig.connect(self._on_param_requested)
-        sig = getattr(insp, "select_requested", None)
-        if sig is not None:
-            sig.connect(self._on_select_requested)
-        sig = getattr(insp, "calibrate_requested", None)
-        if sig is not None:
-            sig.connect(self._on_calibrate_requested)
-        sig = getattr(insp, "charts_requested", None)
-        if sig is not None:
-            sig.connect(self._on_charts_requested)
-
-    #: 一鍵校正最多量幾顆。統計上 50 顆已經把單張雜訊除到 1/7，再多只是等待。
-    CALIBRATE_LIMIT = 60
-
-    def _on_calibrate_requested(self) -> None:
-        """一鍵校正（F8 第七輪）：整批量 pitch/線寬，量完填回這張卡。
-
-        跟「量測尺」「Use」是同一件事的三個尺度：拖一把尺（手動、單段）、
-        按 Use（自動、單張）、按這顆（自動、整批）。批次的價值在統計 ——
-        pitch 是設計常數，每張量的都是同一個數字，中位數把單張的雜訊除掉；
-        小 patch 看不出「間距交錯」，一批看得出。
-        """
-        nid = self.selected_node
-        node = self.model.nodes.get(nid or "")
-        if not self._is_method(node, self.PROFILE_STEP,
-                               self.PROFILE_METHOD):
-            return
-        items = self._items()
-        if not items:
-            self._status("Load a KLARF first - measuring across the lot "
-                         "needs the lot.", "error")
-            return
-        if not self.calibrate_worker.start(
-                self.model.to_recipe(), items[:self.CALIBRATE_LIMIT],
-                self.model.kind, nid, dict(node.params),
-                sources=self.sources_for_run()):
-            self._status("Still measuring - please wait.")
-            return
-        self._status("Measuring stripe pitch and width on %d defects…"
-                     % min(len(items), self.CALIBRATE_LIMIT))
-
-    def _on_calibrated(self, result: Any) -> None:
-        """量完了：能填的填進卡片（走 set_param，可復原），不能填的講原因。"""
-        nid = self.selected_node
-        node = self.model.nodes.get(nid or "")
-        if not self._is_method(node, self.PROFILE_STEP,
-                               self.PROFILE_METHOD):
-            return                        # 量的過程中使用者換卡了 —— 別亂寫
-        res = dict(result or {})
-        filled, refused = [], []
-        for axis, side, word in (("x", "vertical", "upright"),
-                                 ("y", "horizontal", "flat")):
-            cal = res.get(axis)
-            if cal is None:
-                continue
-            if cal.note:
-                refused.append("%s: %s" % (word, cal.note))
-                continue
-            self.model.set_param(nid, "%s_pitch" % side, round(cal.pitch, 3))
-            self.model.set_param(nid, "%s_pitch_2" % side,
-                                 round(cal.pitch_2, 3))
-            bits = ("pitch %.1f / %.1f px" % (cal.pitch, cal.pitch_2)
-                    if cal.pitch_2 >= 2.0 else "pitch %.1f px" % cal.pitch)
-            if cal.width >= 1.0:
-                self.model.set_param(nid, "%s_width" % side,
-                                     round(cal.width, 3))
-                bits += ", width %.1f px" % cal.width
-            filled.append("%s %s (%d defects, %.0f%% agree)"
-                          % (word, bits, cal.n_used, cal.agree * 100.0))
-        node = self.model.nodes.get(nid)
-        self.param_form.set_step(
-            get_step(node.step).describe(), node.params,
-            self.model.available_streams(before_node=nid),
-            self.model.available_regions(before_node=nid))
-        if refused:
-            # 拒絕的那一半是**主角**：它講的是「這批 patch 自己不同意」，
-            # 而那正是 kinds 沒設對的樣子。填了的也要一起講 —— 只報壞消息
-            # 的話，使用者會以為整件事失敗了，然後把填好的那一半也改掉。
-            msg = "Not filled in - %s" % " · ".join(refused)
-            if filled:
-                msg = "Filled %s. %s" % (" · ".join(filled), msg)
-            self._status(msg, "error")
-        elif filled:
-            self._status("Measured across the lot: %s." % " · ".join(filled))
-        else:
-            self._status("Nothing to measure - no defects had stripes.",
-                         "error")
-
-    def _on_param_requested(self, name: str, value: Any) -> None:
-        """儀表說「這一格該是這個值」（目前只有「量給我填」用到）。
-
-        走的是跟使用者自己動參數表**同一條路**（``set_param`` → 復原堆疊 →
-        重跑預覽），所以它可以被 Ctrl+Z 撤銷 —— 一個會改 recipe 而撤不掉的
-        按鈕，比沒有那顆按鈕糟。
-        """
-        nid = self.selected_node
-        if not nid or nid not in self.model.nodes:
-            return
-        self._on_param_edited(str(name), value)
-        # 參數表要跟著顯示新值 —— 不然畫面上那一格還是舊的，而使用者按了鈕。
-        node = self.model.nodes.get(nid)
-        if node is not None:
-            self.param_form.set_step(
-                get_step(node.step).describe(), node.params,
-                self.model.available_streams(before_node=nid),
-                self.model.available_regions(before_node=nid))
-
-    def _on_charts_requested(self) -> None:
-        """`Write charts` 儀表上的 `Preview charts…`（F87）。
-
-        視窗**只有一個**（開第二次是把同一個抬到最前面）—— 每按一次多開一個
-        的話，改設定會只改到其中一個，而其他幾個還畫著舊的樣子。
-        """
-        from .uniformity_window import UniformityWindow
-
-        win = getattr(self, "_charts_window", None)
-        if win is None:
-            win = UniformityWindow(self)
-            win.style_changed.connect(self._on_chart_style_changed)
-            self._charts_window = win
-        self._refresh_charts_window(self._inspector, force=True)
-        win.show()
-        win.raise_()
-        win.activateWindow()
-
-    def _refresh_charts_window(self, insp: Any, force: bool = False) -> None:
-        """把儀表現在那一顆餵給圖的視窗（開著才餵）。"""
-        win = getattr(self, "_charts_window", None)
-        if win is None or not (force or win.isVisible()):
-            return
-        if not hasattr(insp, "series") or not hasattr(insp, "charts"):
-            return
-        series = insp.series()
-        win.set_context(series, look=str(insp.params.get("look", "") or ""),
-                        axis=str(insp.params.get("axis", "") or "x"),
-                        metric=str(series.get("metric") or ""),
-                        kinds=insp.charts(),
-                        # 散佈圖吃的那兩份（別的圖用不到）。
-                        frame=insp.frame() if hasattr(insp, "frame") else None,
-                        spec=str(insp.params.get("spec", "") or ""))
-
-    def _on_chart_style_changed(self, look: str) -> None:
-        """視窗裡改完設定 → 寫回那張卡的 ``look`` 那一格。
-
-        走「量給我填」同一條路（`_on_param_requested` → `set_param`），所以它
-        進得了復原堆疊、參數表也跟著顯示新值 —— 一個會改 recipe 而 Ctrl+Z
-        撤不掉的視窗，比沒有那個視窗糟。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        if node is None or node.step != "output_uniformity":
-            return
-        self._on_param_requested("look", str(look))
-
-    def _on_select_requested(self, axis: str, rule: str) -> None:
-        """使用者在曲線上**點了一根條紋** → 那個方向改用那一種材質（F11 2b）。
-
-        走跟「量給我填」同一條路（``_on_param_requested`` → ``set_param``），
-        所以它可以 Ctrl+Z 撤銷、參數表也跟著顯示新值。
-
-        ``axis`` 是曲線的方向：``x`` 那條曲線講的是**直的**條紋
-        （``vertical_*``），別接反了 —— 接反的症狀是點左邊的圖改到右邊的參數，
-        而畫面上兩邊都會動，看起來像是「有反應」。
-        """
-        name = "vertical_select" if str(axis) == "x" else "horizontal_select"
-        self._on_param_requested(name, str(rule))
-
-    def _on_measure(self, axis: str, start: float, end: float) -> None:
-        """曲線面板上按著量測尺 → 影像上標出同一段（F8）。
-
-        兩張圖都標：並排比對開著的時候，使用者量的是「這個位置」而不是
-        「左邊那張的這個位置」。
-        """
-        for view in (self.image_view, self.image_view_b):
-            view.set_measure(axis, start, end)
-
-    def _on_measure_ended(self) -> None:
-        for view in (self.image_view, self.image_view_b):
-            view.clear_measure()
-
-    def _refresh_inspector(self, result: Any = None) -> None:
-        """把三種來源餵給儀表：這張卡的參數、這一顆的結果、整批的結果。"""
-        insp = self._inspector
-        # meta 在 **context** 上，不在 result 上（result 只帶 features/score/bin）。
-        ctx = getattr(result, "context", None) if result is not None else None
-        meta = dict(getattr(ctx, "meta", {}) or {})
-        if insp is None:
-            self.inspector_summary.setText("")
-            # 沒有儀表的卡也可能有曲線欄位 —— 那個背景跟儀表是兩件事，
-            # 不要因為前者不在就跳過後者。
-            self._refresh_curve_backdrop(meta)
-            return
-        node = self.model.nodes.get(self.selected_node or "")
-        one: Dict[str, Any] = {}
-        if result is not None:
-            one = {"features": dict(getattr(result, "features", {}) or {})}
-        # 「這張卡產出哪些特徵」要問卡片庫（含 output_prefix）—— 儀表只負責畫。
-        feats: List[str] = []
-        if node is not None:
-            try:
-                feats = list(get_step(node.step).resolve_features(node.params))
-            except Exception:  # 顯示用
-                feats = []
-        # 儀表要跟著**畫面上正在看的東西**走：並排比對打開時是左右那兩條流，
-        # 所以底下的直方圖也是兩張、順序一樣（使用者是拿它們互相對照的）。
-        shown = [self.stream_combo.currentText()]
-        if self._compare_on:
-            shown.append(self.stream_combo_b.currentText())
-        # 寫回的儀表要**真的乾跑一次**才講得出「會改幾列」，而那需要 KlarfDoc。
-        # 儀表不自己去讀檔（它連檔名都不該知道）—— 由這裡遞過去。
-        # 沒有 KLARF 的兩種輸入這一格就是 None，面板會退回估算並標明。
-        meta = dict(meta or {})
-        meta["_klarf_doc"] = getattr(self.dataset, "klarf", None)
-        # 跨顆那張圖的座標（`die_x` / `x_um`）在**結果那幾列裡沒有** ——
-        # 它們住在 `Dataset.items`。同 `_klarf_doc` 的理由由這裡遞過去，
-        # 不然選單裡少掉 die 那兩欄，而 die 圖正是那張圖最有用的一種。
-        meta["_items"] = list(getattr(self.dataset, "items", None) or [])
-        insp.set_context(self.selected_node or "",
-                         params=dict(node.params) if node else {},
-                         result=one, batch=self.trial_results, meta=meta,
-                         feature_names=feats,
-                         shown_streams=[s for s in shown if s])
-        self.inspector_summary.setText(insp.summary())
-        # 圖的視窗開著就跟著這一顆走 —— 換一顆 defect 而視窗停在上一顆的
-        # 數字，是最難發現的那一種說謊（兩張圖都畫得出來）。
-        self._refresh_charts_window(insp)
-        # `Chart look` 那一列的編輯器，預覽要畫**這一顆**（不是樣本）。
-        # 同 `set_histogram` 的先例：數字只有引擎那一份，UI 不再算一次。
-        self.param_form.set_chart_series(
-            insp.series() if hasattr(insp, "series") else None)
-        # 散佈圖那一格的選單是從**這一顆的長表**長出來的（欄名跟著量測卡走，
-        # 寫死一份的話使用者的欄位在選單上找不到）。
-        self.param_form.set_chart_frame(
-            insp.frame() if hasattr(insp, "frame") else None)
-        # 分頁鈕的字由**儀表現在畫的東西**決定（使用者 2026-08-21：「title 要
-        # 更詳細一點」）。放不下的那半句進 tooltip。
-        if hasattr(insp, "tab_title"):
-            self.btn_tab_card.setText(str(insp.tab_title() or "Card"))
-            self.btn_tab_card.setToolTip(str(insp.tab_tooltip() or ""))
-        self._refresh_curve_backdrop(meta)
-
-    def _refresh_curve_backdrop(self, meta: Dict[str, Any]) -> None:
-        """曲線欄位後面墊上「這張卡吃進來的那條流」的灰階分布（F11 UI-C）。
-
-        用的是引擎那份 ``stream_change[流]['before']`` —— 跟 Enhance 儀表左邊那條
-        細線同一組數字。UI 不自己再壓一次直方圖：畫面上的分布跟真的跑出來的
-        不一樣，比沒有那個背景更糟。
-
-        ``before`` 是「這張卡動它之前」的樣子，而曲線的橫軸就是輸入灰階 ——
-        兩者講的是同一件事，所以不必另外算一份。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        if node is None:
-            self.param_form.set_histogram([])
-            return
-        changes = dict((meta or {}).get("stream_change") or {})
-        # 這張卡處理的第一條流（曲線是逐像素的，兩條流吃的是同一條曲線）。
-        keys = [k.strip() for k in
-                str(node.params.get("streams") or "").split(",") if k.strip()]
-        for key in keys:
-            rec = changes.get(key)
-            if rec and rec.get("before"):
-                self.param_form.set_histogram(list(rec["before"]))
-                return
-        self.param_form.set_histogram([])
-
-    def _refresh_region_button(self) -> None:
-        regions = self.selected_regions()
-        has_data = bool(self._items())
-        self.btn_region_check.setVisible(bool(regions))
-        self.btn_region_check.setEnabled(bool(regions) and has_data)
-        if regions and not has_data:
-            self.btn_region_check.setToolTip(
-                "No dataset loaded yet — use “Open KLARF…” first.")
-
-    def open_region_check(self, n: Optional[int] = None,
-                          sync: bool = False) -> bool:
-        """把選取節點定義的區域畫到前 N 顆上。
-
-        為什麼要有這個視窗
-        ------------------
-        區域設定對不對是一個**關於整批**的問題：patch 是以缺陷為中心裁的，
-        所以結構在每張 patch 裡的位置本來就不一樣 —— 在第 1 顆剛好的框，
-        第 50 顆可能整個偏掉。看單顆永遠看不出這件事。
-        """
-        regions = self.selected_regions()
-        if not regions:
-            self._status("Select a card that defines a region first.", "error")
-            return False
-        items = self._items()
-        if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
-            return False
-
-        limit = int(n if n is not None else self.spin_trial_n.value())
-        limit = max(1, min(limit, MAX_CHECK, len(items)))
-        node = self.model.nodes[self.selected_node]
-        source = str(node.params.get("source", "") or "") or None
-        args = (self.model.to_recipe(), items[:limit], self.model.kind,
-                self.selected_node, regions, REGION_THUMB, source,
-                self.sources_for_run())
-
-        if self.region_window is None:
-            self.region_window = RegionCheckWindow(self)
-            self.region_window.defect_activated.connect(self._on_defect_activated)
-
-        if sync:
-            self._apply_region_results(regions,
-                                       RegionCheckWorker.run_sync(*args))
-            return True
-        self._region_regions = regions
-        if not self.region_check_worker.start(*args):
-            self._status("Still checking the previous region — please wait.")
-            return False
-        self._status("Checking “%s” on %d defects…"
-                     % (", ".join(regions), limit))
-        return True
-
-    def _on_region_ready(self, results: Any) -> None:
-        self._apply_region_results(list(getattr(self, "_region_regions", []) or []),
-                                   list(results or []))
-
-    def _apply_region_results(self, regions: Sequence[str],
-                              results: Sequence[Dict[str, Any]]) -> None:
-        if self.region_window is None:
-            self.region_window = RegionCheckWindow(self)
-            self.region_window.defect_activated.connect(self._on_defect_activated)
-        self.region_window.set_results(list(regions), list(results))
-        self.region_window.show()
-        self.region_window.raise_()
-        self._status(self.region_window.summary_text())
-
-    @property
-    def profile_panel(self) -> Any:
-        """投影曲線面板 —— 現在住在 ``ProfileInspector`` 裡面（F7-17）。
-
-        保留這個名字是因為它是「這張卡的面板」的對外身分（測試與狀態列都用
-        它）。選的不是投影定位卡時回一個**空的替身**，這樣呼叫端不必到處
-        寫 ``if is None``。
-        """
-        insp = self._inspector
-        panel = getattr(insp, "panel", None)
-        if panel is not None:
-            return panel
-        if getattr(self, "_no_profile", None) is None:
-            self._no_profile = ProfilePanel(self)
-            self._no_profile.setVisible(False)
-        return self._no_profile
-
-    def profile_panel_visible(self) -> bool:
-        """面板現在開著嗎（用明確狀態，不要問 ``isVisible()``）。"""
-        node = self.model.nodes.get(self.selected_node or "")
-        return self._is_method(node, self.PROFILE_STEP,
-                               self.PROFILE_METHOD)
-
-    def _feature_about(self, result: Any) -> Dict[str, str]:
-        """哪一個相對量是**跟誰**比出來的（特徵表中間那一欄要用）。
-
-        名字裡沒有這件事 —— ``epi_cmp_delta_median`` 不講 mg，而把它塞進名字
-        會變成 ``epi_vs_mg_cmp_delta_median`` 那種長度。引擎在
-        ``meta["compares"]`` 已經記著（那一份本來就是給儀表用的），
-        這裡只是讀出來，**不重算**。
-        """
-        ctx = getattr(result, "context", None)
-        rows = (getattr(ctx, "meta", {}) or {}).get("compares") or {}
-        out: Dict[str, str] = {}
-        for rec in rows.values():
-            ref = str((rec or {}).get("reference") or "")
-            for name in (rec or {}).get("names") or []:
-                out[str(name)] = ref
-        return out
-
-    def _feature_model(self, result: Any,
-                       highlight: Sequence[str] = ()) -> List[Dict[str, Any]]:
-        """特徵面板要畫的那幾段（F76 刀 4）—— **跟結果表同一棵樹**。
-
-        分組不是在這裡發明的：`verdict_features.bound_specs` 給每個名字的
-        結構化身分（卡、區域、統計量、變體），`feature_panel.panel_model`
-        把它排成「一張卡 × 一個區域」的段。Results 是 *N 顆 × M 特徵*，
-        這裡是 *一顆* —— 同一棵樹的轉置。
-
-        ⚠ 這一支取代了 `_feature_sections()` 與 `_feature_specs()`：那兩支
-        各自從 `meta["feature_owner"]` 與逐張卡的 `resolve_feature_specs`
-        重建了一次分組，而**那份說法跟結果表那份已經漂開了** —— 區域顏色
-        在同一張表上出現兩種就是漂出來的第一個症狀（F76 刀 1）。
-        """
-        from .feature_panel import panel_model
-        from ..core.pipeline.verdict_features import (
-            bound_specs, diagnostic_columns,
-        )
-
-        try:
-            recipe = self.model.to_recipe()
-            bounds = bound_specs(recipe, self.model.kind)
-            diags = diagnostic_columns(recipe, self.model.kind)
-        except Exception:  # 顯示層，壞了就不分組
-            bounds, diags = [], []
-        return panel_model(getattr(result, "features", {}) or {}, bounds,
-                           highlight=highlight,
-                           about=self._feature_about(result),
-                           diagnostics=diags)
-
-    def _feature_specs(self) -> Dict[str, Any]:
-        """特徵名 → 誕生處宣告的身分（`FeatureSpec`，PR-3；前身 F37 A4 的
-        `_feature_parts`）。
-
-        **問每一張卡，不自己拆字串**：``test_epi_hot_glv_median`` 這一串裡哪
-        一段是流、哪一段是區域、哪一段是使用者自己取的名字，三者都是任意識別
-        字，UI 只能猜 —— 而猜錯會把區域畫成流，顏色跟著錯，而顏色正是這件事的
-        重點。組名字的規則住在卡片上，身分就宣告在同一個地方
-        （`Step.resolve_feature_specs`；上下標的拆解 = ``spec.parts()``）。
-
-        先出現的贏（同 `feature_owners`）：撞名的時候引擎留的是先寫那一份的
-        救援名，而畫面上那一格顯示的是後寫的值 —— 兩邊都指同一個人比較不會錯。
-        """
-        out: Dict[str, Any] = {}
-        for nid in self.model.node_order:
-            node = self.model.nodes.get(nid)
-            if node is None or not node.enabled:
-                continue
-            try:
-                got = get_step(node.step).resolve_feature_specs(node.params)
-            except Exception:  # 顯示用，壞了就不拆
-                swallowed("studio._feature_specs")
-                continue
-            for s in got:
-                out.setdefault(str(s.name), s)
-        return out
-
-    def _feature_sections(self, result: Any) -> List[Dict[str, Any]]:
-        """特徵表要怎麼分組（F13-1 ①）—— **照引擎已經記下來的事分**。
-
-        兩份資料都早就在了，只是 UI 沒用：
-
-        * ``ctx.meta["feature_owner"]`` —— 每個特徵是**哪張卡**寫的（engine 在
-          救援撞名的那一段順手記的）；
-        * ``Step.diagnostic_features()`` —— 哪幾個是「這張卡自己做了什麼」
-          （`clip_frac` 那類），不是在量缺陷。
-
-        所以這裡不發明分類規則。發明一份的話它會跟引擎漂 —— 而漂掉的症狀是
-        「這個數字被歸到錯的卡底下」，畫面上完全看不出來。
-
-        順序 = **執行順序**（讀起來跟畫布一樣，由前到後），診斷那一組排最後
-        而且**預設收起來**：它每張 Enhance 卡都會產出，攤開來會把真正在量的
-        那幾個數字擠到看不見。
-        """
-        ctx = getattr(result, "context", None)
-        owner = dict(getattr(ctx, "meta", {}).get(FEATURE_OWNER_KEY, {})
-                     or {}) if ctx is not None else {}
-        features = dict(getattr(result, "features", {}) or {})
-        if not owner:
-            return []
-
-        diagnostics: List[str] = []
-        sections: List[Dict[str, Any]] = []
-        # 救回來的那份叫什麼，**跟引擎用同一支**（F17-②）。以前這裡自己用
-        # `qualified_feature_name(nid, f)` 組（節點 id 前綴），而引擎改成流名
-        # 前綴之後兩邊就對不上了 —— 症狀是那個值以「量測值」的身分排到最上面，
-        # 而它量的是那張卡自己。兩份說法必然有一份會漂（CLAUDE.md §0）。
-        try:
-            recipe = self.model.to_recipe()
-            prefixes = feature_prefixes(list(self.model.node_order), recipe,
-                                        REGISTRY)
-        except Exception:  # 顯示用，壞了就退回節點 id
-            prefixes = {}
-        for nid in self.model.node_order:
-            node = self.model.nodes.get(nid)
-            if node is None:
-                continue
-            mine = [f for f in features if owner.get(f) == nid]
-            if not mine:
-                continue
-            try:
-                step_cls = get_step(node.step)
-                label = step_cls.label
-                colour = theme.group_hex(step_cls.resolve_group())
-                diag = set(step_cls.diagnostic_features(node.params))
-                # **救回來的那一份也是診斷數字**：兩張 Enhance 卡都寫
-                # `clip_frac`，engine 把先寫的留成 `<那條流>_clip_frac`。
-                # 救援名用 `FeatureSpec.qualified`（跟引擎、binder 同一支）。
-                pfx = prefixes.get(nid, nid)
-                diag |= {s.qualified(pfx).name
-                         for s in step_cls.resolve_feature_specs(node.params)
-                         if s.name in diag}
-            except Exception:  # 顯示用，壞了就當一般的
-                label, colour, diag = node.step, "", set()
-            measured = [f for f in mine if f not in diag]
-            diagnostics.extend(f for f in mine if f in diag)
-            if measured:
-                sections.append({"title": label, "color": colour,
-                                 "names": measured, "node": nid})
-        # **同一張卡放兩次時才把 id 帶出來**（畫布的副標用的是同一條規則）：
-        # 兩組都叫 `Normalize` 的話，使用者分不出哪一組是哪一張卡；而每一組都
-        # 掛一個 node id 又是在每一份正常的 recipe 上加噪音。
-        seen_titles = [sec["title"] for sec in sections]
-        for sec in sections:
-            if seen_titles.count(sec["title"]) > 1:
-                sec["title"] = "%s · %s" % (sec["title"], sec["node"])
-        if diagnostics:
-            sections.append({"title": "Diagnostics", "color": "",
-                             "names": diagnostics, "collapsed": True})
-        return sections
-
-    def _highlight_features(self, result: Any) -> Sequence[str]:
-        """選取節點這一步新增/改值的特徵 → 在特徵表裡標色。"""
-        nid = self.selected_node
-        if not nid:
-            return ()
-        for tr in getattr(result, "traces", []) or []:
-            if getattr(tr, "node_id", None) == nid:
-                return list(getattr(tr, "features_added", {}) or {})
-        return ()
-
-    def _default_stream(self, images: Dict[str, Any]) -> str:
-        """點一張卡時，左邊那張圖預設顯示哪一條流。
-
-        規則是**這張卡的主要輸出**，不是「它寫過的最後一條流」。這兩者以前被
-        當成同一件事（取 ``writes`` 的最後一個），但當時 Enhance 卡的
-        ``resolve_writes`` 是 ``[主流] + 附帶的那一串``，於是預設值一路是那一串
-        的最後一項 —— 點 Normalize 就跳到 ``ref``。並排比對開著、右邊又停在
-        ``ref`` 的時候，畫面就變成左右兩張一模一樣的 ref，每點一張卡都要手動
-        切回來（F7-9 試用回饋 §4）。F7-18 之後一張卡只寫一條流，兩者又合一了，
-        但這條規則仍然是對的（``roi_template`` 這類卡的 writes 不只一項）。
-        """
-        # 並排打開時左邊固定從 test 起跳（右邊就是 ref）——「兩張輸入影像」是
-        # 並排唯一的用途，而每次點卡片都要重認一次哪邊是哪邊的話，比對就慢了。
-        if self._compare_on and "test" in images:
-            return "test"
-        nid = self.selected_node
-        node = self.model.nodes.get(nid) if nid else None
-        if node is not None:
-            for name in self._PRIMARY_PARAMS:
-                # ``streams`` 是**一串**（"test,ref"）—— 整串當流名去比一定
-                # 落空，然後就掉到下面的 writes 分支取最後一項，於是點一張
-                # 兩條流的 Normalize 會跳到 ref。取第一條才是「這張卡的主流」。
-                for val in str(node.params.get(name, "") or "").split(","):
-                    val = val.strip()
-                    if val in images:
-                        return val
-            try:
-                writes = get_step(node.step).resolve_writes(node.params)
-            except KeyError:
-                writes = []
-            for w in reversed(list(writes)):
-                if w in images:
-                    return str(w)
-        if "test" in images:
-            return "test"
-        for k in images:
-            return str(k)
-        return ""
-
-    def _populate_streams(self, images: Dict[str, Any]) -> None:
-        """重建影像流下拉；使用者**親手挑過**的那條還在就留著。
-
-        「親手挑過」只認 :meth:`_on_stream_changed`（真的動了下拉）；換節點時
-        會清掉，讓畫面自動跳到新節點的輸出 —— 點卡片就看得到那張圖。
-        """
-        names = sorted(images)
-        want = (self._user_stream if self._user_stream in images
-                else self._default_stream(images))
-        want_b = (self._user_stream_b if self._user_stream_b in images
-                  else self._default_compare_stream(images, want))
-        if want_b == want:
-            # 左右同一條流 = 兩張一模一樣的圖，那是並排唯一沒有意義的狀態。
-            # 使用者親手挑的右邊也讓步 —— 他挑 ref 是為了「跟左邊比」，
-            # 不是為了「看兩次 ref」。
-            want_b = self._default_compare_stream(images, want)
-        self._syncing = True
-        try:
-            self.stream_combo.clear()
-            self.stream_combo.addItems(names)
-            if want in names:
-                self.stream_combo.setCurrentIndex(names.index(want))
-            self.stream_combo_b.clear()
-            self.stream_combo_b.addItems(names)
-            if want_b in names:
-                self.stream_combo_b.setCurrentIndex(names.index(want_b))
-        finally:
-            self._syncing = False
-
-    def _default_compare_stream(self, images: Dict[str, Any], left: str) -> str:
-        """並排的右邊預設放什麼：左邊是 test 就配 ref（反之亦然）。
-
-        並排最常見的用途就是「這張 Enhance 卡有沒有把 test 和 ref 調成不一樣」，
-        所以預設直接給那一對，不要讓使用者每次都自己挑。
-        """
-        pair = {"test": "ref", "ref": "test"}
-        mate = pair.get(str(left))
-        if mate and mate in images:
-            return mate
-        for k in ("ref", "diff", "test"):
-            if k in images and k != left:
-                return k
-        for k in sorted(images):
-            if k != left:
-                return str(k)
-        return str(left)
-
-    def _show_current_stream(self) -> None:
-        self.image_view.set_image(
-            self._preview_images.get(self.stream_combo.currentText()))
-        if self.compare_check.isChecked():
-            self.image_view_b.set_image(
-                self._preview_images.get(self.stream_combo_b.currentText()))
-        self._refresh_region_overlay()
-
-    def region_overlay(self) -> List[Tuple[float, float, float, float]]:
-        """**選著的那張卡**牽涉到的框（正規化座標，可能有好幾個）。
-
-        兩種來源，同一個畫法：
-        - 這張卡**定義**的區域（``resolve_regions_out``，F7-11 起）——
-          調 Region 卡時看框跟著參數動；
-        - 這張卡**引用**的區域（``resolve_regions_in``，2026-08-14 使用者
-          要求）—— 選 Gray-level stats 那種量測卡時，畫面直接回答
-          「我到底在量哪裡」。以前量測卡選起來預覽上什麼都沒有，roi 填錯
-          只能用數字猜。
-
-        仍然只畫**選著那張卡**的，不是 context 裡所有的框：一份 recipe 常常
-        有好幾張 Region 卡，全部畫出來分不清誰是誰。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        ctx = getattr(getattr(self, "_last_result", None), "context", None)
-        if node is None or ctx is None:
-            return []
-        out: List[Tuple[float, float, float, float]] = []
-        for name in self._overlay_region_names(node):
-            out.extend(tuple(float(v) for v in r)
-                       for r in ctx.roi_norm_rects(name))
-        return out
-
-    @staticmethod
-    def _overlay_region_names(node) -> List[str]:
-        """要畫哪幾個區域，**依畫的順序**。
-
-        只有一份：框與框的名字必須走同一個清單，不然顏色會指到錯的區域 ——
-        而畫面上沒有任何東西透露那件事。
-        """
-        try:
-            step_cls = get_step(node.step)
-            produced = list(step_cls.resolve_regions_out(node.params))
-            consumed = list(step_cls.resolve_regions_in(node.params))
-        except Exception:  # 顯示用，不能擋畫面
-            return []
-        names: List[str] = []
-        for name in produced:
-            # ``_center`` 是同一組框裡的一個，畫兩次只會變成粗一點的線。
-            # 它的角色由 focus 表達（見下面），不是多畫一個框。
-            # （**引用**的不套這條 —— 量測卡明確指著 ``cross_center`` 時，
-            #   那個框就是它在量的地方，當然要畫。）
-            if name.endswith("_center") or name in names:
-                continue
-            names.append(name)
-        for name in consumed:
-            if name and name not in names:
-                names.append(name)
-        return names
-
-    def region_overlay_names(self) -> List[str]:
-        """每個框屬於哪一個具名區域（跟 :meth:`region_overlay` 等長）。
-
-        分開一支而不是讓 ``region_overlay`` 回 tuple：那一支有測試在比清單，
-        而且「框在哪」與「框叫什麼」是兩個問題 —— 疊框只需要前者也還是對的
-        （長度對不上時 `ImageView` 就整組不分色，見 `set_overlay`）。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        ctx = getattr(getattr(self, "_last_result", None), "context", None)
-        if node is None or ctx is None:
-            return []
-        out: List[str] = []
-        for name in self._overlay_region_names(node):
-            out.extend([name] * len(ctx.roi_norm_rects(name)))
-        return out
-
-    def _refresh_region_overlay(self) -> None:
-        """把框疊到預覽影像上。**每次預覽算完都會走這裡**，所以拖參數的時候
-        框是跟著動的 —— 那正是這種參數唯一調得動的方式（F7-8）。"""
-        boxes = self.region_overlay()
-        focus = self._focus_box_index(boxes)
-        labels = self.region_overlay_names()
-        for view in (self.image_view, self.image_view_b):
-            view.set_overlay(boxes, focus, labels)
-        self._refresh_measure_marks()
-
-    def measure_marks(self, stream: Optional[str] = None):
-        """選著那張卡要畫的量測標記 ``(lines, points, focus, labels)``（F19）。
-
-        ``stream`` 是**這個 view 現在顯示的那一條流** —— 卡片只交那一條量到的
-        （見 `Step.overlay_marks`）。不給就是全部，`measure_marks()` 那樣呼叫的
-        既有測試因此不用動。
-
-        資料由**卡片自己**交出來（`Step.overlay_marks`）—— meta 的形狀是那張卡
-        的事。這裡只問「現在選著的是誰」，所以整個 Measure 段共用同一條路。
-
-        **跟框不同來源**：框從 model 推導（recipe 說要看哪裡），標記來自
-        `_last_result` 的 context（這一顆真的量到了什麼）。混在一起的話，
-        「框還在但標記沒了」這個最有用的狀態就講不出來。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        ctx = getattr(getattr(self, "_last_result", None), "context", None)
-        if node is None or ctx is None:
-            return [], [], -1, []
-        try:
-            lines, points, focus, labels = get_step(node.step).overlay_marks(
-                ctx, node.params, stream)
-        except Exception:  # 顯示用，不能擋畫面
-            return [], [], -1, []
-        # ``focus`` 可以是一個 index 或**一串**（一個記號不只一條線 ——
-        # GLV 的贏家格是一個 X）。這裡不收窄成 int：收窄過的那一版，X 的第二
-        # 條會掉進「不是焦點」那一組，畫出來只剩一條斜線。
-        return (list(lines or []), list(points or []), focus,
-                [str(v) for v in (labels or [])])
-
-    def heat_tiles(self, stream: Optional[str] = None):
-        """選著那張卡要鋪的熱圖 ``(cells, colours, legend)``（F87）。
-
-        跟 :meth:`measure_marks` 一模一樣的形狀 —— 卡片自己交
-        （`Step.overlay_heat`），這裡只問「現在選著的是誰、正在看哪一條流」。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        ctx = getattr(getattr(self, "_last_result", None), "context", None)
-        if node is None or ctx is None:
-            return [], [], None
-        try:
-            cells, colours, legend = get_step(node.step).overlay_heat(
-                ctx, node.params, stream)
-        except Exception:  # 顯示用，不能擋畫面
-            return [], [], None
-        return list(cells or []), [str(c) for c in (colours or [])], legend
-
-    def _refresh_measure_marks(self) -> None:
-        """**一個 view 一次** —— 兩張圖顯示的可能是不同的流（比對模式）。
-
-        以前這裡取一次就推給兩個 view，於是一張卡在 test 與 ref 上各量一次時，
-        兩組線會同時畫在**你正在看的那一張**上，同色、同標籤、分不出來。
-        現在各問各的，比對模式因此也才是對的（2026-08-22）。
-        """
-        for view, combo in ((self.image_view, self.stream_combo),
-                            (self.image_view_b, self.stream_combo_b)):
-            lines, points, focus, labels = self.measure_marks(
-                str(combo.currentText() or ""))
-            view.set_marks(lines, points, focus, labels,
-                           solid=self._marks_solid())
-            cells, colours, legend = self.heat_tiles(
-                str(combo.currentText() or ""))
-            view.set_heat(cells, colours, legend)
-
-    def _marks_solid(self) -> bool:
-        """選著那張卡的標記要不要畫滿（`Step.marks_solid`）。
-
-        **那張卡說的，不是這裡猜的** —— 「幾條線算少」是卡片自己才知道的事。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        if node is None:
-            return False
-        try:
-            return bool(getattr(get_step(node.step), "marks_solid", False))
-        except Exception:  # 顯示用，不能擋畫面
-            return False
-
-    def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
-        """哪一個框要畫成醒目的那一個 —— **卡片真的挑走的那一塊**。
-
-        醒目的那一個的意思一直都是 ``<name>_center``（見
-        :meth:`_overlay_region_names` 的註解：「它的角色由 focus 表達」）。
-        以前這裡是用「離影像正中心最近」算出來的，而那在 F20 之前跟
-        ``_center`` **必定一致** —— 那一版的 `_center` 就是這樣定義的。
-
-        F20（2026-08-22）之後 Region 卡多了一格「哪一塊是缺陷那一塊」，
-        選「訊號最強」時 ``_center`` 會落在別的地方。這裡不跟著改的話，
-        影像上被畫成醒目的是 A、卡片實際量的是 B —— 而畫面上沒有任何東西
-        透露那件事（那正是這個 repo 最怕的那種錯）。
-
-        所以改成**去問 context 那一塊到底是哪一個**，對不上才退回舊規則
-        （沒跑過、或那張卡不吐 ``_center``）。
-        """
-        rects = self._center_rects()
-        for i, box in enumerate(boxes):
-            if any(all(abs(float(a) - float(b)) < 1e-6 for a, b in zip(box, r))
-                   for r in rects):
-                return i
-        if not self._defines_regions():
-            # **量測卡選著的時候不要亂指一個。** 這裡的醒目一直都是
-            # ``<name>_center`` 的意思，而那是 **Region 卡**的產物。
-            # 量測卡（GLV / CD）只是**引用**別人定義的區域 —— 一個 24 格的
-            # 區域被 pooled 成一堆像素時，沒有任何一格是特別的，把離畫面中心
-            # 最近的那一格畫成醒目等於在說一件不成立的事。
-            # 量測卡要指哪一格，走的是自己的 `overlay_marks`（那才是
-            # 「這一顆真的量到了什麼」那條路）。
-            return -1
-        if not self._picks_a_center():
-            # **``pick="none"`` 的 Region 卡也不畫醒目框**（F31 T4）：它明講
-            # 「沒有哪一格是缺陷那一塊」，退回「離中心最近」畫一個醒目的，
-            # 等於畫布替引擎說了一句它沒說的話。
-            return -1
-        best, best_d = -1, None
-        for i, (nx, ny, nw, nh) in enumerate(boxes):
-            d = (nx + nw / 2.0 - 0.5) ** 2 + (ny + nh / 2.0 - 0.5) ** 2
-            if best_d is None or d < best_d:
-                best, best_d = i, d
-        return best
-
-    def _defines_regions(self) -> bool:
-        """選著的這張卡是不是**定義**區域的那種（Region 卡）。
-
-        引用別人區域的量測卡不算 —— 見 :meth:`_focus_box_index` 的說明。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        if node is None:
-            return False
-        try:
-            return bool(get_step(node.step).resolve_regions_out(node.params))
-        except Exception:  # 顯示用，不能擋畫面
-            return False
-
-    def _picks_a_center(self) -> bool:
-        """這張卡有沒有挑一塊 —— 宣告裡有沒有 ``<name>_center``。
-
-        `pick="none"` 的 Region 卡定義區域但**不挑**，宣告裡因此沒有那個
-        名字（`_util.region_family` 的開關）—— 醒目框跟著挑選一起走。
-        """
-        node = self.model.nodes.get(self.selected_node or "")
-        if node is None:
-            return False
-        try:
-            names = get_step(node.step).resolve_regions_out(node.params)
-        except Exception:  # 顯示用，不能擋畫面
-            return False
-        return any(str(n).endswith("_center") for n in names)
-
-    def _center_rects(self) -> List[Sequence[float]]:
-        """這一顆上 ``<name>_center`` 實際落在哪 —— 沒跑過就是空的。"""
-        node = self.model.nodes.get(self.selected_node or "")
-        ctx = getattr(getattr(self, "_last_result", None), "context", None)
-        if node is None or ctx is None:
-            return []
-        out: List[Sequence[float]] = []
-        try:
-            names = list(get_step(node.step).resolve_regions_out(node.params))
-        except Exception:  # 顯示用，不能擋畫面
-            return []
-        for name in names:
-            if not str(name).endswith("_center"):
-                continue
-            out.extend(tuple(float(v) for v in r)
-                       for r in ctx.roi_norm_rects(name))
-        return out
-
-    def _on_stream_changed(self, text: str) -> None:
-        if self._syncing:
-            return
-        self._user_stream = str(text) or None
-        self._show_current_stream()
-
-    def _on_stream_b_changed(self, text: str) -> None:
-        if self._syncing:
-            return
-        self._user_stream_b = str(text) or None
-        self._show_current_stream()
-
-    # ---- 並排比對（F7-8）--------------------------------------------------
-    def set_compare(self, on: bool) -> bool:
-        """開／關並排的第二張圖。回傳最後的狀態。
-
-        **預設是關的**，這是刻意的：F7-5 把 Gallery 與直方圖搬走，就是為了讓
-        右欄的影像變大（使用者原話「影像最好大一點、置中」）。預設並排等於
-        把剛爭取到的寬度再砍一半。真正需要並排的是**調 Enhance 卡的時候**
-        （確認 test 與 ref 被調成一樣），那是一個明確的時機，一次點擊就到。
-
-        兩張圖的縮放與平移連動 —— 沒有連動的並排要使用者自己把兩邊拖到同一個
-        位置才比得起來，那還不如切換一張。
-        """
-        on = bool(on)
-        if self.compare_check.isChecked() != on:
-            self.compare_check.setChecked(on)     # 會再繞回這裡一次
-            return self.compare_check.isChecked()
-        self.image_view_b.setVisible(on)
-        self.stream_combo_b.setVisible(on)
-        self._compare_on = on
-        if on:
-            # 打開的當下重挑一次左右兩條流：預設是 test / ref。手動挑過的
-            # (``_user_stream``) 仍然優先 —— 這裡只負責「還沒挑過」的情況。
-            self._populate_streams(self._preview_images or {})
-            self._show_current_stream()
-            scale, offset = self.image_view.view_state()
-            self.image_view_b.set_view(scale, offset)
-        else:
-            self.image_view_b.set_image(None)
-        # 儀表跟著畫面走：兩張圖 → 兩張直方圖（見 _refresh_inspector）。
-        self._refresh_inspector(getattr(self, "_last_result", None))
-        return on
-
-    def compare_enabled(self) -> bool:
-        """並排現在開著嗎。用明確狀態而非 ``isVisible()``（視窗還沒 show 時後者恆假）。"""
-        return bool(self._compare_on)
-
-    def _link_views(self, source: Any, target: Any, scale: float, offset) -> None:
-        """把 ``source`` 的檢視狀態推給 ``target``（單向，避免無限來回）。"""
-        if not self._compare_on or self._view_syncing:
-            return
-        self._view_syncing = True
-        try:
-            target.set_view(scale, offset)
-        finally:
-            self._view_syncing = False
-
     # ==================================================================== #
-    # 試跑
+    # 跑完了，畫面怎麼變（**怎麼發動、怎麼寫在 `ui/run_controller.py`**）
     # ==================================================================== #
-    def run_trial(self, n: int, workers: Optional[int] = 1,
-                  sync: bool = False, cache_dir: Optional[Any] = None,
-                  write_outputs: bool = False) -> bool:
-        """跑前 ``n`` 顆並更新直方圖。``sync=True`` 走同步路徑（測試用）。
-
-        ``write_outputs``（F16 Stage 5c）：跑完之後要不要讓 Output 段的卡
-        **真的寫出檔案**。**預設 False 是刻意的** —— 使用者定調「試跑不寫，
-        只有整批才寫」，而新加一條跑 pipeline 的路時它預設不寫。
-        只有 :meth:`run_all` 傳 True。
-        """
-        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
-        if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
-            return False
-        if not self.model.node_order:
-            self._status("The pipeline is empty — add a card before running.")
-            return False
-
-        # 跑之前先 lint（F7-9）。引擎的契約是「單顆出錯不殺整批」，所以一組接
-        # 錯的卡片以前的下場是**跑完 200 顆、每一顆都失敗**：進度條走完、結果
-        # 是空的、原因埋在每顆的錯誤訊息裡。同一份檢查 CLI 從 M1 就在用了，
-        # 只是 Studio 一直沒接上來。只擋 error，warning 照跑。
-        issues = self.model.validate()
-        problems = [i for i in issues if i.level == "error"]
-        if problems:
-            first = problems[0]
-            more = ("  (and %d more problem%s)"
-                    % (len(problems) - 1, "" if len(problems) == 2 else "s")
-                    if len(problems) > 1 else "")
-            self._status("Cannot run — %s: %s%s"
-                         % (first.title, first.detail, more), "error")
-            return False
-        self._pending_warnings = [i for i in issues if i.level == "warning"]
-
-        recipe = self.model.to_recipe()
-        # 「只跑這幾個 code」（F50）：**篩掉零顆的時候不可以安靜地跑完**。
-        #
-        # 引擎那一頭篩得很乾淨（`batch.select_items`），而乾淨的下場正是危險
-        # 的：一個打錯的欄名或一個不存在的 code，跑出來是「0 defects」與一張
-        # 空的結果表 —— 使用者要去猜是資料沒載到、pipeline 壞了，還是篩選太緊。
-        # 那三件事的下一步完全不同，所以這裡要講出**是哪一個**。
-        from d4t.core.pipeline.batch import item_filters, select_items
-
-        picks = item_filters(recipe)
-        if picks:
-            kept = select_items(recipe, self.dataset, items)
-            if not kept:
-                where = ", ".join("%s = %s" % (col, ", ".join(vals))
-                                  for _nid, col, vals in picks)
-                self._status(
-                    "Nothing to run — the input filter (%s) matches none of "
-                    "the %d defects in this dataset. Check the column and the "
-                    "values, or clear the filter to run everything."
-                    % (where, len(items)), "error")
-                return False
-            self._filtered_note = ("%d of %d defects match the input filter"
-                                   % (len(kept), len(items)))
-            items = kept
-        else:
-            self._filtered_note = ""
-
-        limit = max(1, min(int(n), len(items)))
-        cdir = None if cache_dir is None else str(cache_dir)
-        # **跟著這一次執行走**，不是讀當下的 UI 狀態：使用者按了 Run all 之後
-        # 可以馬上去改別的東西，而這一批的結果仍然是「他叫我整批跑」的那一批。
-        self._write_outputs_this_run = bool(write_outputs)
-        # 同步那條路（headless 測試 / CLI 式呼叫）沒有 event loop 在轉，
-        # 背景 worker 的訊號投遞不到 —— 寫檔那一段要跟著走同步版。
-        self._write_outputs_sync = bool(sync)
-
-        # 這一次抽哪幾顆（X3）。**紀錄先寫下來再跑** —— 跑到一半當掉的時候，
-        # 「剛才那一批是哪幾顆」仍然答得出來。
-        spec = self.sample_spec()
-        # 這裡**再算一次**同一個抽樣，只為了拿那份紀錄。它不浪費（幾千顆的
-        # `random.sample`），而且**保證跟 `run_batch` 挑到同一批** —— 同一個
-        # 種子、同一串 items。紀錄裡的 `mode` 可能跟 `spec` 不一樣（分層那一欄
-        # 整批是空的時候會退成 random），而使用者要看到的是**真的發生的那個**。
-        _picked, note = sampling.pick(
-            items, limit, mode=str(spec.get("mode", "first")),
-            seed=spec.get("seed"),
-            column=str(spec.get("column", "CLASSNUMBER") or "CLASSNUMBER"))
-        self.sample_note = dict(note)
-
-        if sync:
-            t0 = time.time()
-            try:
-                results = TrialWorker.run_sync(
-                    recipe, self.dataset, limit,
-                    workers=int(workers) if workers else 1, cache_dir=cdir,
-                    sample=spec)
-            except Exception as e:  # UI 邊界
-                self._status("Trial run failed: %s: %s" % (type(e).__name__, e), "error")
-                return False
-            self._apply_trial_results(results, time.time() - t0)
-            return True
-
-        self._trial_t0 = time.time()
-        if not self.trial_worker.start(recipe, self.dataset, limit,
-                                       workers=workers, cache_dir=cdir,
-                                       sample=spec):
-            self._status("A run is already in progress — please wait.")
-            return False
-        self._progress_set(0, limit, "%v / %m defects")
-        self._show_stop(True)
-        self._status("Running: 0 / %d" % limit)
-        return True
-
-    def _on_trial_clicked(self) -> None:
-        self.run_trial(int(self.spin_trial_n.value()), workers=TRIAL_WORKERS,
-                       cache_dir=DEFAULT_CACHE_DIR)
-
-    def _on_full_clicked(self) -> None:
-        self.run_all()
-
-    def run_all(self, sync: bool = False) -> bool:
-        """跑**整批** —— 每一顆，不只前 N 顆。**不寫任何檔案。**
-
-        ⚠ 2026-09-09 之前這一支跑完會順手讓 Output 卡寫出去（F16 Stage 5c
-        的「試跑不寫，只有整批才寫」）。使用者：「跑完後可以檢查結果再按一個
-        鍵 output」—— 所以「跑」跟「寫」現在是兩個動作：這裡只跑，寫是
-        :meth:`write_outputs`（Results 視窗上那顆「Write outputs」）。理由是
-        同一句：寫 KLARF 是不可逆的，而在這之前使用者連看一眼結果的機會都
-        沒有。
-        """
-        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
-        if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
-            return False
-        return self.run_trial(len(items), workers=TRIAL_WORKERS,
-                              cache_dir=DEFAULT_CACHE_DIR, sync=sync)
-
-    def write_outputs(self, sync: bool = False) -> bool:
-        """把**現在這批結果**照 Output 卡寫出去（2026-09-09）。
-
-        三道關，每一道都要講話（推廣鐵則）：沒有結果不寫；被停掉的那一批是
-        **部分結果**，不寫（寫進 KLARF 是不可逆的錯）；KLARF ``inplace`` 先問
-        一次（`_confirm_irreversible_writes`，那是這個 app 唯一不可逆的動作）。
-        """
-        results = list(self.trial_results or [])
-        if not results:
-            self._status("Nothing to write yet — run a trial or “Run all” "
-                         "first.", "error")
-            return False
-        last = dict(getattr(self, "_last_run", None) or {})
-        if last.get("partial"):
-            self._status("That run was stopped part-way, so these are partial "
-                         "results — nothing was written. Run again to the end "
-                         "before writing.", "error")
-            return False
-        if not self._confirm_irreversible_writes():
-            return False
-        self._write_outputs_sync = bool(sync)
-        return self._write_outputs(results)
-
-    def rerun(self, sync: bool = False) -> bool:
-        """照**現在的 ADC 設定**把判定再跑一次（2026-09-09，使用者：「可以根據
-        ADC 的設定快速 Re-run（因為 feature 應該都算了？）」）。
-
-        兩條路，由 `batch.measurement_signature` 決定：量測那一段跟上一批一樣
-        → 拿上一批的 features 重判（`batch.rerun_decision`，秒級，影像一顆都
-        不碰）；不一樣 → 整批重跑（跟上一批同樣的顆數）。**不拿舊數字配新的
-        量測卡**：那是這個 repo 最怕的「跑得完、有數字、而且是錯的」。
-
-        重判的底稿是上一批**原封不動的那一份**（`_last_run["rows"]`），不是
-        畫面上那一份 —— 連按兩次 Re-run 之間，上一次判定失敗的顆才救得回來。
-        """
-        from d4t.core.pipeline.batch import measurement_signature, rerun_decision
-
-        last = dict(getattr(self, "_last_run", None) or {})
-        rows = copy.deepcopy(last.get("rows") or [])
-        if not rows:
-            self._status("Nothing to re-run yet — run a trial first.", "error")
-            return False
-        issues = self.model.validate()
-        problems = [i for i in issues if i.level == "error"]
-        if problems:
-            first = problems[0]
-            self._status("Cannot re-run — %s: %s" % (first.title, first.detail),
-                         "error")
-            return False
-        self._pending_warnings = [i for i in issues if i.level == "warning"]
-        recipe = self.model.to_recipe()
-        if measurement_signature(recipe) != str(last.get("sig") or ""):
-            self._status("A measuring card changed since the last run, so the "
-                         "numbers have to be measured again — running every "
-                         "defect of the last run.")
-            return self.run_trial(int(last.get("limit") or len(rows)),
-                                  workers=TRIAL_WORKERS,
-                                  cache_dir=DEFAULT_CACHE_DIR, sync=sync)
-        t0 = time.time()
-        try:
-            n = rerun_decision(recipe, rows)
-        except Exception as e:  # UI 邊界
-            self._status("Re-run failed: %s: %s" % (type(e).__name__, e), "error")
-            return False
-        elapsed = time.time() - t0
-        self._apply_trial_results(rows, elapsed)
-        self._status("Re-run: decided %d of %d defects again from the stored "
-                     "numbers in %.1f s — no image was recomputed."
-                     % (n, len(rows), elapsed))
-        return True
-
-
-    # ---- Output 段：把結果寫出去（F16 Stage 5c）---------------------------
-    def _write_outputs(self, results: Sequence[Dict[str, Any]]) -> bool:
-        """跑 Output 段的卡（背景執行緒）。回 False = 沒開起來。
-
-        **只有 `run_all()` 走得到這裡**（使用者定調：試跑不寫）。
-        """
-        recipe = self.model.to_recipe()
-        self._status("Writing outputs…")
-        if getattr(self, "_write_outputs_sync", False):
-            # 同步那條路沒有 event loop，訊號投遞不到 —— 直接跑並自己收尾，
-            # 走的是**同一支** `run_batch_steps`（不是第二套邏輯）。
-            try:
-                bctx = OutputWorker.run_sync(recipe, self.dataset, list(results))
-            except Exception as e:  # UI 邊界
-                self._on_outputs_failed("%s: %s" % (type(e).__name__, e))
-                return False
-            self._on_outputs_done(bctx)
-            return True
-        if not self.output_worker.start(recipe, self.dataset, list(results)):
-            self._status("Still writing the last run's outputs — please wait.")
-            return False
-        return True
-
-    def _on_outputs_done(self, bctx: Any) -> None:
-        """寫完了：**三種東西是三句不同的話**（見 `BatchContext`）。"""
-        outputs = list(getattr(bctx, "outputs", None) or [])
-        warnings = list(getattr(bctx, "warnings", None) or [])
-        errors = dict(getattr(bctx, "errors", None) or {})
-
-        if not outputs and not errors and not warnings:
-            # 一張 Output 卡都沒有 —— 那不是錯，只是這份 recipe 沒有出口。
-            self._status("Run finished. This recipe has no Output card, so "
-                         "nothing was written — add one to save the results.")
-            return
-
-        bits = []
-        if outputs:
-            # **列出路徑**：使用者要去那裡找檔案。
-            bits.append("Wrote %s" % ", ".join(outputs))
-        # 路徑寫出來還不夠 —— 使用者得自己開檔案總管、自己把它貼進去（X5：
-        # 流程的終點沒有出口）。`QDesktopServices` 這個 repo 只用過一次，
-        # 那條路一直在，只是沒有接上這裡。**留在 bits 裡的路徑不動**：
-        # 這顆鈕是補充，開不起來的時候路徑照樣讀得到。
-        where = str(outputs[0]) if outputs else ""
-        for w in warnings:
-            bits.append(str(w))
-        if errors:
-            # 其他卡照樣寫出去了（鐵則 7 的跨顆版），但失敗的要指名。
-            first = sorted(errors.items())[0]
-            more = ("  (and %d more)" % (len(errors) - 1)) if len(errors) > 1 else ""
-            bits.append("Output card “%s” failed: %s%s" % (first[0], first[1], more))
-        msg = "  ·  ".join(bits)
-        level = "error" if errors else None
-        if where:
-            self._status_next_step(
-                msg, "Open the folder",
-                lambda: self._open_output_folder(where), level or "info",
-                "Show %s in the file browser" % where)
-        else:
-            self._status(msg, level)
-
-    def _open_output_folder(self, where: str) -> None:
-        """帶使用者去那個資料夾。開不起來就**說出來**，不要安靜地沒反應。
-
-        按了一顆鈕、什麼都沒發生，使用者第一個念頭是「這個工具有沒有壞」——
-        `undo()` 那句「Nothing to undo.」是同一條規矩。
-        """
-        if not open_folder(where):
-            self._status("Could not open %s — the path is in the message "
-                         "above, copy it into the file browser." % where,
-                         "error")
-
-    def _on_outputs_failed(self, msg: str) -> None:
-        self._status("Writing outputs failed: %s" % msg, "error")
-
-    def _confirm_irreversible_writes(self) -> bool:
-        """有**啟用**的 KLARF `inplace` 卡就先問一次（F16 Stage 5c）。
-
-        M5 那條「寫回前一定先預覽變更」是硬性關卡，而它不能因為 Export 精靈
-        消失就消失。承接方式是這裡加上 `output_klarf` 的儀表（選到那張卡就
-        看得到乾跑的計畫書）。
-
-        **判準是「會不會動到原檔」不是「是不是 KLARF」**：`annotate` 與 `topn`
-        寫的都是新檔，每次都要多按一下的話，那個確認很快就會變成閉著眼睛按掉
-        的東西 —— 而它要擋的正是 `inplace` 那一種。
-
-        ⚠ **只看啟用的節點**：停用的那張卡不會跑，跳確認就是騙人。
-        """
-        targets = []
-        for nid in self.model.node_order:
-            node = self.model.nodes.get(nid)
-            if node is None or not getattr(node, "enabled", True):
-                continue
-            if node.step != "output_klarf":
-                continue
-            if str(node.params.get("mode", "annotate")).strip() != "inplace":
-                continue
-            targets.append(str(node.params.get("path", "") or "(no path yet)"))
-        if not targets:
-            return True
-
-        plan_text = self._writeback_plan_text()
-        body = ("“In place” edits the KLARF file itself — this cannot be "
-                "undone.\n\nFile(s): %s" % "\n".join(targets))
-        if plan_text:
-            body = "%s\n\n%s" % (body, plan_text)
-        answer = QMessageBox.warning(
-            self, "Write into the original KLARF?", body,
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        return answer == QMessageBox.Yes
-
-    def _writeback_plan_text(self) -> str:
-        """乾跑一次寫回，回一句「會改幾列」。跑不出來就回空字串。
-
-        **乾跑不寫任何東西**（`plan_writeback`），所以在確認之前跑它是安全的。
-        """
-        try:
-            from d4t.core.export.klarf_out import plan_writeback
-
-            doc = getattr(self.dataset, "klarf", None)
-            rows = list(self.trial_results or [])
-            if doc is None or not rows:
-                return ""
-            plan = plan_writeback(doc, rows, "inplace")
-            return ("Based on the last run: %d of %d row(s) would change."
-                    % (int(getattr(plan, "n_rows_changed", 0)),
-                       int(getattr(plan, "n_rows_out", 0))))
-        except Exception:  # 這只是一句提示，不准擋路
-            return ""
-
-    def _on_trial_progress(self, done: int, total: int) -> None:
-        self._progress_set(int(done), int(total), "%v / %m defects")
-        self._status("Running: %d / %d" % (int(done), int(total)))
-
-    def _on_trial_done_async(self, results: Any) -> None:
-        self._apply_trial_results(list(results or []),
-                                  time.time() - (self._trial_t0 or time.time()))
-
-    def _enabled_output_cards(self) -> int:
-        """畫布上**啟用中**的 Output 卡有幾張（F86）。
-
-        只數啟用的：停用的那張不會跑，把它算進去等於承諾一件不會發生的事。
-        """
-        from ..core.pipeline import get_step
-        from ..core.pipeline.step import CATEGORY_BATCH
-
-        n = 0
-        for nid in self.model.node_order:
-            node = self.model.nodes.get(nid)
-            if node is None or not getattr(node, "enabled", True):
-                continue
-            try:
-                if get_step(node.step).category == CATEGORY_BATCH:
-                    n += 1
-            except Exception:  # 一句提示不准擋畫面
-                swallowed("studio._enabled_output_cards")
-                continue
-        return n
-
+    # 這一段只剩 `_apply_trial_results` —— 而它留在這裡是刻意的（F116 第 5 步）：
+    # 它叫的那一串 `_refresh_*` 跟「這批數字怎麼變成一句話」是**交織**的，而且
+    # 每一段前面都釘著一句「順序反過來就會畫出上一批的顏色」。把它搬去
+    # controller 再發 signal 回來，等於把那個順序拆成好幾段再拼回去。
     def _apply_trial_results(self, results: Sequence[Dict[str, Any]],
                              elapsed: float) -> None:
         results = list(results or [])
@@ -6789,8 +3897,8 @@ class StudioWindow(QMainWindow):
         # 決定過了，而這一行無條件用二元那條老路算一次，正好把它蓋掉。
         # 這是同一個 bug 的第二個入口 —— 第一個在 `_refresh_spread` 裡面。
         self._refresh_spread()
-        self._populate_gallery(results)
-        self._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）
+        self.gallery_ctl._populate_gallery(results)
+        self.gauges._refresh_inspector(self._last_result)   # 儀表吃的是整批（F7-17）
         self._update_action_states()
         ok = sum(1 for r in results if r.get("ok"))
         fail = len(results) - ok
@@ -6840,7 +3948,7 @@ class StudioWindow(QMainWindow):
             # 那顆最大的鈕之後什麼都沒有發生，而狀態列只說「Run finished」。
             #
             # 所以只在**真的有 Output 卡**的時候多講一句，並且指名那個動作。
-            n_out = self._enabled_output_cards()
+            n_out = self.run_ctl._enabled_output_cards()
             if n_out:
                 msg = ("%s  ·  Run only - nothing written yet. When the "
                        "numbers look right, press “Write outputs” in Results "
@@ -6848,7 +3956,7 @@ class StudioWindow(QMainWindow):
                        % (msg, n_out, "" if n_out == 1 else "s"))
         self._status(msg)
         if write and results:
-            self._write_outputs(results)
+            self.run_ctl._write_outputs(results)
         # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
         self.results.set_summary(
             summarize_run(len(results), ok, elapsed, self.trial_scores))
@@ -6857,7 +3965,7 @@ class StudioWindow(QMainWindow):
         # 那個門檻再餵一次。
         self._publish_run_snapshot(None)
         self.results.set_run_all_enabled(bool(results),
-                                         self._enabled_output_cards())
+                                         self.run_ctl._enabled_output_cards())
         # ⚠ **狀態列只講工具列沒講的那一半**（R4，2026-08-24）。
         # 這裡以前把整句 `msg` 原封不動再貼一次，而它的前半段
         #（「24 defects (24 ok, 0 failed) in 0.1 s」）跟 30px 上面那一行
@@ -6870,266 +3978,6 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # Gallery（M5）
     # ==================================================================== #
-    def _populate_gallery(self, results: Sequence[Dict[str, Any]]) -> None:
-        """試跑/全跑結果 → Gallery。縮圖一律先給 ``None``，之後背景補上。
-
-        排序欄位 = ``score`` + 這批結果實際出現過的特徵名（沒跑到的特徵不會
-        出現在下拉裡 —— 使用者只看得到「這一批真的有的東西」）。
-        """
-        results = list(results or [])
-        feats: List[str] = []
-        for r in results:
-            for k in (r.get("features") or {}):
-                if k not in feats:
-                    feats.append(str(k))
-        self.gallery.set_sort_keys(["score"] + sorted(feats))
-        # **每一顆判成了哪一類**（R5，2026-08-24）。縮圖底下第一行寫的是這個字
-        # —— 使用者在樹上親手取的名字，而不是 `bin 3`（那是 KLARF 的實作細節）。
-        # 名字從判定段那一份算出來（`verdict_rows`），所以整個 Results 視窗
-        # 講的是同一份東西，不是兩份各自數出來的。
-        names = self._class_names(results)
-        # 表格的分層與徽章（PR-1）：判定層、按卡分組、診斷欄、警示布林 ——
-        # 全部由 recipe 推導（`core/pipeline/verdict_features.py` 是唯一出處）。
-        # 顯示層：推不出來就退回平鋪，不准因此沒有表。
-        layout = alarms = None
-        try:
-            recipe = self.model.to_recipe()
-            kind = self.model.kind
-            layout = results_table.column_tree(
-                results,
-                verdict_features.features_in_verdict(recipe, kind),
-                verdict_features.bound_specs(recipe, kind),
-                verdict_features.diagnostic_columns(recipe, kind))
-            alarms = verdict_features.diagnostic_alarm_map(recipe, kind)
-        except Exception:  # 顯示層，見上
-            layout = alarms = None
-        # ⚠ 答案卷**一律傳**（沒有就是空 dict，不是 ``None``）：``None`` 的意思是
-        # 「這個宿主沒有標注這回事」，而 Studio 永遠有 —— 那一欄消失的話，
-        # 使用者標完之後畫面上不會有任何變化（X2）。
-        self.results.set_table(results, names, layout, alarms,
-                               dict(self.ground_truth or {}))  # 表格那一半（R7）
-        self.gallery.set_items([
-            {
-                "defect_id": str(r.get("defect_id", "")),
-                "ok": bool(r.get("ok", True)),
-                "score": r.get("score"),
-                "bin": r.get("bin"),
-                "cls": names.get(str(r.get("defect_id", "")), ""),
-                "features": dict(r.get("features") or {}),
-                "thumb": None,
-            }
-            for r in results
-        ])
-        # 新的一批 = 分數分佈變了：舊的分數篩選一定要清掉，不然使用者會看到
-        # 一個對不上新直方圖的區間（而且 chip 還掛在那裡）。
-        self.results.clear_filter()
-        self._score_filter = None
-
-    def _class_names(self, results: Sequence[Dict[str, Any]]) -> Dict[str, str]:
-        """``defect_id → 這一顆判成了哪一類的名字``（沒取名字的那一類是空的）。
-
-        ⚠ **不自己走一次樹**：判定段已經算好每一類是哪幾顆
-        （`verdict_rows` 的 ``ids``），這裡只是把它翻過來。兩邊各走一次的話，
-        縮圖上的名字跟判定段上的顆數會是兩份會漂的東西。
-        """
-        from .verdict_band import verdict_rows
-
-        out: Dict[str, str] = {}
-        for row in verdict_rows(getattr(self.model, "decide", None),
-                                list(results or []), self.ground_truth):
-            if row.get("kind") != "class":
-                continue
-            name = str(row.get("name") or "").strip()
-            for did in (row.get("ids") or ()):
-                out[str(did)] = name
-        return out
-
-    def show_gallery(self) -> None:
-        """把 Results 視窗叫出來（Gallery 與分數分佈都在那裡）。
-
-        **還沒跑過也叫得出來**（F48，2026-08-28）：工具列那顆「Results」與
-        `Ctrl+Shift+R` 走的是這一支，而它們不要求先跑一批。空的時候視窗自己
-        要講得出為什麼是空的 —— 那是 F44 的 empty_reason 巡檢同一條規矩：
-        **一塊空白要嘛有東西，要嘛有一句話說它在等什麼。**
-
-        工具列左邊的摘要本來就寫著 `No results yet.`，但那句話回答不了
-        「所以我現在該做什麼」，而狀態列是這個視窗唯一會講整句話的地方。
-        """
-        if not self.trial_results:
-            self.results.status(
-                "Nothing to show yet — press “Run trial” in the main window "
-                "and the score distribution, thumbnails and table fill in here.")
-        self.results.present()
-
-    def show_preview(self) -> None:
-        """回到主視窗的單顆預覽。"""
-        self.raise_()
-        self.activateWindow()
-
-    def results_visible(self) -> bool:
-        """Results 視窗現在開著嗎（測試用）。"""
-        return bool(self.results.isVisible())
-
-    # ---- 縮圖（永遠不在 GUI 執行緒解碼）------------------------------------
-    def _on_thumbs_requested(self, ids: Any) -> None:
-        self.request_thumbs(list(ids or []))
-
-    def request_thumbs(self, ids: Sequence[str], sync: bool = False) -> int:
-        """做這些 defect 的縮圖。``sync=True`` 直接算完（測試 / headless 用）。
-
-        回傳實際排進去（或同步做好）的張數；認不得的 id 靜靜略過。
-        """
-        jobs = [(str(i), self._items_by_id[str(i)])
-                for i in (ids or []) if str(i) in self._items_by_id]
-        if not jobs:
-            return 0
-        size = int(self.gallery.thumb_size())
-        if sync:
-            mapping = ThumbWorker.run_sync(jobs, size)
-            self._on_thumbs_ready(mapping)
-            return len(mapping)
-        self.thumb_worker.request(jobs, size)
-        return len(jobs)
-
-    def _on_thumbs_ready(self, mapping: Any) -> None:
-        """背景做好的縮圖回到 GUI 執行緒 —— 只有這裡碰 Gallery。"""
-        self.gallery.set_thumbs(dict(mapping or {}))
-
-    # ---- Gallery 的互動 ---------------------------------------------------
-    def _on_defect_selected(self, defect_id: str) -> None:
-        """Results 裡單擊（或方向鍵走到）某顆 → 主畫面跳過去，**不搶焦點**
-        （2026-09-09）。使用者正在 Results 視窗裡一顆一顆看，主視窗每次都跳到
-        前面的話，他每看一顆就要再點回去一次。已經在那一顆上就不動。"""
-        did = str(defect_id)
-        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
-        for i, it in enumerate(items):
-            if str(getattr(it, "defect_id", "")) == did:
-                if i != int(self.defect_index):
-                    self.set_defect_index(i)
-                return
-
-    def _on_defect_activated(self, defect_id: str) -> None:
-        """Gallery 雙擊某顆 → 切回單顆預覽並跳過去。"""
-        did = str(defect_id)
-        items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
-        index = None
-        for i, it in enumerate(items):
-            if str(getattr(it, "defect_id", "")) == did:
-                index = i
-                break
-        self.show_preview()
-        if index is None:
-            self._status("Defect “%s” is not in the current dataset." % did)
-            return
-        self.set_defect_index(index)
-        self._status("Jumped to defect “%s” (%d / %d)"
-                     % (did, index + 1, len(items)))
-
-    def _on_gallery_selection(self, ids: Any) -> None:
-        self._status("%d selected" % len(list(ids or [])))
-
-    # ---- 回溯面板（PR-3）：這一顆為什麼判成這樣 ---------------------------
-    def _on_trace_requested(self, defect_id: str) -> None:
-        """結果表點了 score / bin / class → 重放那一顆的判定並開面板。
-
-        trace 吃**那一列的 features**（引擎判定後的快照，let 值都在）——
-        不重跑影像、不重算任何值（`verdict_trace` 的立身規矩）。
-        """
-        did = str(defect_id)
-        row = next((r for r in (self.trial_results or [])
-                    if str(r.get("defect_id", "")) == did), None)
-        if row is None:
-            return
-        if not row.get("ok"):
-            self._status("Defect “%s” failed before the decision — the error "
-                         "column says why." % did, "error")
-            return
-        feats = dict(row.get("features") or {})
-        # score-only 的 recipe：bin 只在列上（引擎不寫進 features）——
-        # 補給 trace 顯示；decide 模式的 leaf_bin 是重放樹算的，不看這一格。
-        if row.get("bin") is not None:
-            feats.setdefault("bin", float(row["bin"]))
-        try:
-            trace = verdict_trace(self.model.to_recipe(), self.model.kind,
-                                  feats)
-        except Exception as e:  # 顯示層
-            self._status("Could not replay the decision: %s" % e, "error")
-            return
-        if trace.mode == "none":
-            self._status("This recipe has no score and no decision — "
-                         "there is nothing to replay.")
-            return
-        self.results.show_why(did, trace)
-
-    def _on_why_item(self, defect_id: str, name: str) -> None:
-        """面板上點了一項 → 跳到產出那個數字的卡。
-
-        身分查 `bound_specs`（跟結果表的分組同一份）：有區域的項把那一塊
-        **亮**在影像上（`highlight_region`），引擎的項（let / score）對映
-        Score / Bin 偽卡＝打開判定區。
-        """
-        try:
-            bound = {b.spec.name: b for b in verdict_features.bound_specs(
-                self.model.to_recipe(), self.model.kind)}
-        except Exception:  # 顯示層
-            swallowed("studio._on_why_item")
-            return
-        b = bound.get(str(name))
-        if b is None:
-            return
-        if not b.node_id:
-            # 引擎的名字（let、score、decide_unanswered）：去編判定區 ——
-            # 跟畫布上點 ADC 那一格走同一條。
-            self._on_tree_step_clicked("")
-            return
-        if b.spec.region:
-            self.highlight_region(defect_id, b.node_id, b.spec.region)
-        else:
-            self.select_node(b.node_id)
-
-    def highlight_region(self, defect_id: str, node_id: str,
-                         region: str) -> bool:
-        """跳到那一顆、選產出的卡，並把**那一塊區域**亮在影像上。
-
-        亮法住在 `ImageView.set_overlay_emphasis`：命中的框全強度、其餘降
-        alpha —— 顏色仍然說「哪一塊」、粗細仍然說「缺陷格」，**不 overload
-        focus**。`set_overlay` 會清掉強調，所以先刷新預覽再點亮。
-        """
-        did = str(defect_id)
-        items = list(getattr(self.dataset, "items", []) or []) \
-            if self.dataset else []
-        index = next((i for i, it in enumerate(items)
-                      if str(getattr(it, "defect_id", "")) == did), None)
-        if index is not None:
-            self.set_defect_index(index)
-        if not self.select_node(str(node_id)):
-            return False
-        self.refresh_preview(sync=True)
-        for view in (self.image_view, self.image_view_b):
-            view.set_overlay_emphasis([str(region)])
-        return True
-
-    # ---- 直方圖點長條 → Gallery 篩選 --------------------------------------
-    def _on_bar_clicked(self, lo: float, hi: float) -> None:
-        """點一根長條：只看那個分數區間；再點同一根就取消。
-
-        「同一根」的判斷要連 Gallery 目前**真的還在篩**一起看 —— 使用者可能
-        已經按掉 Gallery 上的條件 chip 了，那時候再點同一根當然是重新篩選。
-        """
-        rng = (float(lo), float(hi))
-        if self._score_filter == rng and self.gallery.filter_text():
-            self.results.clear_filter()
-            self._score_filter = None
-            self._status("Score filter cleared (showing all %d)"
-                         % self.gallery.displayed_count())
-            return
-        self.results.set_filter({"mode": "score_range",
-                                 "lo": rng[0], "hi": rng[1]})
-        self._score_filter = rng
-        self.show_gallery()
-        self._status("Filtered to score %.3g–%.3g (%d defects)"
-                     % (rng[0], rng[1], self.gallery.displayed_count()))
-
     # ==================================================================== #
     # 首次開啟導覽 + 範例 recipe 庫（M6）
     # ==================================================================== #
@@ -7137,7 +3985,8 @@ class StudioWindow(QMainWindow):
         """「Windows」下拉列的那幾個頂層視窗（U15 那張表上准開的）。"""
         return [("Results", getattr(self, "results", None)),
                 ("Region check", getattr(self, "region_window", None)),
-                ("Uniformity charts", getattr(self, "_charts_window", None))]
+                ("Uniformity charts",
+                 getattr(self.gauges, "_charts_window", None))]
 
     def show_welcome(self, force: bool = False) -> Optional[Any]:
         """開（或重開）首次導覽。
@@ -7236,116 +4085,7 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 對話框（測試不走這條路）
     # ==================================================================== #
-    # ---- 第二份 lot（F15）--------------------------------------------------
-    def _on_open_pair_source(self, node_id: str) -> None:
-        """`pair_source` 卡上的 `Open data…`：載一份**第二個** lot 掛上去。
-
-        **不取代目前的資料集**：main 決定批次跑幾顆、route 用哪一條、KLARF 寫回
-        誰。這一份只提供「另一張圖與它的座標」。
-        """
-        if self.dataset is None:
-            self._status("Load the main lot first — this card pairs every "
-                         "defect of the open lot with one from a second lot.")
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open the second lot's KLARF", "",
-            "KLARF (*.001 *.klarf *.txt);;All files (*)")
-        if path:
-            self.attach_pair_source(node_id, path)
-
-    def attach_pair_source(self, node_id: str, klarf_path: str,
-                           sync: bool = False) -> str:
-        """載入第二份 lot 並掛到 main 上（回狀態列那句話）。
-
-        **預設走背景執行緒**（F15-2）。第一版是同步的，於是開一份 raw data
-        （幾十萬顆）的時候整個 Studio 沒有反應好一陣子 —— main 那一份早就在
-        背景載了（`dataset_worker`），第二份沒有跟上。``sync=True`` 留給測試
-        與 headless。
-
-        代號從卡片的 `source` 參數來；還沒取名就用檔名推一個 —— 使用者要打的字
-        程式已經知道了（同 F11 的「量到的 pitch 自動填回參數」）。
-        """
-        node = self.model.nodes.get(str(node_id))
-        if node is None or self.dataset is None:
-            return ""
-        if sync:
-            try:
-                ds = DatasetLoadWorker.run_sync(str(klarf_path), None)
-            except Exception as e:  # UI 邊界，一律回報
-                return self._on_pair_source_failed("%s: %s" % (type(e).__name__, e))
-            self._pending_pair = (str(node_id), str(klarf_path))
-            return self._on_pair_source_loaded(ds)
-
-        if self.pair_worker.is_running():
-            msg = "A second lot is already loading — please wait."
-            self._status(msg)
-            return msg
-        self._pending_pair = (str(node_id), str(klarf_path))
-        self.pair_worker.start(str(klarf_path), None)
-        name = os.path.basename(str(klarf_path))
-        self._progress_busy("Loading %s…" % name)
-        msg = "Loading second lot: %s" % name
-        self._status(msg)
-        return msg
-
-    def _on_pair_source_failed(self, msg: str) -> str:
-        self._pending_pair = None
-        self._progress_done()
-        text = "Could not load that lot: %s" % msg
-        self._status(text, "error")
-        return text
-
-    def _on_pair_source_loaded(self, ds: Any) -> str:
-        """第二份載完了 → 掛到 main 上（背景與同步兩條路都走這裡）。"""
-        from d4t.core.ingest import pair_source as pair_ingest
-
-        pending, self._pending_pair = self._pending_pair, None
-        self._progress_done()
-        if pending is None:
-            return ""                       # 關窗／換卡之後才送達的通知
-        node_id, klarf_path = pending
-        node = self.model.nodes.get(str(node_id))
-        if node is None or self.dataset is None:
-            return ""
-
-        sid = str(node.params.get("source", "") or "").strip()
-        if not sid:
-            sid = _source_id_from(klarf_path)
-            self.model.set_param(str(node_id), "source", sid)
-        # **只複製要用的那幾欄**：raw data 是幾十萬顆，×24 欄字串是幾百 MB，
-        # 而那幾欄還要 pickle 進 worker。`carry` 之後改了會重填（見
-        # `_sync_pair_fields`），所以少複製不會變成「這一欄不見了」。
-        cols = self._pair_columns_wanted(sid)
-        try:
-            rep = pair_ingest.attach(self.dataset, ds, sid, columns=cols)
-        except pair_ingest.PairSourceError as e:
-            self._status(str(e), "error")
-            return str(e)
-        self._pair_filled[sid] = tuple(cols)
-        self._say_missing_columns(sid, cols)
-        # 卡片旁邊那句話要講得出檔名 —— 它是使用者認得的東西。
-        ds._d4t_name = os.path.basename(str(klarf_path))
-        self._sync_source_action(node)
-        # 三格的選單（代號／哪張圖／哪些欄）現在才有答案（F15-2）。
-        if self.selected_node == str(node_id):
-            self.param_form.set_dynamic_choices(self._dynamic_choices_for(node))
-        self._refresh_all()
-        # **掛上第二份 = 這條 pipeline 的產出變了**，所以預覽要重跑一次
-        # （2026-08-20）。以前不重跑，於是使用者按完 `Open data…` 什麼事都沒
-        # 發生：影像流的下拉裡沒有 `paired`，要再去點一張卡才會出現 ——
-        # 而「按了鈕、畫面沒反應」讀起來就是「載不進來」。
-        self._schedule_preview()
-        msg = "Paired source · %s" % rep.summary()
-        self._status(msg)
-        return msg
-
     # ---- 三格「用選的」要的答案（F15-2）------------------------------------
-    def _pair_columns_wanted(self, source_id: str) -> List[str]:
-        """指著這個代號的每一張配對卡，`carry` 的聯集（`carry` 的意思住在卡片）。"""
-        from d4t.core.steps.pair_source import columns_for_source
-
-        return columns_for_source(self.model.nodes.values(), source_id)
-
     def _number_info(self):
         """設定區「插入數字 ▾」的 tooltip 與區域顏色（`ParamForm.number_info_provider`）。"""
         from .number_picker import number_tips
@@ -7411,177 +4151,7 @@ class StudioWindow(QMainWindow):
         return pair_ingest.sources_for_run(self.dataset)
 
 
-    def _after_carry_param(self, node_id: str, name: str) -> None:
-        """Load 卡改了 `carry` 之後要重填（F16）。
 
-        跟 `_after_pair_param` 是同一件事的另一半：那一支管掛上來的第二份，
-        這一支管主資料集。分開兩支是因為它們問的是**兩份不同的 KLARF**。
-        """
-        node = self.model.nodes.get(str(node_id))
-        if node is None or node.step not in ("load_patch", "load_single"):
-            return
-        if name != "carry":
-            return
-        self._carry_main_columns()
-
-    def _carry_main_columns(self) -> None:
-        """把 Load 卡點名的 KLARF 欄位填進主資料集的每一顆。
-
-        **答案只有一份**：`steps.load.columns_for_main`（`carry` 的意思住在
-        卡片）。CLI 走的是同一支 —— 兩個入口，不是兩份規則。
-
-        沒有人勾 → 一欄都不填，所以既有的 recipe 一個位元組都沒多帶。
-        要一個這份 KLARF 沒有的欄 → **在勾的當下就講**（同 F15-2：等跑起來
-        才講的話，那句話會一顆一顆出現，而且列的是「你要的」不是「它有的」）。
-        """
-        from d4t.core.ingest.dataset import (
-            columns_of, fill_fields, missing_columns_of,
-        )
-        from d4t.core.steps.load import columns_for_main
-
-        if self.dataset is None:
-            return
-        want = columns_for_main(self.model.nodes.values())
-        if getattr(self, "_carry_filled", None) == tuple(want):
-            return                          # 沒變 —— 不用走一遍幾十萬顆
-        absent = missing_columns_of(self.dataset, want)
-        fill_fields(self.dataset, want)
-        self._carry_filled = tuple(want)
-        if absent:
-            self._status(
-                "This lot has no KLARF column called %s. It has: %s."
-                % (", ".join(absent), ", ".join(columns_of(self.dataset))),
-                "error")
-
-    def _sync_pair_fields(self, source_id: str) -> None:
-        """`carry` 改了 → 把那幾欄補進掛著的那一份（F15-2）。
-
-        掛的時候只複製「當時要的那幾欄」，所以之後才勾起來的那一欄不在
-        `fields` 裡 —— 而卡片會照它的規矩說「這一份沒有這個欄位」，
-        那句話是錯的（欄位在，只是沒複製）。KlarfDoc 還在手上，重填很便宜。
-        """
-        from d4t.core.ingest import pair_source as pair_ingest
-
-        sid = str(source_id or "").strip()
-        if not sid or self.dataset is None:
-            return
-        if sid not in (getattr(self.dataset, "sources", None) or {}):
-            return
-        cols = self._pair_columns_wanted(sid)
-        if self._pair_filled.get(sid) == tuple(cols):
-            return                          # 要的欄位沒變 —— 不用走一遍幾十萬顆
-        pair_ingest.refill_fields(self.dataset, sid, cols)
-        self._pair_filled[sid] = tuple(cols)
-        self._say_missing_columns(sid, cols)
-
-    def _say_missing_columns(self, source_id: str, columns: Sequence[str]) -> None:
-        """要 carry 一個那一份沒有的欄位 → **在勾的當下**就講（F15-2）。
-
-        以前這句話要等跑起來才出現，一顆一顆講，而且列出來的是「帶過來的那幾
-        欄」不是「那一份有的那幾欄」—— 打錯字的人最需要的正是後者。
-        這裡手上還有 KlarfDoc，所以答得出來。
-        """
-        from d4t.core.ingest import pair_source as pair_ingest
-
-        src = (getattr(self.dataset, "sources", None) or {}).get(str(source_id))
-        if src is None:
-            return
-        missing = pair_ingest.missing_columns(src, columns)
-        if not missing:
-            return
-        self._status(
-            "'%s' has no KLARF column %s — its columns are: %s"
-            % (source_id, ", ".join(missing),
-               ", ".join(pair_ingest.columns_of(src))), "error")
-
-    def _on_open_gds(self) -> None:
-        path = QFileDialog.getExistingDirectory(
-            self, "Attach GLAS export (the folder with the *_label.png files)")
-        if path:
-            self.attach_gds_export(path)
-
-    def attach_gds_export(self, export_dir: str) -> str:
-        """把一份 GLAS 匯出掛到目前的資料集上（F11 Region-3）。回傳狀態列那句話。
-
-        **配對在 ingest 層**（`core/ingest/glas_export.attach`），這裡只負責問
-        路徑、把結果講出來、以及把 layer 的名字**填進卡片** —— 那個對照表在
-        匯出的 manifest 裡，讓使用者自己去抄一次是在製造一個可以抄錯的機會
-        （同 F11 Input 的「量到的 pitch 自動填回參數」）。
-        """
-        from d4t.core.ingest import glas_export
-
-        if not self.dataset:
-            msg = ("Load the lot first — “Open GDS export…” attaches labels to "
-                   "the defects that are already open.")
-            self._status(msg)
-            return msg
-        try:
-            rep = glas_export.attach(self.dataset, export_dir)
-            doc = glas_export.read_manifest(export_dir)
-        except glas_export.GlasExportError as e:
-            self._status(str(e))
-            return str(e)
-
-        # 名字填進**每一張** roi_reference 卡（還沒設定過的才填 —— 使用者改過的
-        # 名字不能被一次「重新掛載」洗掉）。
-        default = glas_export.default_layer_map(doc)
-        filled = 0
-        if default:
-            for nid, node in self.model.nodes.items():
-                if node.step == "roi_reference" and not str(
-                        node.params.get("layers", "") or "").strip():
-                    self.model.set_param(nid, "layers", default)
-                    filled += 1
-        # 表單的列數要照**這份匯出有幾層**排（`ChannelMapField` 的 labels 版）。
-        self._gds_layers = list(rep.layers)
-        self.param_form.set_label_count(len(rep.layers))
-        msg = rep.summary()
-        if filled:
-            msg += " · filled the layer names into %d card(s)" % filled
-        for w in rep.warnings:
-            msg += " · △ %s" % w
-        self._status(msg)
-        self.refresh_preview()
-        return msg
-
-
-    def _on_open_recipe(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open Recipe", "", "Recipe JSON (*.json);;All files (*)")
-        if not path:
-            return
-        self.load_recipe_path(path)
-
-    #: 「另存」對話框的副檔名 —— 這一個常數是為了**下面那句 endswith**
-    #: 而存在的，不是為了整齊：Windows 的另存對話框在使用者自己打了一個
-    #: 沒有副檔名的名字時**不會**幫他補（`docs/NO-GIT-SETUP.md` 記過記事本
-    #: 那個反例），而一份叫 `char` 的檔案下次打開時在「Recipe JSON」這個
-    #: 篩選底下**看不見**。
-    RECIPE_SUFFIX = ".json"
-
-    def _on_save_recipe(self) -> bool:
-        """`Ctrl+S` 與工具列那顆鈕：**存回原檔**，沒有原檔才問路徑。
-
-        回傳「真的存下去了嗎」—— 關窗前的確認要靠這個答案（F7-16）：
-        使用者在另存對話框按取消，意思是「先別關」，不是「丟掉」。
-        """
-        if self.recipe_path:
-            return bool(self.save_recipe_path(self.recipe_path))
-        return self._on_save_recipe_as()
-
-    def _on_save_recipe_as(self) -> bool:
-        """`Ctrl+Shift+S`：**一定問路徑**。"""
-        start = self.recipe_path or ("%s%s" % (
-            str(getattr(self.model, "recipe_id", "") or "recipe").strip()
-            or "recipe", self.RECIPE_SUFFIX))
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Recipe", start,
-            "Recipe JSON (*%s);;All files (*)" % self.RECIPE_SUFFIX)
-        if not path:
-            return False
-        if not str(path).lower().endswith(self.RECIPE_SUFFIX):
-            path = "%s%s" % (path, self.RECIPE_SUFFIX)
-        return bool(self.save_recipe_path(path))
 
     # ==================================================================== #
     # 關窗
@@ -7637,12 +4207,12 @@ class StudioWindow(QMainWindow):
             return False
         if answer == "discard":
             return True
-        return bool(self._on_save_recipe())
+        return bool(open_dialogs.save_recipe(self))
 
     def showEvent(self, event) -> None:  # Qt hook
         super().showEvent(event)
         # 中欄的畫布/設定比例第一次 show 才套 —— setSizes 要有實際高度才
-        # 算得出來（見 _build_body 的說明）。只做一次：之後的比例是使用者
+        # 算得出來（見 `studio_layout.build_body` 的說明）。只做一次：之後的比例是使用者
         # 自己拖的，重新 show（從最小化回來）不可以把它蓋掉。
         if not self._layout_ratio_applied:
             self._layout_ratio_applied = True
@@ -7656,6 +4226,97 @@ class StudioWindow(QMainWindow):
             # 「只在設定區攤開時才還原」的判斷，而那個判斷現在住在
             # `set_layout_mode` 裡（Build 模式不吃存下來的比例，它就是滿版）。
             self.set_layout_mode(self.layout_mode(), remember=False)
+
+    # ==================================================================== #
+    # 門面（F116）
+    # ==================================================================== #
+    # 搬進 controller 的方法裡，**測試與其他模組用得多**的那幾個在這裡留一行
+    # 轉呼叫（F116 §3-3）。用得少的沒有門面 —— 門面也算方法數，而那一格天花板
+    # 只准往下。
+
+    def inspector(self) -> Optional[Any]:
+        """目前掛著的卡片儀表（沒有就 None）。"""
+        return self.gauges.inspector()
+
+    def bottom_page(self) -> int:
+        return self.gauges.bottom_page()
+
+    def open_region_check(self, n: Optional[int] = None,
+                          sync: bool = False) -> bool:
+        """把選取節點定義的區域畫到前 N 顆上（內容在 `ui/region_check.py`）。"""
+        return region_check.open_region_check(self, n, sync)
+
+    @property
+    def profile_panel(self) -> Any:
+        """投影曲線面板（沒有的話是一個空的替身 —— 見 `GaugePanel`）。"""
+        return self.gauges.profile_panel
+
+    def profile_panel_visible(self) -> bool:
+        return self.gauges.profile_panel_visible()
+
+    def set_compare(self, on: bool) -> bool:
+        """開／關並排的第二張圖（內容在 `ui/preview_overlays.py`）。"""
+        return self.overlays.set_compare(on)
+
+    def _on_edge_added(self, src: str, dst: str, stream: str = "",
+                       dst_in: str = "") -> None:
+        """拉一條線（規則在 `ui/canvas_edges.py` —— 鐵則 10 的主場）。"""
+        canvas_edges.on_edge_added(self, src, dst, stream, dst_in)
+
+    def _connect(self, src: str, dst: str, stream: str,
+                 dst_in: str = "") -> None:
+        canvas_edges.connect(self, src, dst, stream, dst_in)
+
+    def _on_edge_removed(self, src: str, dst: str, stream: str = "",
+                         dst_in: str = "") -> None:
+        canvas_edges.on_edge_removed(self, src, dst, stream, dst_in)
+
+    def run_trial(self, n: int, workers: Optional[int] = 1,
+                  sync: bool = False, cache_dir: Optional[Any] = None,
+                  write_outputs: bool = False) -> bool:
+        """跑前 N 顆（內容在 `ui/run_controller.py`）。**不寫任何檔案。**"""
+        return self.run_ctl.run_trial(n, workers, sync, cache_dir, write_outputs)
+
+    def run_all(self, sync: bool = False) -> bool:
+        """跑整批。**一樣不寫** —— 寫是 `write_outputs()`（鐵則 11）。"""
+        return self.run_ctl.run_all(sync)
+
+    def write_outputs(self, sync: bool = False) -> bool:
+        """把現在這批結果照 Output 卡寫出去（鐵則 11 的「另一個動作」）。"""
+        return self.run_ctl.write_outputs(sync)
+
+    def rerun(self, sync: bool = False) -> bool:
+        """Results 上的「Re-run」—— 只重判或整批重跑（`batch.rerun_decision`）。"""
+        return self.run_ctl.rerun(sync)
+
+    def show_gallery(self) -> None:
+        """開 Results 視窗（工具列那顆鈕與 Ctrl+Shift+R 接的就是這一行）。"""
+        self.gallery_ctl.show_gallery()
+
+    def results_visible(self) -> bool:
+        return self.gallery_ctl.results_visible()
+
+    def compare_enabled(self) -> bool:
+        """並排比對開著嗎。
+
+        ⚠ 這一支**不只是給測試用的門面**：`GaugePanel` 要知道畫面上現在看的是
+        一條流還是兩條（底下的直方圖跟著畫幾張），而 controller 之間不直接互叫
+        （F116 §3-2）—— 它走的就是這一行。
+        """
+        return self.overlays.compare_enabled()
+
+    def region_overlay_names(self) -> List[str]:
+        return self.overlays.region_overlay_names()
+
+    def heat_tiles(self, stream: Optional[str] = None):
+        return self.overlays.heat_tiles(stream)
+
+    def _focus_box_index(self, boxes: Sequence[Sequence[float]]) -> int:
+        return self.overlays._focus_box_index(boxes)
+
+    def _on_calibrated(self, result: Any) -> None:
+        """一鍵校正量完了（`calibrate_worker.ready` 接的就是這一行）。"""
+        self.gauges._on_calibrated(result)
 
     def closeEvent(self, event) -> None:  # Qt hook
         if not self.confirm_close():
@@ -7677,8 +4338,8 @@ class StudioWindow(QMainWindow):
             except Exception:  # 關窗不准擋路
                 swallowed("studio.closeEvent")
         for worker in (self.preview_worker, self.trial_worker,
-                       self.dataset_worker, self.pair_worker,
-                       self.thumb_worker, self.output_worker):
+                       self.dataset_worker, self.attach_ctl.pair_worker,
+                       self.gallery_ctl.thumb_worker, self.output_worker):
             try:
                 worker.stop()
             except Exception:  # 關窗不准擋路

@@ -206,7 +206,7 @@ def test_no_window_hard_codes_a_size_any_more():
 def test_the_toolbar_still_fits_the_machine_beside_the_tool(qapp, fake_screen):
     """**主視窗的預設寬度是工具列決定的，而螢幕決定得了它**（U1 ＋ X4）。
 
-    `_build_toolbar` 那一段記著一次踩過的：加「Results」那顆鈕之後，Qt 把放不下
+    `studio_layout.build_toolbar` 那一段記著一次踩過的：加「Results」那顆鈕之後，Qt 把放不下
     的最後一顆收進右邊那個 » 溢位選單 —— 而使用者要的正是「按一顆鈕就叫得出
     Results」，一顆藏在兩層選單底下的鈕不算數。
 

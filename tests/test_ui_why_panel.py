@@ -136,13 +136,13 @@ def test_a_failed_row_does_not_open_the_panel(window):
 # --------------------------------------------------------------------------- #
 def test_clicking_an_item_selects_the_producing_card(window):
     did = window.trial_results[0]["defect_id"]
-    window._on_why_item(did, "glv_max")
+    window.gallery_ctl._on_why_item(did, "glv_max")
     assert window.selected_node == window._glv_node
 
 
 def test_a_region_item_lights_that_region_on_the_image(window):
     did = window.trial_results[0]["defect_id"]
-    window._on_why_item(did, "epi_present")
+    window.gallery_ctl._on_why_item(did, "epi_present")
     assert window.selected_node == window._roi_node
     assert window.image_view.overlay_emphasis() == ["epi"]
     assert "epi" in window.region_overlay_names(), \
@@ -160,7 +160,7 @@ def test_the_emphasis_is_cleared_when_the_overlay_changes(window):
 
 def test_an_engine_item_opens_the_decision_editor(window):
     did = window.trial_results[0]["defect_id"]
-    window._on_why_item(did, "bright")
+    window.gallery_ctl._on_why_item(did, "bright")
     assert window.stack.currentWidget() is window.tree_pane
 
 
