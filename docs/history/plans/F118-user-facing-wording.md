@@ -10,7 +10,7 @@
 下一條新 lint 又會長出一個 `step 'dn'` 來，而**沒有人會發現**。
 
 > F117 走查把這件事記成四條（J1 P1、I11、J5、J6）。它們是**同一個病根**，
-> 所以收成一輪：[`F117-ui-review.md`](F117-ui-review.md)。
+> 所以收成一輪：[`F117-ui-review.md`](../../plans/F117-ui-review.md)。
 
 ---
 

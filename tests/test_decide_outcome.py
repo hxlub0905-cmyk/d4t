@@ -36,15 +36,50 @@ def test_an_unmarked_recipe_writes_exactly_what_it_used_to():
     """⚠ **這一條就是「不必遷移」那句話的證據**（F119 §3.3）。
 
     `outcome` 是新加的、預設 ``""``，而 ``""`` 對舊檔案與新 recipe 的意思完全
-    相同（都是「還沒說」）。所以它**有才寫** —— 沒標的 recipe 存出來跟以前
-    逐位元組相同，`RECIPE_VERSION` 也不必動。
+    相同（都是「還沒說」）。所以它**有才寫** —— 一份沒標的 recipe（＝每一份
+    F119 之前的檔案）存出來跟以前逐位元組相同，`RECIPE_VERSION` 也不必動。
     """
     assert RECIPE_VERSION == 5, "F119 不該動版本號（它沒有遷移）"
+    r = Recipe(recipe_id="t", routes={"ebi_patch": []}, nodes={}, edges=[],
+               score=ScoreSpec(expr="", threshold=0.0, bins={}),
+               decide=DecideSpec(tree=_tree(),
+                                 rules=[Rule(when="a", bin=3, label="n")]))
+    out = json.dumps(r.to_json_dict())
+    assert "outcome" not in out, out
+    assert Recipe.from_json_dict(r.to_json_dict()).to_json_dict()         == r.to_json_dict()
+
+
+def test_every_shipped_recipe_says_which_of_its_bins_is_good_news():
+    """**出貨的 recipe 一片葉子都不准沒標**（F119 第 3 步）。
+
+    這一條會在有人加第四份 recipe 而忘了標的那天紅 —— 而忘了標的下場不是
+    崩潰，是**膠囊變成灰的**，那種退步沒有人會在測試以外發現。
+
+    ⚠ 順便釘住那份對照表本身：``nothing stands out`` 是**好消息**。走查
+    （F117 D2）之前它是紅的 —— 三份全反，而沒有人發現，因為「找到缺陷 = 綠」
+    看起來像在慶祝。
+    """
+    expected = {
+        "nothing to measure": "neutral",
+        "nothing stands out": "good",
+        "measured": "good",
+        "a spot stands out": "bad",
+        "one box stands out": "bad",
+        "more than one box is off": "bad",
+    }
+    seen = set()
     for path in sorted((REPO / "recipes").glob("*.json")):
         raw = json.loads(path.read_text(encoding="utf-8"))
-        again = Recipe.from_json_dict(raw).to_json_dict()
-        assert again == raw, "%s 存出來跟讀進去不一樣" % path.name
-        assert "outcome" not in json.dumps(again), path.name
+        decide = Recipe.from_json_dict(raw).decide
+        assert decide is not None, "%s 沒有判定段" % path.name
+        labels, outcomes = decide.bin_labels(), decide.bin_outcomes()
+        assert labels, path.name
+        for b, name in labels.items():
+            assert outcomes.get(b),                 "%s 的 bin %d（%s）沒說是好消息還是壞消息" % (path.name, b, name)
+            assert outcomes[b] == expected[name], (path.name, name)
+            seen.add(name)
+    assert seen == set(expected), "對照表跟出貨的 recipe 對不上：%s" % (
+        set(expected) ^ seen)
 
 
 def test_a_marked_recipe_survives_a_round_trip():

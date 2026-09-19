@@ -145,17 +145,20 @@
       "when": "peak < 0",
       "yes": {
         "bin": 9,
-        "label": "nothing to measure"
+        "label": "nothing to measure",
+        "outcome": "neutral"
       },
       "no": {
         "when": "peak < quiet",
         "yes": {
           "bin": 0,
-          "label": "nothing stands out"
+          "label": "nothing stands out",
+          "outcome": "good"
         },
         "no": {
           "bin": 1,
-          "label": "a spot stands out"
+          "label": "a spot stands out",
+          "outcome": "bad"
         }
       }
     },

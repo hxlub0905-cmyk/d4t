@@ -173,23 +173,27 @@
       "when": "worst < 0",
       "yes": {
         "bin": 9,
-        "label": "nothing to measure"
+        "label": "nothing to measure",
+        "outcome": "neutral"
       },
       "no": {
         "when": "worst < quiet",
         "yes": {
           "bin": 0,
-          "label": "nothing stands out"
+          "label": "nothing stands out",
+          "outcome": "good"
         },
         "no": {
           "when": "boxes_off >= 2",
           "yes": {
             "bin": 2,
-            "label": "more than one box is off"
+            "label": "more than one box is off",
+            "outcome": "bad"
           },
           "no": {
             "bin": 1,
-            "label": "one box stands out"
+            "label": "one box stands out",
+            "outcome": "bad"
           }
         }
       }
