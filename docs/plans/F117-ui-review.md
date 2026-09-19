@@ -54,10 +54,10 @@
 
 | # | 問題 | 建議 | 查證 |
 |---|---|---|---|
-| A5 | 判定區卡片寫 `tree hidden — double-click to show`，判定面板卻寫「click a diamond on the canvas」—— 樹收著時看不到菱形 | 面板那句在樹收起時改成「雙擊判定區展開」 | ✅ `tree_scene.py:328` |
+| A5 ✅ | **做完** —— 面板拿得到畫布的收合狀態（`set_tree_collapsed`），樹收著時改講「double-click the Decision card on the canvas to show the tree, then click a diamond」。原本記的：判定區卡片寫 `tree hidden — double-click to show`，判定面板卻寫「click a diamond on the canvas」—— 樹收著時看不到菱形| 面板那句在樹收起時改成「雙擊判定區展開」 | ✅ `tree_scene.py:328` |
 | A6 | 深色模式：深色卡片配深色底、連線細灰，對比比淺色低 | 畫布納入 `test_ui_contrast` | ✅ 截圖（主觀程度中） |
 | B1 | GLV 最上面「What to measure」三顆在沒接 Region 時都灰掉，第一眼是一排不能按的東西；停用與未選的差別不大 | 未啟用時收成一行提示；停用的樣式再明顯一點 | ✅ 截圖 |
-| B2 | 均勻度 GLV 的「How even are the boxes」直接用 feature 名當選項（`range`、`range_pct`、`cv_pct`、`slope_x`） | 顯示白話 label，key 不變 | ✅ 截圖 |
+| B2 ✅ | **做完** —— `multi_choice` 也收 `choice_labels`，格子上寫 `Gap (gray levels)` / `Spread (%)` / `Tilt across`，**值還是鍵**（跟著 box 的屬性走，不跟著 `box.text()` 走 —— 讀字的那一版會把白話名字存進 recipe）。原本記的：均勻度 GLV 的「How even are the boxes」直接用 feature 名當選項（`range`、`range_pct`、`cv_pct`、`slope_x`）| 顯示白話 label，key 不變 | ✅ 截圖 |
 | B3 | 卡片說明一行截斷，沒有展開方式 | 兩行＋more | ✅ |
 | B4 | `Write charts` 卡：`At most this many defects 0`（0＝無上限？）、第五格勾選框叫 `chart`、`Enabled` 當 label | 0 顯示 `All`；`Your own chart`；具體動詞 | ✅ |
 | C2 | Features 同名多列：`clip_frac` 三列、`peak` 兩列。說明文字有寫「kept under this name because a later card wrote over it」，但要讀完那句才懂 | 名字後面直接帶來源卡（`clip_frac · Normalize(ref)`） | ✅（屬既有設計的呈現問題）|
@@ -77,7 +77,7 @@
 | F8 | 熱圖刻度 `27.50`；Box plot 標題靠左、其他置中；Position profile 虛線／點線無圖例；摘要表 `range` 為 `-` | 刻度取整；對齊統一；補圖例 | ✅ |
 | G2 | 歡迎頁畫三段（引擎軸），卡片庫是七段（使用者軸）。README 說兩軸刻意並存 | 歡迎頁加一句說明兩者關係即可 | ✅（既有設計，只是第一次見面沒講）|
 | G5 | Simgen 區塊順序 1、2 左，3 右，4 左；週期欄顯示 `4.00`（是 setRange 的下限，不是預設值） | 閱讀順序調整；沒有 Golden Cell 時欄位空白 | ✅ |
-| G6 | Graph builder 沒資料時 preset 灰掉像普通字；`facet`（`chart_spec.ROLE_FACET`）沒有白話 label | 加說明；`Split into panels by` | ✅ |
+| G6 ✅ | **做完** —— `facet` → 「Split into panels by」；preset 一顆都按不動時多一句「Run a trial first…」（⚠ 停用的 widget 收不到 tooltip，所以那句話要寫在畫面上）。原本記的：Graph builder 沒資料時 preset 灰掉像普通字；`facet`（`chart_spec.ROLE_FACET`）沒有白話 label| 加說明；`Split into panels by` | ✅ |
 | G4b | Template 對話框主按鈕寫死 `Rebuild from image…`，第一次打開也是 | 沒有模板時叫 `Build from image…` | ✅ `template_dialog.py:246` |
 | H2 | 底部兩條狀態列；`Run only – nothing written yet…` 在 Results 又出現一次 | 合併 | ✅（主觀）|
 | H3 | 空白狀態三種資料說明太長，第三種被截 | 一句話＋更多 | ✅ |
@@ -88,7 +88,7 @@
 | I8 | 參數區段標題（`1 · Where to measure`）比欄位名小 | 調字級 | ✅ |
 | I11 ✅ | 刪卡後狀態列只寫 `Removed "dn"`，沒有復原提示 | `已移除 Denoise · 復原（Ctrl+Z）` | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 1 步）**
 | I12 | 對話框主按鈕樣式不一（範本庫 `Load` 藍、Chart settings `OK` 白） | 統一 | ✅ |
-| I13 | 符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`） | 統一 | ✅ |
+| I13 ✅ | **做完** —— `->` 全部改成 `→`（8 處；`→` 在 WGL4 裡，Segoe UI 蓋得到，而 repo 本來就有 25 處在用它）。`tests/test_ui_symbols.py` 擋回頭，配一條反向測試（把走查看到的那句話餵回去，確認判準會咬它）。原本記的：符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`）| 統一 | ✅ |
 | I15 | Results 表格橫向捲動時 defect 欄會跑掉（表頭本來就固定） | 凍結第一欄 | ✅ |
 | I16 | Results、Chart settings、範本庫不記得視窗大小位置（`d4t/ui` 內沒有 `saveGeometry`） | QSettings 記住並經過 `keep_on_screen` | ✅ |
 | J4 | 刪掉中間的卡，上下游斷開 | 型別對得上時提供一鍵補線 | 建議 |
