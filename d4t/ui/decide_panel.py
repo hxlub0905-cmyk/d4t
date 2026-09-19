@@ -634,7 +634,10 @@ class DecidePanel(QWidget):
         bits = ["bin %d · %d defects" % (b, self._counts[b])]
         row = self._purity.get(b)
         if row and row.get("purity") is not None:
-            bits.append("%.0f%% real" % (row["purity"] * 100))
+            # 同 `verdict_band`（F117 E7）：分母寫出來，不要人心算。
+            labelled = int(row.get("labelled") or 0)
+            bits.append("%d/%d real" % (int(row.get("real") or 0), labelled)
+                        if labelled else "%.0f%% real" % (row["purity"] * 100))
         lab = QLabel("   ".join(bits))
         lab.setObjectName("paramHint")
         lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)

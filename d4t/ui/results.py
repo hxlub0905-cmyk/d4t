@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import fit_screen
+from . import fit_screen, geometry
 from .splitters import HairlineSplitter
 from .baseline import BaselineBar, default_store
 from .gallery import GalleryPanel
@@ -102,6 +102,8 @@ class ResultsWindow(QMainWindow):
         self.setWindowTitle("d4t — Results")
         self.setWindowFlag(Qt.Window, True)
         fit_screen.fit(self, 980, 700)
+        # 記得上一次拉成多大（F117 I16）。還原不了就停在上面那個預設。
+        geometry.restore(self, "results")
 
         bar = QToolBar("Results", self)
         bar.setMovable(False)
@@ -547,6 +549,9 @@ class ResultsWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # Qt hook
         # 關掉不丟結果：下次再跑（或按主視窗的 Gallery 入口）就會回來。
+        # 大小與位置也不丟（F117 I16）—— 拉寬是為了看得到欄，而每次回到
+        # 預設等於每次重做一遍那個動作。
+        geometry.remember(self, "results")
         super().closeEvent(event)
 
 

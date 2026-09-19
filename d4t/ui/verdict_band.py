@@ -227,12 +227,20 @@ class VerdictBand(QWidget):
         # 版面，而且每次都在提醒使用者少了一個他可能根本沒有的東西
         #（`_accuracy_text` 對同一件事講過同一句話）。
         if graded:
+            # ⚠ **百分比沒有分母就要人心算**（F117 E7）：`12% real` 的下一個
+            # 問題一定是「12% 的什麼」—— 而這一類可能只有 8 顆，其中標過答案
+            # 的可能只有 3 顆。兩個數字都寫出來就沒有那一步。
             labelled = int(row.get("labelled") or 0)
+            real = int(row.get("real") or 0)
             pure = QLabel("" if not labelled
-                          else "%d%% real" % round(100.0 * int(row.get("real") or 0)
-                                                   / labelled), host)
+                          else "%d/%d real" % (real, labelled), host)
             pure.setObjectName("paramHint")
-            pure.setFixedWidth(66)
+            pure.setToolTip(
+                "" if not labelled else
+                "%d of the %d defects in this class that have an answer are "
+                "real; the other %d are nuisance."
+                % (real, labelled, labelled - real))
+            pure.setFixedWidth(72)
             pure.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             lay.addWidget(pure)
 

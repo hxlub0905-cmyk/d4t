@@ -69,7 +69,7 @@
 | E3 | 縮圖沒有標出 defect 位置 | 疊量測標記或中心十字 | ✅ |
 | E4 | Results 分布圖只有 min/max 刻度、沒有圖例、沒畫判定門檻 | 補刻度與圖例；判定樹用到這個數字時畫出那一刀 | ✅ 截圖 |
 | E6 | Results 頂端一條很寬的灰色空條 | 沒在跑時收起 | ✅ |
-| E7 | `12% real` 要想一下才懂 | `4 real (missed)` | ✅ |
+| E7 ✅ | **做完** —— `12% real` → `4/12 real`（畫面與判定面板兩處）。百分比沒有分母就要人心算：`12% 的什麼`？這一類可能只有 8 顆，標過答案的可能只有 3 顆。原本記的：`12% real` 要想一下才懂| `4 real (missed)` | ✅ |
 | F3 | CSV／報表預設不帶 KLARF 座標與原始欄位（機制 `carry_klarf_columns` 已有，是 recipe 沒開） | 出貨的 recipe 預設打開 | ✅ |
 | F5 | 均勻度 CSV 欄名 `cells_cells_area_px` —— 區域剛好叫 `cells`，又疊上 ROI 卡自己的 `cells_` 前綴 | 前綴規則遇到同名不疊，或出貨 recipe 換區域名 | ✅ |
 | F6 | ~~標題用 recipe id~~（**做完**：改成「使用者打的字 → recipe 的描述 → recipe id」）、~~`glv_pixels` 顯示 `1.638e+04`~~（**I5 做完了**）；**剩下：表格太寬** | 標題用檔名或描述；整數不用科學記號 | ✅ |
@@ -90,7 +90,7 @@
 | I12 | 對話框主按鈕樣式不一（範本庫 `Load` 藍、Chart settings `OK` 白） | 統一 | ✅ |
 | I13 ✅ | **做完** —— `->` 全部改成 `→`（8 處；`→` 在 WGL4 裡，Segoe UI 蓋得到，而 repo 本來就有 25 處在用它）。`tests/test_ui_symbols.py` 擋回頭，配一條反向測試（把走查看到的那句話餵回去，確認判準會咬它）。原本記的：符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`）| 統一 | ✅ |
 | I15 | Results 表格橫向捲動時 defect 欄會跑掉（表頭本來就固定） | 凍結第一欄 | ✅ |
-| I16 | Results、Chart settings、範本庫不記得視窗大小位置（`d4t/ui` 內沒有 `saveGeometry`） | QSettings 記住並經過 `keep_on_screen` | ✅ |
+| I16 ✅ | **做完** —— 新的 `ui/geometry.py`（`remember`／`restore`），三個視窗都接上。⚠ 還原完一定過一次 `keep_on_screen`（拔掉第二個螢幕之後，存下來的位置會落在沒有螢幕的地方 —— 那是一個按了沒反應的按鈕）。⚠ 最小化／全螢幕時**不存**。⚠ 它是「第四個會寫磁碟的東西」，所以先做出覆寫點 `geometry.SETTINGS`（CLAUDE.md §4）。原本記的：Results、Chart settings、範本庫不記得視窗大小位置（`d4t/ui` 內沒有 `saveGeometry`）| QSettings 記住並經過 `keep_on_screen` | ✅ |
 | J4 | 刪掉中間的卡，上下游斷開 | 型別對得上時提供一鍵補線 | 建議 |
 | J6 ✅ | warning 太長 | 先講結論 | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 4 步）**
 | K2 | Recipe 差異比較（兩份或存檔前後） | 逐卡逐參數 diff | 建議 |

@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 from ..core.export import uniformity_charts as uc
 from ..core.pipeline import chart_spec as cspec
 from ..core.pipeline import chart_style as cs
-from . import fit_screen
+from . import fit_screen, geometry
 from .uniformity_window import ChartView, chart_style_for
 from .theme import TOKENS, region_hex
 from .widgets import ChoiceChips, apply_button_cursors, small_button
@@ -501,6 +501,7 @@ class ChartSettingsDialog(QDialog):
         # 一打開就有捲軸，而捲軸底下正好是那幾格膠囊 —— 使用者要先發現有東西
         # 在下面才找得到它們。
         fit_screen.fit(self, 1180, 940)
+        geometry.restore(self, "chart_settings")      # F117 I16
 
         self._kinds: List[str] = [k for k in (kinds if kinds is not None
                                               else uc.CHARTS) if k in uc.CHARTS]
@@ -591,6 +592,17 @@ class ChartSettingsDialog(QDialog):
         self._connect_live()
         self.refresh_preview()
         apply_button_cursors(self)
+
+    def done(self, result: int) -> None:   # Qt hook
+        """關掉時記住大小（F117 I16）。
+
+        ⚠ **`done` 而不是 `closeEvent`**：`accept` / `reject` 兩條路都走這
+        裡，而按 Esc 關掉的對話框不一定收得到 `closeEvent`。掛錯地方的症狀
+        是「用滑鼠關掉會記得，按 Esc 關掉不會」—— 那種不一致使用者只會覺得
+        它壞了。
+        """
+        geometry.remember(self, "chart_settings")
+        super().done(int(result))
 
     def _hide_rows_that_do_not_apply(self) -> None:
         """只畫盒鬚圖的卡片不必看到「直方圖切幾根柱」（`GLOBAL_APPLIES`）。
