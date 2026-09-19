@@ -2111,6 +2111,12 @@ class StudioWindow(QMainWindow):
         for view in self._canvases():
             view.set_selected(node_id)
             view.set_tree_selected(None)   # 一次只編一個東西（卡片或樹的一步）
+            # **選到的東西要看得見**（F117 A3）。以前 Tune 模式的畫布只有
+            # 300 px 高，選一張排在下面的卡只會露出上緣 —— 而右邊的設定區
+            # 已經換成它了，於是畫面上「正在編的那張卡」跟「看得到的那張卡」
+            # 不是同一張。`_on_problem_activated` 的說明從 U2 起就寫著
+            # 「選中那張卡並捲到它」，缺的一直是這一行（F117 J2 同一支）。
+            view.ensure_card_visible(node_id)
         self._fill_param_form(node_id)
         self.stack.setCurrentWidget(self.param_form)
         self.gauge_note.setText("")              # 儀表又是這張卡的了（P1-7）

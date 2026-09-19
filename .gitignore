@@ -30,3 +30,10 @@ wheels/
 /char_report/
 /patch_report/
 /rsem_report/
+
+# UI 走查用的截圖（F117）。**畫面會過期而檔案不會** —— 一張 2026-09-19 的截圖
+# 三輪之後描述的是一個已經不存在的版面，而讀到它的人分不出來。走查的結論寫進
+# `docs/plans/F117-ui-review.md`（那一份每一條都有「查證」欄指回程式碼），
+# 圖留在走查的人自己機器上。
+/Claude outputs/
+

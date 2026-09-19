@@ -2,7 +2,7 @@
 # 由 tools/make_filelist.py 產生；tests/test_offline_tools.py 會擋住它腐爛。
 afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 05c93bfe4f450929664975133d72d2034d07a8fa .github/workflows/ci.yml
-68a59c98883d1b448c8bbe84dc129883207a341f .gitignore
+01f407bd48dc147fa73fa20ce5b7a420b3ca577f .gitignore
 50c5296a3ca9137a0b895ef4c68ae091b367830e AGENTS.md
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
@@ -103,7 +103,7 @@ bd2b6c2523251e7f43333ff4d33788aceb6da270 d4t/ui/attach_sources.py
 d7b22eefab71fa356cf843110791075b6f90e889 d4t/ui/baseline.py
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
 c8486175a525e1bf1ec5b7ac141e480f7febfecc d4t/ui/buttons.py
-a694cb0dff37f7e2d675d84696b669291ec349ea d4t/ui/canvas.py
+bd08f442fbfaccc164ba6e1f9852e7cdc903967d d4t/ui/canvas.py
 c7c2cf42aded404eca8bcdf788f19ff333dde258 d4t/ui/canvas_edges.py
 f95b2bd90c5936c688e9d929dc63ac22a9598877 d4t/ui/card_menu.py
 e78f82f7bc4f40733f8f34d3a690fd7b975320c0 d4t/ui/cell_canvas.py
@@ -152,7 +152,7 @@ fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-a61b1dbb82eb3fb78896096a31cf4ba1817197c7 d4t/ui/studio.py
+bfcec5e3bceb70cde7acc0b35fa1d1287cf4b74c d4t/ui/studio.py
 0a033283dc7745779c44c2a28026cbb836627661 d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
@@ -184,6 +184,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
+47a006145085f0870d5e117405af6b8a0a24ece8 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -352,7 +353,7 @@ ea726228058ab2350165cc086f03946cf96c6516 tests/test_ui_canvas.py
 0be37c9adde25478248faf4ddcc1870566f40fe3 tests/test_ui_canvas_animation.py
 91f2a205111fef383dd8bd0d12d86f77affee113 tests/test_ui_canvas_cut_button.py
 fbe5cbca000fcac3a95ac34b5d69c1975c193f80 tests/test_ui_canvas_flat.py
-6b79c01d6d1ebd3ba5d9b504ea5372ef694bf1c5 tests/test_ui_canvas_focus.py
+a03b9d708573e18545c7040a19c8b47c77ae6939 tests/test_ui_canvas_focus.py
 5ce1abe0940e54580cf1809822921fa1ee89a74d tests/test_ui_canvas_grid.py
 25112528f0f28b2929861c53c08f186b579d0999 tests/test_ui_canvas_invariants.py
 715534c4e3ed9f628f1ff737144cb409ad103ee0 tests/test_ui_canvas_keys_and_hints.py
