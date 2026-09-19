@@ -7,10 +7,10 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 77c58b2d57df83b95d1a036603466bfa7659c05b README.md
-d39fb202b083e0f1c4e322f465921e944041c4e9 SESSION_LOG.md
+9b0f13942862c2ca73158a155bd449b7049af37e SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
-e0a81454e663372c631cdfc7079e92346a92e124 d4t/__main__.py
+889f3943a1b029b44ff30a265e63f4e4f8dd64a1 d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 dbcf7ddc11affd20145254f192259784aa3b8789 d4t/core/algo/__init__.py
 4831e63cce346047c2bb15032d3ad47e7a2cb847 d4t/core/algo/align.py
@@ -40,13 +40,13 @@ b5fe256d267f2d487c83b8ac2c036102cbd6f1a4 d4t/core/calibration.py
 607bc796c64e79f5738317810cb8e2a1f04d412e d4t/core/export/boxplot.py
 6bdef6d76457fe600ddbe9069d1a28a215c45971 d4t/core/export/chart_draw.py
 e124c808bc10ad7aac2e434dcf87e3a8efef4794 d4t/core/export/chart_frame.py
-f164c233dc03c87477e6f06ceea7abcc8b09c5de d4t/core/export/html.py
+40dfd3e9e33be8023aba9271f91810594ecd764a d4t/core/export/html.py
 df85cecb3e142f94a5ccb6d8775cd3540d99fa97 d4t/core/export/klarf_out.py
 f1096aa00597a3ce6e7a69b03aa11fdfe0b6cd1a d4t/core/export/overlay.py
-97bcb8cc00d5b8f40e07ae0d22fe3ef178af8a15 d4t/core/export/report.py
+28bdf3174ea4b4743f3305da2a2b68cb414ddb91 d4t/core/export/report.py
 66e0f95368bfaaeffd70ea4b7ceff2d8e3625daf d4t/core/export/uniformity_charts.py
 cfa364ebeaf68456e2ac3a55c7120a3b650d0739 d4t/core/ingest/__init__.py
-feffaff91ac2d56955fc9743ba10aae476f52518 d4t/core/ingest/dataset.py
+dd90cd983e006157c74d60f28d51e66c163d4526 d4t/core/ingest/dataset.py
 8e73de19c7ae0e640d64a03465ef96248f7ae28c d4t/core/ingest/glas_export.py
 42948c7ff7901d48434530d524790904d1466be4 d4t/core/ingest/imageio.py
 c035ede25a8f2e1c7edd6abe585475f57ec00ddf d4t/core/ingest/klarf_core.py
@@ -85,7 +85,7 @@ e4379264e37ab47c37974e94415b2c72386e8932 d4t/core/steps/__init__.py
 6374a586fa926b9283a7bdd1f1b75e75466ee449 d4t/core/steps/load.py
 d3e1fe208e365d72f2fdcf9ccdaf543af9cd85a1 d4t/core/steps/load_sidecar.py
 d8b1021ce4eb76b436ba9dea26d62951febd06ac d4t/core/steps/normalize.py
-502eeffd5c4af818e21610358a72b3eaf3e9e6b4 d4t/core/steps/output.py
+7c493b84ce8aa974ef5ba9bc9382c3c08f3cb87d d4t/core/steps/output.py
 effe382a885c4d5e4308ddcfae8968f04d0ccda7 d4t/core/steps/pair_source.py
 6964c80f4583ab0d9e2cf5469ea790b8f1338738 d4t/core/steps/quality.py
 256789e28d725b76e991351b333b659078d69419 d4t/core/steps/roi_cross.py
@@ -186,7 +186,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-2ba8d7707c4d467679157aa7eb8efa1d45fb044b docs/plans/F117-ui-review.md
+b832d671079c90ea69a6fd82f49a76c04d48e8cb docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -253,7 +253,7 @@ c0118936ed3142d67da8d49b9520167dd3fa94ee tests/test_edit_plan.py
 3cf463de84edac205d46bdd02e82541fd995e290 tests/test_enhance.py
 5bcbc5d88b74b990dac7d69874664cc9ca5617fe tests/test_export_klarf.py
 76e33c29788bc9608c6b33cae469de4a2dd971c4 tests/test_export_overlay.py
-1534570199d2ef7ae5e6c58ff7760d724a2b0e85 tests/test_export_parity.py
+1daa4aaba7fb4ffb1529d5f825d5f828e9336e18 tests/test_export_parity.py
 6138a81f0685a2f422c85b965b558ee1adbc1873 tests/test_export_report.py
 492495bffaf1e92a236605b50c04047a8bcb36b0 tests/test_export_uniformity.py
 2415c6f4229d2d8ff5044b35cdde8560d3bcd8c2 tests/test_expression.py
@@ -321,6 +321,7 @@ ea2dedbfa9c8d6be5a1cca8bbb253c205528b43f tests/test_region_edges_migration.py
 5742affc2b26c819c5c539d2facf58145e98e2b6 tests/test_region_facts.py
 7fffad90c21e7f06007c0a061f38576918639e81 tests/test_region_names_are_unique.py
 a39282d5c9cec8ae68990b9f6acc7096b3e6db72 tests/test_rename_fallout.py
+cece7bc845bcccd47cb26250b885f674acdd019e tests/test_report_run_info.py
 983eb33a6efc869f1ae43e7bac09a417d9d5d02a tests/test_rerun_decision.py
 76c92e8a6e56d16307cdd73a83fd7d39dd1802d2 tests/test_rescore_decide.py
 3b5f5eec393a4bd203095e437572cd787b93c6ef tests/test_results_store.py

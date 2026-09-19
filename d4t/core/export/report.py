@@ -387,6 +387,59 @@ _NUM_FMT = "0.0000"
 _PCT_FMT = "0.00%"
 
 
+#: 一份報表**追不追得回來**要答得出的幾件事（F117 F2）。
+#:
+#: ⚠ **它跟 `_recipe_info` 是兩件事**：那一支講的是「這份 recipe 長什麼樣」
+#: （分數式、門檻、幾張卡），這一支講的是「**這一次**是什麼時候、拿哪一份
+#: 資料、用哪一版程式跑出來的」。一份報表離開這台電腦之後，第二件事沒有別
+#: 的地方查得到 —— 而那正是 F2 記的：「檔案一離開電腦就追不回是哪一次跑的」。
+RUN_INFO_LABELS = ("Run at", "Source", "Defects", "Recipe file", "Made with")
+
+
+def run_info(recipe: Any = None, source: str = "",
+             n_rows: Optional[int] = None, n_source: Optional[int] = None,
+             when: Any = None) -> List[Sequence[Any]]:
+    """這一次跑的身分 → ``[(名字, 值), …]``。**HTML 與 xlsx 走同一支。**
+
+    ``when`` 留空就用現在的時間（測試把它釘死）。``n_rows`` / ``n_source``
+    都給、而且不相等時，「跑了幾顆」會講出**這一批不是全部** —— 一份只跑了
+    60 顆的報表看起來跟跑完 6 萬顆的一模一樣，是這個工具最容易誤導人的地方。
+
+    ⚠ **算不出來的那一列不寫**（不是空字串、不是 ``unknown``）：一列寫著
+    ``Source: unknown`` 比沒有那一列更像「我知道，只是弄丟了」。
+    """
+    import datetime
+
+    from d4t import version_line
+
+    out: List[Sequence[Any]] = []
+    stamp = when if when is not None else datetime.datetime.now()
+    try:
+        out.append(("Run at", stamp.strftime("%Y-%m-%d %H:%M")))
+    except AttributeError:
+        out.append(("Run at", str(stamp)))
+    if str(source or "").strip():
+        out.append(("Source", str(source).strip()))
+    if n_rows is not None:
+        if n_source and int(n_source) != int(n_rows):
+            out.append(("Defects", "%d of %d (not the whole lot)"
+                        % (int(n_rows), int(n_source))))
+        else:
+            out.append(("Defects", int(n_rows)))
+    rd = None
+    if hasattr(recipe, "to_json_dict"):
+        rd = recipe.to_json_dict()
+    elif isinstance(recipe, dict):
+        rd = recipe
+    if rd is not None and rd.get("version") is not None:
+        out.append(("Recipe file", "%s (format v%s)"
+                    % (rd.get("recipe_id", "") or "unnamed",
+                       rd.get("version"))))
+    # **build id 是公司機唯一答得出「我這台跑的是哪一版」的東西**（沒有 git）。
+    out.append(("Made with", version_line()))
+    return out
+
+
 def _recipe_info(recipe: Any) -> List[Sequence[Any]]:
     """Recipe 物件 / recipe JSON dict → 摘要頁要顯示的幾列。"""
     if recipe is None:
@@ -433,11 +486,13 @@ def _text_width(rows: Iterable[Sequence[Any]], n_cols: int) -> List[int]:
 def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
                 ground_truth: Optional[Dict[Any, Any]] = None,
                 recipe: Any = None,
-                positive_bins: Optional[Iterable[int]] = None) -> str:
+                positive_bins: Optional[Iterable[int]] = None,
+                run: Optional[Sequence[Sequence[Any]]] = None) -> str:
     """匯出 Excel 報表（三張工作表），atomic 寫入。回傳寫入路徑。
 
-    - 「摘要」：總數、bin 分佈、分數統計、recipe 資訊；給了 ``ground_truth``
-      再加抓漏率 / 誤殺率 / 正確率與 2×2 混淆矩陣。
+    - 「摘要」：總數、bin 分佈、分數統計、**這一次跑的身分**（``run``，
+      見 :func:`run_info`）、recipe 資訊；給了 ``ground_truth`` 再加抓漏率 /
+      誤殺率 / 正確率與 2×2 混淆矩陣。
     - 「明細」：與 :func:`write_csv` 相同的表，凍結標題列 + 自動篩選。
     - 「特徵統計」：每個特徵的 筆數 / 最小 / 中位數 / 最大 / 標準差。
 
@@ -484,6 +539,9 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
         ("Median", s["score_median"]),
         ("Maximum", s["score_max"]),
     ]
+    if run:
+        rows.append(("__section__", "This run"))
+        rows += list(run)
     rinfo = _recipe_info(recipe)
     if rinfo:
         rows.append(("__section__", "recipe"))

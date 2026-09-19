@@ -485,6 +485,7 @@ def _cmd_export(args: argparse.Namespace) -> int:
         ExportError, apply_writeback, plan_writeback, summarize,
         write_csv, write_excel,
     )
+    from d4t.core.export.report import run_info
     from d4t.core.ingest import klarf_core
     from d4t.core.store import RunStore
 
@@ -517,8 +518,22 @@ def _cmd_export(args: argparse.Namespace) -> int:
     if args.csv:
         print(f"→ CSV：{write_csv(results, args.csv)}")
     if args.excel:
+        # ⚠ **時間是那一次跑的時間，不是現在**（F117 F2）。`d4t export` 讀的是
+        # 批次歷史 —— 對一份三個月前的 run 蓋上今天的日期，比沒有日期更糟。
+        # recipe 也從庫裡拿：以前這一支根本沒傳 `recipe=`，所以 CLI 匯出的
+        # xlsx 連 recipe 那一段都沒有。
         try:
-            print(f"→ Excel：{write_excel(results, args.excel, ground_truth=gt)}")
+            rdict = json.loads(run.get("recipe_json") or "null")
+        except ValueError:
+            rdict = None
+        stamp = run_info(rdict, source=str(run.get("klarf_path") or ""),
+                         n_rows=len(results),
+                         n_source=run.get("n_total"),
+                         when=str(run.get("created_utc") or "") or None)
+        try:
+            out = write_excel(results, args.excel, recipe=rdict,
+                              ground_truth=gt, run=stamp)
+            print(f"→ Excel：{out}")
         except ExportError as exc:
             print(f"[錯誤] {exc}", file=sys.stderr)
             return 2

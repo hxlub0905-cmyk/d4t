@@ -28,6 +28,51 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F117 F2：報表講得出「這是哪一次跑的」（2026-09-20）
+
+走查記的原話：**「檔案一離開電腦就追不回是哪一次跑的」。** `report.html` 以前
+只有 recipe id 與 bin 計數 —— 沒有日期、沒有來源 KLARF、沒有 d4t 的版本／
+build id，也看不出這一批是不是只跑了一部分。報表頭現在是：
+
+```
+Run at       2026-09-20 14:33
+Source       D:/lots/LOT.001/defects.001
+Defects      60 of 6000 (not the whole lot)
+Recipe file  ebi_die_to_die (format v5)
+Made with    d4t 0.1.0.dev0 (build ac9092788c9e)
+```
+
+**HTML 與 xlsx 同源**（`export/report.run_info()`）—— 各算一份的那天，它們會
+對同一次跑講出兩個答案，而沒有人知道哪一個是對的。
+
+### 三件寫進去的判斷
+
+**一、「跑了幾顆」不是一個數字，是一句話。** 一份只跑了 60 顆的報表看起來跟
+跑完 6 萬顆的一模一樣，而使用者拿它去講「這個 lot 的情況」—— 那是這個工具
+最容易誤導人的地方。跑完整批就只印數字（每一份都掛一句「not the whole lot」
+的話，那句話就沒有人看了）。
+
+**二、算不出來的那一列不寫**（不是空字串、不是 `unknown`）。一列寫著
+`Source: unknown` 比沒有那一列更像「我知道，只是弄丟了」。
+
+**三、`d4t export` 蓋的是那一次跑的時間，不是現在**（從批次歷史的
+`created_utc`）。對一份三個月前的 run 蓋上今天的日期，比沒有日期更糟。順手
+查出那條路徑**連 `recipe=` 都沒傳** —— CLI 匯出的 xlsx 以前連 recipe 那一段
+都沒有。
+
+順手關掉 **F6 的前半**：報表標題從「recipe id」改成「使用者打的字 → recipe
+的描述 → recipe id」。`recipe_id` 是 JSON 的鍵（`ebi_die_to_die`），不是一份
+報表的標題。F6 剩下「表格太寬」那一半（數字那一半 I5 已經做完）。
+
+⚠ `test_export_parity` 那條「卡片產的 == 直接叫引擎產的」**放寬了一格**：
+卡片手上有 `BatchContext`，引擎沒有，所以卡片那一份多一段 `This run`。
+放寬的同時補了一條反向的（`test_the_card_stamps_which_run_this_was`）——
+拿掉一段再比，等於對那一段完全不問。
+
+**F117 的 P1 到此全部關掉。**
+
+---
+
 ## F119：哪一個 bin 是好消息（2026-09-20）
 
 走查（F117 D2）記的是「均勻度那份 recipe 的判定膠囊 `measured · bin 0` 是

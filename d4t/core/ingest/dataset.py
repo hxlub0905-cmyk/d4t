@@ -213,6 +213,28 @@ class Dataset:
     def __post_init__(self) -> None:
         self.renumber()
 
+    def source_label(self) -> str:
+        """**這份資料是從哪裡來的**，一句給人看的話（F117 F2）。
+
+        有 KLARF 就是那個檔（廠內講的就是那個檔名）；沒有 KLARF 的三種
+        （folder / doe_folder / 單張）回第一顆影像所在的資料夾 —— 那是使用者
+        在 `Open images…` 挑的那個。
+
+        ⚠ **答不出來就回空字串**，呼叫端那一列就不寫。一列寫著
+        ``Source: unknown`` 比沒有那一列更像「我知道，只是弄丟了」。
+        """
+        import os
+
+        src = str(getattr(self.klarf, "source_path", "") or "")
+        if src:
+            return src
+        for item in self.items or []:
+            for ref in (item.images or {}).values():
+                path = str(getattr(ref, "path", "") or "")
+                if path:
+                    return os.path.dirname(path) or path
+        return ""
+
     def renumber(self) -> None:
         """把 ``items`` 的位置寫回每一顆的 :attr:`DefectItem.index`。
 
