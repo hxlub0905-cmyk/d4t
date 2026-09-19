@@ -1,9 +1,9 @@
 # F116 — 拆 `studio.py`：`StudioWindow` 只留組裝與接線，內容搬進 controller
 
-狀態：**進行中（2026-09-19）** —— **第 1、2、3 步做完**。
-`studio.py` 7,686 → **5,434**（−2,252）、方法 293 → **235**。
-下一步是第 4 步（第二份 lot ＋ recipe 的存開對話框）。
-前三步量到的東西已經寫回 §3、§4、§6（見那幾節）。
+狀態：**進行中（2026-09-19）** —— **第 1～4 步做完**。
+`studio.py` 7,686 → **5,135**（−2,551）、方法 293 → **221**。
+下一步是第 5 步（試跑 ＋ Output → `ui/run_controller.py`，要改成 signal）。
+前四步量到的東西已經寫回 §3、§4、§6（見那幾節）。
 
 > 起點 commit `3329659`。下面的數字都是那一刻量的；動手前用 §6 那支腳本重量一次，
 > 對不上就以重量的為準（這一份不是數字的家，`tests/test_size_ceilings.py` 才是）。
@@ -174,9 +174,35 @@ Gallery）。`studio.py` 用 `# noqa: F401` 把那三個名字轉出去 —— �
 全部是 `_wire_widgets` 裡的接線，而接線本來就留在 `studio.py`，直接指到
 `self.gallery_ctl._on_defect_activated` 就好，測試一處都沒有用到它。
 
-**第 4 步：第二份 lot ＋ recipe 的存開對話框** → recipe 那半併進 `ui/open_dialogs.py`
-（同一個「只問問題、不自己載」的契約），pair source 那半 → `ui/pair_source_ui.py`。
-`pair_worker`、`_pending_pair`、`_pair_filled` 跟著搬。
+**第 4 步：第二份 lot ＋ recipe 的存開對話框**。✅ **做完**（2026-09-19）。
+
+第 4 步的結果：`studio.py` 5,434 → **5,135**（−299）、方法 235 → **221**。
+
+* recipe 的開／存三支 ＋ `RECIPE_SUFFIX` → **既有的** `ui/open_dialogs.py`
+  （同一個「只問路徑、做事交給 `window`」的契約，照計畫）。
+* **`ui/pair_source_ui.py` 沒有出現** —— 那一族搬進的是
+  `ui/attach_sources.py`，而且 **GLAS 匯出那兩支（`_on_open_gds` /
+  `attach_gds_export`）一起搬了**。理由是它們的形狀一字不差：**問一個路徑 →
+  交給 ingest 層 → 把結果講成一句話 → 把量到的名字填回卡片**。只搬一半的話，
+  `對話框` 那一段會剩下兩支名字對不上段名的東西，而模組名會比內容窄。
+  `_source_id_from`（模組層的小工具）跟著走 —— 它唯一的使用者在這一族裡。
+* **一支門面都沒留**：接線改成 `partial(open_dialogs.save_recipe, win)`，
+  跟那三顆 Open 鈕同一個形狀。
+
+**留在 `studio.py` 的三支**（它們在那一段裡只是鄰居，不是「掛第二份東西」）：
+`_number_info`、`_dynamic_choices_for`、`sources_for_run`。
+`_carry_filled` 也留著 —— 換資料集時 `_on_dataset_loaded` 會清它（§3-1）。
+
+⚠ **第二種漏法（這一輪新的）：組出來的名字。** `_on_source_requested` 用
+`getattr(self, "_on_open_%s" % att_key)()` 分派到 `_on_open_gds` —— 那個名字是
+`"_on_open_"` 加上一張表裡的值拼出來的，**沒有任何靜態掃描找得到它**。
+`ruff`、`studio_surface --check`、`import` 全綠，只有「選到 layout(GDS) 卡再按
+那顆鈕」那一條路會炸（`test_ui_f14_input_on_the_card` 抓到）。
+
+⚠ **第 3 步加的那一關當場就賺回來了**：`--check` 一跑就列出 `studio_layout.py`
+那 5 行還在叫 `win._on_open_recipe` / `win._on_save_recipe` / `_on_save_recipe_as`
+—— 那是「按工具列那顆存檔鈕就 AttributeError」，而**一條測試都不會紅**
+（沒有人去按那顆鈕）。修完再跑就乾淨了。
 
 **第 5 步：試跑 ＋ Output** → `ui/run_controller.py`。
 這一塊往外叫 17 支 `_refresh_*`，直接搬會變成 controller 反過來操縱整個視窗。
@@ -231,6 +257,11 @@ Gallery）。`studio.py` 用 `# noqa: F401` 把那三個名字轉出去 —— �
       （controller 是 QObject，不是 QWidget）。搬完 grep 一次 `self(?!\s*\.)`
 - [ ] 搬完 grep 一次每一個 `self.w.<名字>`，確認它真的還在 `StudioWindow` 上
       —— 跨 controller 的狀態（第 1 步是 `_compare_on`）要走門面（§3-2）
+- [ ] ⚠ **組出來的名字沒有任何掃描找得到**：`getattr(self, "_on_open_%s" % key)`
+      這一種（`studio.py` 的 `_ATTACHMENT_CARDS` 分派就是）。`ruff`、
+      `studio_surface --check`、`import` 在第 4 步全部是綠的，只有「選到
+      layout(GDS) 卡再按那顆鈕」那一條路會 AttributeError。搬一族之前先
+      `grep 'getattr(self, "'`，看看有沒有人用字串拼它們的名字。
 - [ ] **`d4t/ui/` 裡別的模組也可能在叫搬走的那個名字**（不只 `studio.py` 與
       `tests/`）：`region_check.py` 與 `studio_layout.py` 都是吃 `win` 的模組，
       而它們的 `win.<名字>(…)` 是**接線** —— 只有使用者真的按下那一顆才會炸。

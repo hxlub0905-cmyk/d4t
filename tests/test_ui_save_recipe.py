@@ -26,6 +26,7 @@ def _load_qt() -> None:
 
     from d4t.ui import studio as studio_mod  # noqa: F401
     from d4t.ui import theme as theme_mod  # noqa: F401
+    from d4t.ui import open_dialogs  # noqa: F401
 
     from d4t.core.pipeline import Recipe  # noqa: F401
 
@@ -152,8 +153,14 @@ def test_ctrl_s_writes_back_to_the_file_it_came_from(window, tmp_path):
 
     window.model.add_step("glv_stats")
     asked = []
-    window._on_save_recipe_as = lambda: asked.append(1) or False
-    assert window._on_save_recipe() is True
+    # ⚠ 打在**模組**上：`save_recipe` 現在是 `open_dialogs` 的模組層函式，
+    # 它直接叫同一個模組裡的 `save_recipe_as`（F116 第 4 步）。
+    original = open_dialogs.save_recipe_as
+    open_dialogs.save_recipe_as = lambda w: asked.append(1) or False
+    try:
+        assert open_dialogs.save_recipe(window) is True
+    finally:
+        open_dialogs.save_recipe_as = original
     assert asked == [], "已經有原檔了，不該再問路徑"
     assert len(Recipe.load(path).routes[window.model.kind]) == 2
 
@@ -163,8 +170,12 @@ def test_the_first_save_has_to_ask_where(window):
     window.model.add_step("load_single")
     assert window.recipe_path is None
     asked = []
-    window._on_save_recipe_as = lambda: asked.append(1) or True
-    assert window._on_save_recipe() is True
+    original = open_dialogs.save_recipe_as
+    open_dialogs.save_recipe_as = lambda w: asked.append(1) or True
+    try:
+        assert open_dialogs.save_recipe(window) is True
+    finally:
+        open_dialogs.save_recipe_as = original
     assert asked == [1]
 
 

@@ -201,7 +201,11 @@ FILE_CEILINGS = {
     # 回溯那一族進 `ui/gallery_controller.py`，縮圖那一條鏈
     # （`THUMB_CHANNEL_PRIORITY` → `thumb_channel` → `load_thumb` →
     # `ThumbWorker`）跟著走 —— 它們的唯一使用者就是 Gallery。
-    "d4t/ui/studio.py": 5434,
+    # 2026-09-19（F116 第 4 步）：5,434 → **5,135**（−299）。「把第二份東西掛到
+    # 已經載入的這一份上」那一族（配對卡的第二份 lot ＋ GLAS 匯出）進
+    # `ui/attach_sources.py`；recipe 的開／存三支進**既有的** `ui/open_dialogs.py`
+    # （同一個「只問路徑、做事交給 window」的契約）。
+    "d4t/ui/studio.py": 5135,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -392,7 +396,10 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        235,
+        221,
+        # 2026-09-19（F116 第 4 步）：235 → 221。搬走 14 支（attach 那一族 11 支
+        # ＋ recipe 的開存 3 支），**一支門面都沒留** —— 接線改成
+        # `partial(open_dialogs.save_recipe, win)`，同那三顆 Open 鈕的形狀。
         # 2026-09-19（F116 第 3 步）：248 → 235。搬走 15 支，回來兩支門面
         # （`show_gallery` —— 工具列那顆鈕與 Ctrl+Shift+R 都接它；
         # `results_visible` —— 14 處／2 個測試檔）。
@@ -452,7 +459,10 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        308,
+        292,
+        # 2026-09-19（F116 第 4 步）：308 → 292。`pair_worker` / `_pending_pair`
+        # / `_pair_filled` 的家跟著 attach 那一族走；`_carry_filled` 留在視窗
+        # （換資料集時 `_on_dataset_loaded` 會清它 —— §3-1）。
         # 2026-09-19（F116 第 3 步）：323 → 308。`thumb_worker` 的家跟著它唯一的
         # 使用者走；`_items_by_id` **留在視窗**（`_on_dataset_loaded` 在寫它 ——
         # §3-1：被別段也寫的留在視窗），進來的是 `gallery_ctl`。
@@ -565,9 +575,12 @@ HARD_CAPS = {
     # `ui/gallery_controller.py`，縮圖那一條鏈跟著走。行 5,792 → 5,434、
     # 方法 248 → 235、`self.*` 323 → 308。
     # **前三步合計**：7,686 → 5,434（−2,252）、293 → 235（−58）、433 → 308。
-    "d4t/ui/studio.py": 5434,
-    "studio_window_methods": 235,
-    "studio_window_attributes": 308,
+    # 2026-09-19（F116 第 4 步）：行 5,434 → 5,135、方法 235 → 221、
+    # `self.*` 308 → 292。**前四步合計**：7,686 → 5,135（−2,551）、
+    # 293 → 221（−72）、433 → 292（−141）。
+    "d4t/ui/studio.py": 5135,
+    "studio_window_methods": 221,
+    "studio_window_attributes": 292,
 }
 
 

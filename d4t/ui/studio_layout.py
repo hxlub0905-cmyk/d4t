@@ -131,7 +131,8 @@ def build_toolbar(win: "StudioWindow") -> None:
     # 仍然一種 source 一列（`empty_source_buttons`，從同一張 `INPUT_SOURCES`
     # 長出來），而那是第一次進來的人真的會看的地方。
     win.btn_open_recipe = _tool_button(win,
-        "Open recipe…", "Load a recipe JSON", win._on_open_recipe,
+        "Open recipe…", "Load a recipe JSON",
+        partial(open_dialogs.open_recipe, win),
         icon="document")
     # **存檔回來了**（2026-08-26）。2026-08-16 拿掉的理由是「先把整個
     # engine 用好，再來支援」，而 Phase 1 同一天就收斂了 —— 那個前提到期。
@@ -141,7 +142,7 @@ def build_toolbar(win: "StudioWindow") -> None:
     # 那顆鈕的意思是「存起來」，不是「我要選一個路徑」。
     win.btn_save_recipe = _tool_button(win,
         "Save recipe…", "Save this pipeline as a recipe JSON",
-        win._on_save_recipe, icon="save")
+        partial(open_dialogs.save_recipe, win), icon="save")
     win.btn_examples = _tool_button(win,
         "Templates…",
         "Open the template library — every entry is a complete, runnable "
@@ -387,9 +388,9 @@ def build_shortcuts(win: "StudioWindow") -> None:
     handlers = {
         "open_klarf": partial(open_dialogs.open_source, win,
                               "klarf"),
-        "open_recipe": win._on_open_recipe,
-        "save_recipe": win._on_save_recipe,
-        "save_recipe_as": win._on_save_recipe_as,
+        "open_recipe": partial(open_dialogs.open_recipe, win),
+        "save_recipe": partial(open_dialogs.save_recipe, win),
+        "save_recipe_as": partial(open_dialogs.save_recipe_as, win),
         "run": win._on_trial_clicked,
         "results": win.show_gallery,
         "undo": win.undo,

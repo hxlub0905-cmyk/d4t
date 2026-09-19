@@ -264,12 +264,18 @@ def test_a_save_that_did_not_happen_is_not_permission_to_close(window):
     """
     window.model.add_step("align")
     window._ask_unsaved = lambda: "save"
-    window._on_save_recipe = lambda: False   # 使用者在另存對話框按了取消
+    # ⚠ 打在**模組**上：`confirm_close` 現在叫 `open_dialogs.save_recipe(self)`
+    # （F116 第 4 步）。
+    from d4t.ui import open_dialogs
+
+    original = open_dialogs.save_recipe
+    open_dialogs.save_recipe = lambda w: False  # 使用者在另存對話框按了取消
     window.PROMPT_ON_CLOSE = True
     try:
         assert window.confirm_close() is False
     finally:
         window.PROMPT_ON_CLOSE = False
+        open_dialogs.save_recipe = original
 
 
 def test_the_close_event_is_actually_gated(window):

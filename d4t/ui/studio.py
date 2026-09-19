@@ -88,7 +88,6 @@ from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
-    QFileDialog,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -120,6 +119,7 @@ from .gauge_panel import GaugePanel
 from .preview_overlays import PreviewOverlays
 from . import studio_layout
 from .gallery_controller import GalleryController
+from .attach_sources import AttachSources
 # ⚠ 縮圖那一條鏈的家在 `ui/gallery_controller.py`（F116 第 3 步）。這裡拿
 # 回來是因為前兩個在下面的 `__all__` 裡、而三個都有測試用 `studio_mod.`
 # 拿 —— 它們是對外的名字，不是實作細節。
@@ -242,22 +242,6 @@ def _fmt(value: Any) -> str:
         return ("%g" % value)
     return str(value)
 
-
-
-def _source_id_from(path: Any) -> str:
-    """檔名 → 一個能當變數名的代號（F15）。
-
-    規則刻意很笨，因為它要**每次都一樣**：非變數字元換成 `_`、頭尾的 `_` 去掉、
-    開頭是數字就補一個 `s`、空的就叫 `src`。（跟 `glas_export.region_name_for`
-    同一條路 —— 那裡也是「一個給人取的名字必須先能當變數名」。）
-    """
-    import re as _re
-
-    stem = os.path.splitext(os.path.basename(str(path)))[0]
-    name = _re.sub(r"[^A-Za-z0-9_]", "_", stem).strip("_")
-    if not name:
-        return "src"
-    return name if name[0].isalpha() or name[0] == "_" else "s" + name
 
 
 def _running_under_pytest() -> bool:
@@ -419,13 +403,6 @@ class StudioWindow(QMainWindow):
 
         # ---- 背景工作 ------------------------------------------------------
         self.dataset_worker = DatasetLoadWorker(self)
-        #: 第二份 lot 用**另一個** worker（F15-2）：跟 main 那一份是兩件可以同時
-        #: 發生的事，共用一個的話「已經有工作在跑」會把其中一個默默擋掉。
-        self.pair_worker = DatasetLoadWorker(self)
-        #: 正在載的第二份是**哪一張卡**要的（載完才知道要掛到哪）。
-        self._pending_pair: Optional[Tuple[str, str]] = None
-        #: 每一份第二 source 上次填了哪幾欄（`carry` 沒變就不用重填）。
-        self._pair_filled: Dict[str, Tuple[str, ...]] = {}
         self.preview_worker = PreviewWorker(self)
         self.trial_worker = TrialWorker(self)
         # Output 段的卡（F16 Stage 5c）。**只有 `run_all()` 叫得到它** ——
@@ -470,6 +447,7 @@ class StudioWindow(QMainWindow):
         self.gauges = GaugePanel(self)
         self.overlays = PreviewOverlays(self)
         self.gallery_ctl = GalleryController(self)
+        self.attach_ctl = AttachSources(self)
 
         self._wire_widgets()
         self._wire_workers()
@@ -785,9 +763,6 @@ class StudioWindow(QMainWindow):
         self.dataset_worker.failed.connect(
             lambda msg: (self._progress_done(),
                          self._status("Could not load dataset: %s" % msg, "error")))
-
-        self.pair_worker.loaded.connect(self._on_pair_source_loaded)
-        self.pair_worker.failed.connect(self._on_pair_source_failed)
 
         self.preview_worker.ready.connect(self._on_async_preview_ready)
         self.preview_worker.busy.connect(self._on_preview_busy)
@@ -2810,10 +2785,14 @@ class StudioWindow(QMainWindow):
             return
         att_key = self._ATTACHMENT_CARDS.get(node.step)
         if att_key:
-            getattr(self, "_on_open_%s" % att_key)()
+            # ⚠ 名字是**組出來的**（`_on_open_` ＋ 表裡那個 key），所以沒有任何
+            # 靜態掃描找得到它 —— F116 第 4 步搬走 `_on_open_gds` 的時候，
+            # `ruff`、`studio_surface --check`、`import` 全部是綠的，只有
+            # 「選到 layout(GDS) 卡再按那顆鈕」那一條路會 AttributeError。
+            getattr(self.attach_ctl, "_on_open_%s" % att_key)()
             return
         if node.step in self._PAIR_CARDS:
-            self._on_open_pair_source(nid)
+            self.attach_ctl._on_open_pair_source(nid)
             return
         menu = QMenu(self)
         for src in scope.INPUT_SOURCES:
@@ -3330,7 +3309,7 @@ class StudioWindow(QMainWindow):
             # 在設定區少勾一個統計量也是改名（那個數字從此不存在）——
             # 跟拉線同一件事，所以講同一句話。
             self._say_fallout(says)
-            self._after_carry_param(node_id, str(name))
+            self.attach_ctl._after_carry_param(node_id, str(name))
             # 拖滑桿的時候框要跟著變 —— 那正是這個輔助的全部意義（F7-8：
             # 使用者是一邊看影像一邊決定值的）。
             self._refresh_kernel_hint()
@@ -3350,7 +3329,8 @@ class StudioWindow(QMainWindow):
             return
         if name not in ("source", "carry", "rank_within", "rank_by"):
             return
-        self._sync_pair_fields(str(node.params.get("source", "") or ""))
+        self.attach_ctl._sync_pair_fields(
+            str(node.params.get("source", "") or ""))
         if name == "source" and self.selected_node == str(node_id):
             self.param_form.set_dynamic_choices(self._dynamic_choices_for(node))
 
@@ -3513,7 +3493,7 @@ class StudioWindow(QMainWindow):
         # 換一份資料 = 那幾欄的值全變了。忘了填的下場是**上一份的欄位值**
         # 留在這一份的每一顆上，跑得完、有數字、而且是別人的。
         self._carry_filled = None
-        self._carry_main_columns()
+        self.attach_ctl._carry_main_columns()
         # 分流（F23 期2）：編輯區塊的欄位下拉要吃這一份的欄名；route_by 的
         # 那一欄也趁現在填進每一顆（換一份資料＝值全變了，同 carry 的理由）。
         from d4t.core.ingest.dataset import columns_of as _cols
@@ -4924,116 +4904,7 @@ class StudioWindow(QMainWindow):
     # ==================================================================== #
     # 對話框（測試不走這條路）
     # ==================================================================== #
-    # ---- 第二份 lot（F15）--------------------------------------------------
-    def _on_open_pair_source(self, node_id: str) -> None:
-        """`pair_source` 卡上的 `Open data…`：載一份**第二個** lot 掛上去。
-
-        **不取代目前的資料集**：main 決定批次跑幾顆、route 用哪一條、KLARF 寫回
-        誰。這一份只提供「另一張圖與它的座標」。
-        """
-        if self.dataset is None:
-            self._status("Load the main lot first — this card pairs every "
-                         "defect of the open lot with one from a second lot.")
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open the second lot's KLARF", "",
-            "KLARF (*.001 *.klarf *.txt);;All files (*)")
-        if path:
-            self.attach_pair_source(node_id, path)
-
-    def attach_pair_source(self, node_id: str, klarf_path: str,
-                           sync: bool = False) -> str:
-        """載入第二份 lot 並掛到 main 上（回狀態列那句話）。
-
-        **預設走背景執行緒**（F15-2）。第一版是同步的，於是開一份 raw data
-        （幾十萬顆）的時候整個 Studio 沒有反應好一陣子 —— main 那一份早就在
-        背景載了（`dataset_worker`），第二份沒有跟上。``sync=True`` 留給測試
-        與 headless。
-
-        代號從卡片的 `source` 參數來；還沒取名就用檔名推一個 —— 使用者要打的字
-        程式已經知道了（同 F11 的「量到的 pitch 自動填回參數」）。
-        """
-        node = self.model.nodes.get(str(node_id))
-        if node is None or self.dataset is None:
-            return ""
-        if sync:
-            try:
-                ds = DatasetLoadWorker.run_sync(str(klarf_path), None)
-            except Exception as e:  # UI 邊界，一律回報
-                return self._on_pair_source_failed("%s: %s" % (type(e).__name__, e))
-            self._pending_pair = (str(node_id), str(klarf_path))
-            return self._on_pair_source_loaded(ds)
-
-        if self.pair_worker.is_running():
-            msg = "A second lot is already loading — please wait."
-            self._status(msg)
-            return msg
-        self._pending_pair = (str(node_id), str(klarf_path))
-        self.pair_worker.start(str(klarf_path), None)
-        name = os.path.basename(str(klarf_path))
-        self._progress_busy("Loading %s…" % name)
-        msg = "Loading second lot: %s" % name
-        self._status(msg)
-        return msg
-
-    def _on_pair_source_failed(self, msg: str) -> str:
-        self._pending_pair = None
-        self._progress_done()
-        text = "Could not load that lot: %s" % msg
-        self._status(text, "error")
-        return text
-
-    def _on_pair_source_loaded(self, ds: Any) -> str:
-        """第二份載完了 → 掛到 main 上（背景與同步兩條路都走這裡）。"""
-        from d4t.core.ingest import pair_source as pair_ingest
-
-        pending, self._pending_pair = self._pending_pair, None
-        self._progress_done()
-        if pending is None:
-            return ""                       # 關窗／換卡之後才送達的通知
-        node_id, klarf_path = pending
-        node = self.model.nodes.get(str(node_id))
-        if node is None or self.dataset is None:
-            return ""
-
-        sid = str(node.params.get("source", "") or "").strip()
-        if not sid:
-            sid = _source_id_from(klarf_path)
-            self.model.set_param(str(node_id), "source", sid)
-        # **只複製要用的那幾欄**：raw data 是幾十萬顆，×24 欄字串是幾百 MB，
-        # 而那幾欄還要 pickle 進 worker。`carry` 之後改了會重填（見
-        # `_sync_pair_fields`），所以少複製不會變成「這一欄不見了」。
-        cols = self._pair_columns_wanted(sid)
-        try:
-            rep = pair_ingest.attach(self.dataset, ds, sid, columns=cols)
-        except pair_ingest.PairSourceError as e:
-            self._status(str(e), "error")
-            return str(e)
-        self._pair_filled[sid] = tuple(cols)
-        self._say_missing_columns(sid, cols)
-        # 卡片旁邊那句話要講得出檔名 —— 它是使用者認得的東西。
-        ds._d4t_name = os.path.basename(str(klarf_path))
-        self._sync_source_action(node)
-        # 三格的選單（代號／哪張圖／哪些欄）現在才有答案（F15-2）。
-        if self.selected_node == str(node_id):
-            self.param_form.set_dynamic_choices(self._dynamic_choices_for(node))
-        self._refresh_all()
-        # **掛上第二份 = 這條 pipeline 的產出變了**，所以預覽要重跑一次
-        # （2026-08-20）。以前不重跑，於是使用者按完 `Open data…` 什麼事都沒
-        # 發生：影像流的下拉裡沒有 `paired`，要再去點一張卡才會出現 ——
-        # 而「按了鈕、畫面沒反應」讀起來就是「載不進來」。
-        self._schedule_preview()
-        msg = "Paired source · %s" % rep.summary()
-        self._status(msg)
-        return msg
-
     # ---- 三格「用選的」要的答案（F15-2）------------------------------------
-    def _pair_columns_wanted(self, source_id: str) -> List[str]:
-        """指著這個代號的每一張配對卡，`carry` 的聯集（`carry` 的意思住在卡片）。"""
-        from d4t.core.steps.pair_source import columns_for_source
-
-        return columns_for_source(self.model.nodes.values(), source_id)
-
     def _number_info(self):
         """設定區「插入數字 ▾」的 tooltip 與區域顏色（`ParamForm.number_info_provider`）。"""
         from .number_picker import number_tips
@@ -5099,177 +4970,7 @@ class StudioWindow(QMainWindow):
         return pair_ingest.sources_for_run(self.dataset)
 
 
-    def _after_carry_param(self, node_id: str, name: str) -> None:
-        """Load 卡改了 `carry` 之後要重填（F16）。
 
-        跟 `_after_pair_param` 是同一件事的另一半：那一支管掛上來的第二份，
-        這一支管主資料集。分開兩支是因為它們問的是**兩份不同的 KLARF**。
-        """
-        node = self.model.nodes.get(str(node_id))
-        if node is None or node.step not in ("load_patch", "load_single"):
-            return
-        if name != "carry":
-            return
-        self._carry_main_columns()
-
-    def _carry_main_columns(self) -> None:
-        """把 Load 卡點名的 KLARF 欄位填進主資料集的每一顆。
-
-        **答案只有一份**：`steps.load.columns_for_main`（`carry` 的意思住在
-        卡片）。CLI 走的是同一支 —— 兩個入口，不是兩份規則。
-
-        沒有人勾 → 一欄都不填，所以既有的 recipe 一個位元組都沒多帶。
-        要一個這份 KLARF 沒有的欄 → **在勾的當下就講**（同 F15-2：等跑起來
-        才講的話，那句話會一顆一顆出現，而且列的是「你要的」不是「它有的」）。
-        """
-        from d4t.core.ingest.dataset import (
-            columns_of, fill_fields, missing_columns_of,
-        )
-        from d4t.core.steps.load import columns_for_main
-
-        if self.dataset is None:
-            return
-        want = columns_for_main(self.model.nodes.values())
-        if getattr(self, "_carry_filled", None) == tuple(want):
-            return                          # 沒變 —— 不用走一遍幾十萬顆
-        absent = missing_columns_of(self.dataset, want)
-        fill_fields(self.dataset, want)
-        self._carry_filled = tuple(want)
-        if absent:
-            self._status(
-                "This lot has no KLARF column called %s. It has: %s."
-                % (", ".join(absent), ", ".join(columns_of(self.dataset))),
-                "error")
-
-    def _sync_pair_fields(self, source_id: str) -> None:
-        """`carry` 改了 → 把那幾欄補進掛著的那一份（F15-2）。
-
-        掛的時候只複製「當時要的那幾欄」，所以之後才勾起來的那一欄不在
-        `fields` 裡 —— 而卡片會照它的規矩說「這一份沒有這個欄位」，
-        那句話是錯的（欄位在，只是沒複製）。KlarfDoc 還在手上，重填很便宜。
-        """
-        from d4t.core.ingest import pair_source as pair_ingest
-
-        sid = str(source_id or "").strip()
-        if not sid or self.dataset is None:
-            return
-        if sid not in (getattr(self.dataset, "sources", None) or {}):
-            return
-        cols = self._pair_columns_wanted(sid)
-        if self._pair_filled.get(sid) == tuple(cols):
-            return                          # 要的欄位沒變 —— 不用走一遍幾十萬顆
-        pair_ingest.refill_fields(self.dataset, sid, cols)
-        self._pair_filled[sid] = tuple(cols)
-        self._say_missing_columns(sid, cols)
-
-    def _say_missing_columns(self, source_id: str, columns: Sequence[str]) -> None:
-        """要 carry 一個那一份沒有的欄位 → **在勾的當下**就講（F15-2）。
-
-        以前這句話要等跑起來才出現，一顆一顆講，而且列出來的是「帶過來的那幾
-        欄」不是「那一份有的那幾欄」—— 打錯字的人最需要的正是後者。
-        這裡手上還有 KlarfDoc，所以答得出來。
-        """
-        from d4t.core.ingest import pair_source as pair_ingest
-
-        src = (getattr(self.dataset, "sources", None) or {}).get(str(source_id))
-        if src is None:
-            return
-        missing = pair_ingest.missing_columns(src, columns)
-        if not missing:
-            return
-        self._status(
-            "'%s' has no KLARF column %s — its columns are: %s"
-            % (source_id, ", ".join(missing),
-               ", ".join(pair_ingest.columns_of(src))), "error")
-
-    def _on_open_gds(self) -> None:
-        path = QFileDialog.getExistingDirectory(
-            self, "Attach GLAS export (the folder with the *_label.png files)")
-        if path:
-            self.attach_gds_export(path)
-
-    def attach_gds_export(self, export_dir: str) -> str:
-        """把一份 GLAS 匯出掛到目前的資料集上（F11 Region-3）。回傳狀態列那句話。
-
-        **配對在 ingest 層**（`core/ingest/glas_export.attach`），這裡只負責問
-        路徑、把結果講出來、以及把 layer 的名字**填進卡片** —— 那個對照表在
-        匯出的 manifest 裡，讓使用者自己去抄一次是在製造一個可以抄錯的機會
-        （同 F11 Input 的「量到的 pitch 自動填回參數」）。
-        """
-        from d4t.core.ingest import glas_export
-
-        if not self.dataset:
-            msg = ("Load the lot first — “Open GDS export…” attaches labels to "
-                   "the defects that are already open.")
-            self._status(msg)
-            return msg
-        try:
-            rep = glas_export.attach(self.dataset, export_dir)
-            doc = glas_export.read_manifest(export_dir)
-        except glas_export.GlasExportError as e:
-            self._status(str(e))
-            return str(e)
-
-        # 名字填進**每一張** roi_reference 卡（還沒設定過的才填 —— 使用者改過的
-        # 名字不能被一次「重新掛載」洗掉）。
-        default = glas_export.default_layer_map(doc)
-        filled = 0
-        if default:
-            for nid, node in self.model.nodes.items():
-                if node.step == "roi_reference" and not str(
-                        node.params.get("layers", "") or "").strip():
-                    self.model.set_param(nid, "layers", default)
-                    filled += 1
-        # 表單的列數要照**這份匯出有幾層**排（`ChannelMapField` 的 labels 版）。
-        self._gds_layers = list(rep.layers)
-        self.param_form.set_label_count(len(rep.layers))
-        msg = rep.summary()
-        if filled:
-            msg += " · filled the layer names into %d card(s)" % filled
-        for w in rep.warnings:
-            msg += " · △ %s" % w
-        self._status(msg)
-        self.refresh_preview()
-        return msg
-
-
-    def _on_open_recipe(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open Recipe", "", "Recipe JSON (*.json);;All files (*)")
-        if not path:
-            return
-        self.load_recipe_path(path)
-
-    #: 「另存」對話框的副檔名 —— 這一個常數是為了**下面那句 endswith**
-    #: 而存在的，不是為了整齊：Windows 的另存對話框在使用者自己打了一個
-    #: 沒有副檔名的名字時**不會**幫他補（`docs/NO-GIT-SETUP.md` 記過記事本
-    #: 那個反例），而一份叫 `char` 的檔案下次打開時在「Recipe JSON」這個
-    #: 篩選底下**看不見**。
-    RECIPE_SUFFIX = ".json"
-
-    def _on_save_recipe(self) -> bool:
-        """`Ctrl+S` 與工具列那顆鈕：**存回原檔**，沒有原檔才問路徑。
-
-        回傳「真的存下去了嗎」—— 關窗前的確認要靠這個答案（F7-16）：
-        使用者在另存對話框按取消，意思是「先別關」，不是「丟掉」。
-        """
-        if self.recipe_path:
-            return bool(self.save_recipe_path(self.recipe_path))
-        return self._on_save_recipe_as()
-
-    def _on_save_recipe_as(self) -> bool:
-        """`Ctrl+Shift+S`：**一定問路徑**。"""
-        start = self.recipe_path or ("%s%s" % (
-            str(getattr(self.model, "recipe_id", "") or "recipe").strip()
-            or "recipe", self.RECIPE_SUFFIX))
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Recipe", start,
-            "Recipe JSON (*%s);;All files (*)" % self.RECIPE_SUFFIX)
-        if not path:
-            return False
-        if not str(path).lower().endswith(self.RECIPE_SUFFIX):
-            path = "%s%s" % (path, self.RECIPE_SUFFIX)
-        return bool(self.save_recipe_path(path))
 
     # ==================================================================== #
     # 關窗
@@ -5325,7 +5026,7 @@ class StudioWindow(QMainWindow):
             return False
         if answer == "discard":
             return True
-        return bool(self._on_save_recipe())
+        return bool(open_dialogs.save_recipe(self))
 
     def showEvent(self, event) -> None:  # Qt hook
         super().showEvent(event)
@@ -5425,7 +5126,7 @@ class StudioWindow(QMainWindow):
             except Exception:  # 關窗不准擋路
                 swallowed("studio.closeEvent")
         for worker in (self.preview_worker, self.trial_worker,
-                       self.dataset_worker, self.pair_worker,
+                       self.dataset_worker, self.attach_ctl.pair_worker,
                        self.gallery_ctl.thumb_worker, self.output_worker):
             try:
                 worker.stop()

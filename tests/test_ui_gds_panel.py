@@ -305,13 +305,13 @@ def test_a_card_added_after_the_export_still_gets_its_layer_names(qapp,
         try:
             assert win.load_dataset_path(lot["klarf"], sync=True)
             if order == "attach-first":
-                win.attach_gds_export(str(tmp_path / "exp"))
+                win.attach_ctl.attach_gds_export(str(tmp_path / "exp"))
                 nid = win.model.add_step("roi_reference")
                 win._autofill_new_card(nid)
             else:
                 nid = win.model.add_step("roi_reference")
                 win._autofill_new_card(nid)
-                win.attach_gds_export(str(tmp_path / "exp"))
+                win.attach_ctl.attach_gds_export(str(tmp_path / "exp"))
             return str(win.model.nodes[nid].params.get("layers", ""))
         finally:
             win.deleteLater()
@@ -342,11 +342,11 @@ def test_the_users_own_names_are_never_overwritten(qapp, tmp_path):
     win = StudioWindow(show_welcome_on_start=False)
     try:
         win.load_dataset_path(lot["klarf"], sync=True)
-        win.attach_gds_export(str(tmp_path / "exp"))
+        win.attach_ctl.attach_gds_export(str(tmp_path / "exp"))
         nid = win.model.add_step("roi_reference")
         win._autofill_new_card(nid)
         win.model.set_param(nid, "layers", "1:epi, 2:mg")
-        win.attach_gds_export(str(tmp_path / "exp"))          # 再掛一次
+        win.attach_ctl.attach_gds_export(str(tmp_path / "exp"))          # 再掛一次
         win._autofill_new_card(nid)
         assert win.model.nodes[nid].params["layers"] == "1:epi, 2:mg"
     finally:
@@ -401,7 +401,7 @@ def test_connecting_the_labels_fills_the_layers_and_shows_boxes(qapp, tmp_path):
     win = StudioWindow(show_welcome_on_start=False)
     try:
         assert win.load_dataset_path(lot["klarf"], sync=True)
-        win.attach_gds_export(exp)
+        win.attach_ctl.attach_gds_export(exp)
         sid = win.model.add_step("load_sidecar")
         win.select_node(sid)
         win.refresh_preview(sync=True)
@@ -438,7 +438,7 @@ def test_the_real_layer_names_win_over_the_fallback(qapp, tmp_path):
     win = StudioWindow(show_welcome_on_start=False)
     try:
         win.load_dataset_path(lot["klarf"], sync=True)
-        win.attach_gds_export(exp)
+        win.attach_ctl.attach_gds_export(exp)
         gid = win.model.add_step("roi_reference")
         win._autofill_new_card(gid)
         got = win.model.nodes[gid].params["layers"]
@@ -460,7 +460,7 @@ def test_an_excluded_layer_stays_excluded(qapp, tmp_path):
     win = StudioWindow(show_welcome_on_start=False)
     try:
         win.load_dataset_path(lot["klarf"], sync=True)
-        win.attach_gds_export(exp)
+        win.attach_ctl.attach_gds_export(exp)
         sid = win.model.add_step("load_sidecar")
         win.select_node(sid)
         win.refresh_preview(sync=True)
