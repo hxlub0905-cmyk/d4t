@@ -1,7 +1,9 @@
 # F117 — UI 檢視：待改事項（2026-09-19，已複查）
 
 狀態：**進行中（2026-09-19）** —— F116 拆完了，開始做。第一批挑的是**「一改多條」的根因群**（不是照 P1/P2/P3 走）：
-已完成 **A3＋J2**（選到的卡捲進視野）、**I1**（縮圖 bin 顏色走共用調色盤）、**F6＋I5**（報表的數字跟畫面同一條規則）。
+已完成 **A3＋J2**（選到的卡捲進視野）、**I1**（縮圖 bin 顏色走共用調色盤）、**F6＋I5**（報表的數字跟畫面同一條規則）、
+**G1**（歡迎頁不介紹打不開的東西）、**F1**（輸出檔的 score 欄不重複）、
+**J1＋I11＋J5＋J6**（使用者面的字 —— 整群走 [F118](F118-user-facing-wording.md)）。
 中文化（H5）這一輪**不碰**（使用者決定：那一條要先有 2–3 位目標使用者試用）。
 
 ⚠ **做的時候查出兩條跟原本寫的不一樣**，已改在下面：**D2** 不是 I1 的同一個病根（撤回它的推測）、**D3** 撤回（那個位數是算過的）。
@@ -22,7 +24,7 @@
 
 | # | 問題 | 建議 | 查證 |
 |---|---|---|---|
-| J1 | **錯誤訊息是給開發者看的**（同 I11／J5／J6 —— 同一個病根）| **設計寫好了：[`F118-user-facing-wording.md`](F118-user-facing-wording.md)**，還沒開工。一句話：`Issue` 加選配的結構化欄位（預設空，所以 63 個產地可以一個一個搬），UI 新增 `ui/wording.py` 組句子；`detail` 不刪，CLI 照舊。⚠ 查出來 **`StepError` 那一半已經有結構了**（`step_key` ＋ 不含前綴的 `detail`），UI 只是沒用它 | ✅ 真的跑出一句來看過（`route 'ebi_patch': the variables ['nosuch_feature'] … (['cd_axis_deg', …20 幾個…])`）|
+| J1 ✅ | **錯誤訊息是給開發者看的**（同 I11／J5／J6 —— 同一個病根）| **做完了：[`F118-user-facing-wording.md`](F118-user-facing-wording.md) 第 1～3 步。**`Issue` 加選配的結構化欄位（預設空，所以 48 個產地一條一條搬），UI 新增 `ui/wording.py` 組句子；`detail` 不刪，CLI 照舊。⚠ 查出來 **`StepError` 那一半已經有結構了**（`step_key` ＋ 不含前綴的 `detail`），UI 只是沒用它。⚠ 產地是 **48 不是 63**：`klarf_core.Issue` 是另一個 class | ✅ 真的跑出一句來看過（`route 'ebi_patch': the variables ['nosuch_feature'] … (['cd_axis_deg', …20 幾個…])`）|  **已關（F118 第 1～3 步）**
 | F2 | `report.html` 沒有執行資訊：只有 recipe id 與 bin 計數，沒有日期、來源 KLARF、recipe 版本、d4t 版本／build id、取樣方式。檔案一離開電腦就追不回是哪一次跑的（`report.xlsx` 的摘要頁有 recipe 資訊，HTML 沒有） | HTML 報表頭加一塊 metadata，與 xlsx 摘要頁同源 | ✅ 讀過輸出檔全文 |
 | G1 | ✅ **做完** —— 而且不只一處：`welcome.py:111` 那一句、`btn_open` 的 tooltip（`the other three kinds`，也點名了 multi-page TIFF）、還有頁尾那句 **`the four kinds of data it reads`**（`INPUT_SOURCES` 是**三**條）| **改法不是「改字」**：`InputSource` 的說明寫著那張表存在的理由是「同一組入口被抄在三個地方…三份會漂」—— **導覽這一段就是那第三份**，從來沒被改成從表上長。所以導覽**不再列清單**（留給真的一種一列的空白狀態），數量一律數出來（`ways_in()`）。`_FOOTER_HINT` 常數改成函式 —— 它在 import 那一刻算，換 profile 之後會停在舊分支（U10 漏網的那一個）| ✅ 三條測試：不准再列清單、數字要用數的、以及一根釘死 `tiff_stack` 的回歸釘 |
 | A3 | ✅ **做完** —— 在 Tune 模式選取一張卡，畫布不會把它捲進視野 | 新增 `canvas.ensure_card_visible()`（**只捲，不亮** —— `reveal_cards` 那一套的 hover 高亮是給「指給我看」用的），`select_node` 叫它。⚠ **沒有接進 `set_selected`**：那一支在重建路徑上也會被叫到，接上去使用者每拖一次參數畫布就把他捲回去 | ✅ 附帶發現：`_on_problem_activated` 的說明從 U2 起就寫著「選中那張卡並捲到它」—— **那句話描述的行為一直不存在** |
@@ -39,7 +41,7 @@
 | G4 | Template 對話框工具列下方那排說明字被截、還壓著一條捲軸 | 說明改 tooltip 或換行 | ✅ 截圖 |
 | I1 | ✅ **做完** —— `bin_hex()` 改走 `leaf_color`（失敗＝紅、未判定＝中性沒有被吃掉）。多類別時更明顯：bin 1/2/3 在樹上是三色、在縮圖牆上曾是同一個綠 | 測試**不釘色碼**（釘了換主題就紅然後被關掉），問的是「縮圖色 ＝ 樹的色」 | ✅ ⚠ **verdict chip 沒有跟著改** —— 見 D2 |
 | J2 | ✅ **做完**（同 A3 那一行）—— 點問題清單會 `select_node`，所以 A3 修好它就跟著好了 | — | ✅ |
-| J5 | 問題清單一行一條、要水平捲動才讀得完；狀態列紅字被截斷 | 換行；每條前面放卡片名＋「帶我去」 | ✅ 截圖 ｜ **併進 [F118](F118-user-facing-wording.md)**（同 J1 的病根）|
+| J5 ✅ | 問題清單一行一條、要水平捲動才讀得完；狀態列紅字被截斷 | 換行；每條前面放卡片名＋「帶我去」 | ✅ 截圖 ｜ **併進 [F118](F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 3～4 步）**
 | K1 | App 內沒有連到 `docs/USING-*.md` 的入口；手冊只在 repo 裡，廠內使用者不會去翻 | 卡片／視窗的「?」打開對應章節（離線、本機） | ✅ `d4t/ui` 內沒有任何開啟手冊的程式 |
 | K3 | 整批跑沒有剩餘時間估計；`.I01` 一批可到 6 萬顆 | 進度加 ETA；可暫停；跑完通知 | ✅ 找不到 ETA 相關程式 |
 | H5 | **中文化策略（待使用者決定）**：機制已在（`strings.tr()`、`zh_TW.json` 39 句），卡片名與階段名依既定規則不翻 | 術語留英文、說明翻中文；先依 `_seen` 曝光數翻前 100 句；先請 2–3 位目標使用者試用確認需求 | — |
@@ -81,13 +83,13 @@
 | I6 | 畫布、Features、Results 之間可以互相指：滑過 Features 一列亮起來源卡、點 Results 欄名跳到那張卡（`reveal_cards` 已有，可沿用） | 延伸既有機制 | 建議 |
 | I7 | 每張卡都印 `20 ok · 2051 img/s` | 只在失敗或特別慢時顯示 | 主觀 |
 | I8 | 參數區段標題（`1 · Where to measure`）比欄位名小 | 調字級 | ✅ |
-| I11 | 刪卡後狀態列只寫 `Removed "dn"`，沒有復原提示 | `已移除 Denoise · 復原（Ctrl+Z）` | ✅ ｜ **併進 [F118](F118-user-facing-wording.md)**（同 J1 的病根）|
+| I11 ✅ | 刪卡後狀態列只寫 `Removed "dn"`，沒有復原提示 | `已移除 Denoise · 復原（Ctrl+Z）` | ✅ ｜ **併進 [F118](F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 1 步）**
 | I12 | 對話框主按鈕樣式不一（範本庫 `Load` 藍、Chart settings `OK` 白） | 統一 | ✅ |
 | I13 | 符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`） | 統一 | ✅ |
 | I15 | Results 表格橫向捲動時 defect 欄會跑掉（表頭本來就固定） | 凍結第一欄 | ✅ |
 | I16 | Results、Chart settings、範本庫不記得視窗大小位置（`d4t/ui` 內沒有 `saveGeometry`） | QSettings 記住並經過 `keep_on_screen` | ✅ |
 | J4 | 刪掉中間的卡，上下游斷開 | 型別對得上時提供一鍵補線 | 建議 |
-| J6 | warning 太長 | 先講結論 | ✅ ｜ **併進 [F118](F118-user-facing-wording.md)**（同 J1 的病根）|
+| J6 ✅ | warning 太長 | 先講結論 | ✅ ｜ **併進 [F118](F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 4 步）**
 | K2 | Recipe 差異比較（兩份或存檔前後） | 逐卡逐參數 diff | 建議 |
 | K4 | 介面字級可調 | 90／100／115% | 建議 |
 | G8 | ❓ 選著 GLV 卡開均勻度圖表視窗是空白（從 `Write charts` 卡開正常） | 先重現；空狀態要說明 | ❓ |

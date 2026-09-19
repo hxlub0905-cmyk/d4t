@@ -140,7 +140,7 @@ a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
 f833c92e7f7d4e409ac777ab681db38434d619e1 d4t/ui/param_form.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
-c3e651127001cfc145f49ba3fd16ac0f195edd0c d4t/ui/problems_bar.py
+8b27913e9a32d324381a1e00dca9e53b267711fc d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
 9bcae50b6478688608568c6c8242688343af9d38 d4t/ui/region_words.py
 c2a8983fa3fb3c815ce1bd9a3b89baa7d67f1392 d4t/ui/results.py
@@ -153,7 +153,7 @@ acee90a6152ed5654699f853ebab9c7f30050832 d4t/ui/run_controller.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-9ca169493f9d83cafabc487b5ba72c99e0411897 d4t/ui/studio.py
+938bdae4c6bd3d4508b5e3522c05881fb7e7cd19 d4t/ui/studio.py
 0a033283dc7745779c44c2a28026cbb836627661 d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
@@ -186,8 +186,8 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-fa5db46811cba285fc6a853a68978bafcf9d994d docs/plans/F117-ui-review.md
-ccf48b8c4e6161b3ba4b5ca3ef52b55cb9f49dd1 docs/plans/F118-user-facing-wording.md
+46f5b9d439c0081c8bbb7e0d10a4908c6d8000fd docs/plans/F117-ui-review.md
+c979748bdde243bf2bd0e073acd4bd40e5eee235 docs/plans/F118-user-facing-wording.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -425,7 +425,7 @@ ee2409f03b5bdad686549ea5d9639d5653151350 tests/test_ui_number_picker.py
 517c38a66c0973adcc445eaae1b50d4f1748e0cf tests/test_ui_panel_truth.py
 d346560d0285c87606673279e3417ad6109e7c38 tests/test_ui_panels_pr2.py
 6a3f59e4edeb47dc32395c89d7ebf0fc702a8eea tests/test_ui_preview_why.py
-72225577eae98b7205c5c93a59edafb7ed158e16 tests/test_ui_problems_bar.py
+a34f4bc35c3ba61865120a2f96deb5c815dbd95a tests/test_ui_problems_bar.py
 af11d2dc509035a4c8551497c1b125a44bbac976 tests/test_ui_region_check.py
 8e66ad2bdea14a377ee9b756a30273ec0a32c992 tests/test_ui_region_edges.py
 3f89f089eb6babc96ea6bc50abd8266676d9e389 tests/test_ui_region_hydration.py

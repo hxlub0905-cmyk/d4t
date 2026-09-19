@@ -1232,7 +1232,7 @@ class StudioWindow(QMainWindow):
             return
         row = next((r for r in self.problems.rows() if not r["node_id"]), None)
         if row:
-            self._status(row["detail"] or row["title"],
+            self._status(row["text"] or row["title"],
                          "error" if row["level"] == "error" else "info")
 
     def _node_problems(self, issues: Optional[Sequence[Any]] = None

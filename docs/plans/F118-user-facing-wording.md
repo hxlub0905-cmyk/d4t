@@ -1,9 +1,9 @@
 # F118 — 使用者面的字：訊息不准講開發者的話（F117 J1／I11／J5／J6）
 
-狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1～3 步做完**
-（`ui/wording.py`、`Issue` 的選配欄位、最常出現的六條 lint 已經交結構）。
-下一步是第 4 步（問題清單兩行 ＋「帶我去」）。§5 那 84 條文字斷言實際只動到
-**4 條**，而且四條都變成更好的斷言（讀結構化欄位，不讀句子）—— 見 §5。
+狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1～4 步做完**
+（`ui/wording.py`、`Issue` 的選配欄位、六條 lint 交結構、問題清單兩行＋
+「帶我去」）。**J1／I11／J5／J6 四條都關掉了。** 只剩第 5 步（另外 41 條
+lint 逐步填，不急）。§5 那 84 條文字斷言實際只動到 **4 條** —— 見 §5。
 
 > F117 走查把這件事記成四條（J1 P1、I11、J5、J6）。它們是**同一個病根**，
 > 所以收成一輪：[`F117-ui-review.md`](F117-ui-review.md)。
@@ -177,7 +177,7 @@ Results 的 warning 四個地方都要用**，而那正是 F52（`numbers.py`）
 | **1** ✅ | **做完**。`ui/wording.py`（Qt-free）＋ `card` / `card_of_step` / `field` / `name_list` / `trace_error_text` / `step_error_text`，接了**四**個呼叫端（多一個 `Preview: stopped after “dn”`）。實際畫面：`Removed “dn”` → **`Removed “Write report”`**；`Preview problem: [glv_stats] no input connected…` → **`Preview problem: “GLV”: no input connected…`** | **I11**、J1 的一半 | 低 —— 沒有動 core |
 | **2** ✅ | **做完**。`Issue` 加那四個選配欄位（預設空）＋ `wording.issue_line()`（有結構就用、沒有就退回 `detail`、`detail` 空了退回 `title`），接進 Problems 列、畫布警示點、判定徽章、兩句「不能跑」。§5 那條便利貼也做了：`issue_line()` 對**每一個** `code` 都給得出一句話 | — | 低 —— 48 個產地一個都還沒改 |
 | **3** ✅ | **做完**。搬了七個產地／六條 lint（`unknown-feature` ×2、`not-connected`、`unknown-step`、`ambiguous-input`、`duplicate-region`、`wrong-content`），＋ core 的 `card_name()`／`closest()` | **J1** 主體、J5 | 中 —— 實際只動到 4 條斷言 |
-| **4** | 問題清單改成兩行（結論在第一行、細節第二行）＋「帶我去」 | **J5**、**J6** | 低 |
+| **4** ✅ | **做完**。`problems_bar.row_text()`（結論一行、細節縮排在第二行）、清單換行不橫捲、常駐一句「點一列會跳到那張卡」（以前只在按鈕的 tooltip 上），清單高度 132 → 168 | **J5**、**J6** | 低 |
 | **5** | 剩下 41 條 lint 逐步填（可以分好幾輪，**不急**）| 尾巴 | 低 |
 
 **第 1 步就會讓畫面明顯變好，而且它不動 core** —— 如果這一輪只做得完一步，
