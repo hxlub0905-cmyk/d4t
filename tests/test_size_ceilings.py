@@ -268,7 +268,13 @@ FILE_CEILINGS = {
     # 是看 bin 的**號碼**決定的，而三份出貨的 recipe 全反了（F117 D2）。+85 裡
     # 有一半是 `OUTCOMES` 上面那一段**為什麼不准猜**：`rsem-worst-box` 的
     # bin 2 比 bin 1 更嚴重，任何按號碼排的規則都答不出來。
-    "d4t/core/pipeline/recipe.py": 4427,
+    # 2026-09-20（F119 第 5 步）：4,427 → **4,471**（+44）。標錯／標不一致的
+    # 兩條 lint（`unknown-outcome`／`conflicting-outcome`，照 F118 交結構）。
+    # ⚠ **「還沒說」刻意不是一條 lint**：一份每個舊 recipe 都會亮的訊息會被
+    # 學會忽略，而真的那一條也跟著被忽略 —— 理由寫在 `_outcome_issues` 上面。
+    # 淨增只有 +44 是因為 `bin_labels` / `bin_outcomes` 的兩支走訪收成一支
+    # `entries()`（四個地方對「哪一片排在前面」本來會有四個答案）。
+    "d4t/core/pipeline/recipe.py": 4471,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右

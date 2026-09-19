@@ -438,6 +438,40 @@ class DecideSpec:
     #: （鏈狀樹，見 :func:`rules_to_tree`），所以舊寫法照讀不誤。
     tree: Any = None
 
+    def entries(self) -> List[Tuple[int, str, str]]:
+        """每一類的 ``(bin, 名字, 好壞)``，**照使用者由上往下讀的順序**。
+
+        樹（有的話）→ 規則 → otherwise。`bin_labels` / `bin_outcomes` 與
+        `validate` 的兩條 lint 都走這一支 —— 四個地方各走一次的那天，它們對
+        「哪一片葉子排在前面」會有四個答案（而第一個贏就是靠那個順序）。
+
+        ⚠ **不去重、不過濾**：判準住在呼叫端，因為它們不一樣（名字要非空、
+        好壞要認得、lint 要看得到重複的那幾片）。
+        """
+        out: List[Tuple[int, str, str]] = []
+
+        def _take(b: Any, label: Any, outcome: Any) -> None:
+            try:
+                out.append((int(b), str(label or ""), str(outcome or "")))
+            except (TypeError, ValueError):
+                return
+
+        def _walk(node: Any) -> None:
+            if node is None:
+                return
+            if isinstance(node, TreeLeaf):
+                _take(node.bin, node.label, node.outcome)
+                return
+            _walk(getattr(node, "yes", None))
+            _walk(getattr(node, "no", None))
+
+        _walk(self.tree)
+        for rule in self.rules:
+            _take(rule.bin, rule.label, rule.outcome)
+        _take(self.otherwise_bin, self.otherwise_label,
+              self.otherwise_outcome)
+        return out
+
     def bin_labels(self) -> Dict[int, str]:
         """``bin`` → 使用者給它的名字（沒取名的不在裡面）。
 
@@ -454,31 +488,9 @@ class DecideSpec:
         ⚠ 這一支不 import Qt，也不該（鐵則 1）—— 它回一個 dict，UI 拿去畫。
         """
         out: Dict[int, str] = {}
-
-        def _take(b: Any, label: Any) -> None:
-            text = str(label or "").strip()
-            if not text:
-                return
-            try:
-                key = int(b)
-            except (TypeError, ValueError):
-                return
-            out.setdefault(key, text)
-
-        def _walk(node: Any) -> None:
-            if node is None:
-                return
-            if isinstance(node, TreeLeaf):
-                _take(node.bin, node.label)
-                return
-            _walk(getattr(node, "yes", None))
-            _walk(getattr(node, "no", None))
-
-        # 順序＝使用者由上往下讀的順序：樹（有的話）→ 規則 → otherwise。
-        _walk(self.tree)
-        for rule in self.rules:
-            _take(rule.bin, rule.label)
-        _take(self.otherwise_bin, self.otherwise_label)
+        for b, label, _ in self.entries():
+            if label.strip():
+                out.setdefault(b, label.strip())
         return out
 
     def bin_outcomes(self) -> Dict[int, str]:
@@ -498,30 +510,10 @@ class DecideSpec:
         ⚠ 這一支不 import Qt，也不該（鐵則 1）—— 它回一個 dict，UI 拿去畫。
         """
         out: Dict[int, str] = {}
-
-        def _take(b: Any, outcome: Any) -> None:
-            text = str(outcome or "").strip()
-            if not text or text not in OUTCOMES:
-                return
-            try:
-                key = int(b)
-            except (TypeError, ValueError):
-                return
-            out.setdefault(key, text)
-
-        def _walk(node: Any) -> None:
-            if node is None:
-                return
-            if isinstance(node, TreeLeaf):
-                _take(node.bin, node.outcome)
-                return
-            _walk(getattr(node, "yes", None))
-            _walk(getattr(node, "no", None))
-
-        _walk(self.tree)
-        for rule in self.rules:
-            _take(rule.bin, rule.outcome)
-        _take(self.otherwise_bin, self.otherwise_outcome)
+        for b, _, outcome in self.entries():
+            text = outcome.strip()
+            if text and text in OUTCOMES:
+                out.setdefault(b, text)
         return out
 
 
@@ -724,6 +716,7 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
 DECISION_ISSUE_CODES = frozenset({
     "ambiguous-decision", "bad-bins", "bad-let", "bad-rule",
     "deep-tree", "no-rules", "score-expr", "unknown-feature",
+    "conflicting-outcome", "unknown-outcome",                  # F119
 })
 
 #: 沒有節點、但**不是**判定的那幾條（見上）。兩張表合起來要蓋滿。
@@ -1136,6 +1129,57 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
                 code="bad-rule", level="error", node_id=None,
                 title="The decide block's score expression does not parse",
                 detail=str(e)))
+    out.extend(_outcome_issues(decide))
+    return out
+
+
+def _outcome_issues(decide: "DecideSpec") -> List["Issue"]:
+    """「哪一類是好消息」標錯或標不一致（F119）。
+
+    ⚠ **「還沒說」不是一條 lint。** 一份每個舊 recipe 都會亮的訊息會被學會
+    忽略，而真的那一條也跟著被忽略（`_feature_collisions` 上面那段記過同一
+    件事，而 `test_the_reference_recipes_stay_completely_clean` 鎖的正是
+    「一條都沒有」—— 那些參考檔案就是沒標的）。「還沒說」講在它該講的地方：
+    判定樹的托盤上，就在那一排膠囊旁邊（F119 第 4 步）。
+
+    所以下面兩條**只在使用者真的標了東西的時候**才可能響。
+    """
+    out: List["Issue"] = []
+    known = tuple(x for x in OUTCOMES if x)
+    seen: Dict[int, Tuple[str, str]] = {}
+    for b, label, outcome in decide.entries():
+        text = outcome.strip()
+        if not text:
+            continue
+        who = Q % label if label.strip() else "bin %d" % b
+        if text not in known:
+            advice = ("The choices are %s. That word is ignored, so this "
+                      "class has no colour on the verdict chip."
+                      % ", ".join("'%s'" % x for x in known))
+            out.append(Issue(
+                code="unknown-outcome", level="warning", node_id=None,
+                title="A class says something nobody understands",
+                detail="%s says outcome='%s'. %s" % (who, text, advice),
+                names=(text,), suggest=closest(text, known), advice=advice))
+            continue
+        prev = seen.get(b)
+        if prev is None:
+            seen[b] = (text, label)
+            continue
+        if prev[0] != text:
+            # **第一個贏**（同 `bin_labels`），所以要講出贏的是哪一個 ——
+            # 不然使用者改了後面那一片，畫面上一點反應都沒有。
+            advice = ("Two classes both write bin %d, and they disagree: "
+                      "%s says '%s' and %s says '%s'. The first one wins, so "
+                      "the second has no effect. Give them the same answer, "
+                      "or a different bin." % (b, Q % prev[1] if prev[1].strip()
+                                               else "the first one", prev[0],
+                                               who, text))
+            out.append(Issue(
+                code="conflicting-outcome", level="warning", node_id=None,
+                title="Two classes disagree about whether bin %d is good news"
+                      % b,
+                detail=advice, names=(prev[0], text), advice=advice))
     return out
 
 

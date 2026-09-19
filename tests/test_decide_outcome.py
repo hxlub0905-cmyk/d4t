@@ -149,3 +149,89 @@ def test_the_vocabulary_is_the_one_the_theme_already_uses():
     tokens = (REPO / "d4t" / "ui" / "theme.py").read_text(encoding="utf-8")
     for name in OUTCOMES[1:]:
         assert '"chip_%s_bg"' % name in tokens, name
+
+
+# --------------------------------------------------------------------------- #
+# 3. 標錯／標不一致要講出來（第 5 步）
+# --------------------------------------------------------------------------- #
+def _codes(decide):
+    from d4t.core.pipeline.recipe import validate
+    r = Recipe(recipe_id="t", routes={"ebi_patch": []}, nodes={}, edges=[],
+               score=ScoreSpec(expr="", threshold=0.0, bins={}), decide=decide)
+    return [i for i in validate(r)
+            if i.code in ("unknown-outcome", "conflicting-outcome")]
+
+
+def test_not_answering_is_not_a_lint():
+    """⚠ **這一條擋的是「每一份都多兩行不痛不癢的話」。**
+
+    一份每個舊 recipe 都會亮的訊息會被學會忽略，而真的那一條也跟著被忽略
+    —— `test_the_reference_recipes_stay_completely_clean` 鎖的正是「一條都
+    沒有」，而那些參考檔案就是沒標的。「還沒說」講在它該講的地方：判定樹
+    的托盤上，就在那一排膠囊旁邊。
+    """
+    assert _codes(DecideSpec(tree=_tree())) == []
+
+
+def test_a_word_nobody_understands_gets_a_did_you_mean():
+    """打錯的字**安靜地不生效** —— 沒有這一條的話沒有人會發現。"""
+    got = _codes(DecideSpec(tree=_tree("gud", "good")))
+    assert [i.code for i in got] == ["unknown-outcome"]
+    assert got[0].level == "warning"
+    assert got[0].names == ("gud",)
+    assert "good" in got[0].suggest, got[0].suggest
+    assert "no colour" in got[0].advice
+
+
+def test_two_classes_that_disagree_say_which_one_wins():
+    """同一個 bin 標成一好一壞 —— **第一個贏**，所以要講出贏的是哪一個。
+
+    不講的話使用者去改後面那一片，畫面上一點反應都沒有。
+    """
+    d = DecideSpec(tree=TreeStep(
+        when="x > 1",
+        yes=TreeLeaf(bin=0, label="clean", outcome="good"),
+        no=TreeStep(when="y > 2",
+                    yes=TreeLeaf(bin=0, label="also clean", outcome="bad"),
+                    no=TreeLeaf(bin=1, label="found", outcome="bad"))))
+    got = _codes(d)
+    assert [i.code for i in got] == ["conflicting-outcome"]
+    assert "clean" in got[0].advice and "also clean" in got[0].advice
+    assert "The first one wins" in got[0].advice
+    assert d.bin_outcomes()[0] == "good", "講的跟畫面上真的用的要是同一個"
+    # 同一個答案標兩次不是衝突（那只是寫了兩遍，沒有歧義）。
+    same = DecideSpec(tree=TreeStep(
+        when="x > 1",
+        yes=TreeLeaf(bin=0, label="a", outcome="good"),
+        no=TreeLeaf(bin=0, label="b", outcome="good")))
+    assert _codes(same) == []
+
+
+def test_the_new_lints_hang_on_the_decision_not_on_a_card():
+    """它們沒有 `node_id`（判定不是一張卡），所以判定的徽章要認得它們。"""
+    from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
+    for code in ("unknown-outcome", "conflicting-outcome"):
+        assert code in DECISION_ISSUE_CODES, code
+    for issue in _codes(DecideSpec(tree=_tree("gud", ""))):
+        assert issue.node_id is None
+
+
+# --------------------------------------------------------------------------- #
+# 4. 一支走訪，不是三支
+# --------------------------------------------------------------------------- #
+def test_the_names_and_the_outcomes_are_read_in_the_same_order():
+    """⚠ `bin_labels` / `bin_outcomes` / 兩條 lint **走同一支** `entries()`。
+
+    各走一次的那天，它們對「哪一片葉子排在前面」會有四個答案 —— 而「第一個
+    贏」整條規則就是靠那個順序。這一條問的是那件事還成立。
+    """
+    d = DecideSpec(tree=TreeStep(
+        when="x > 1",
+        yes=TreeLeaf(bin=1, label="first", outcome="bad"),
+        no=TreeLeaf(bin=1, label="second", outcome="good")))
+    # ⚠ 尾巴那一筆是 `otherwise`，**走樹的時候它用不到** —— 但它照樣在清單
+    # 裡，而那是刻意的：`bin_labels` 在 F119 之前就是這樣走的，而它靠「空的
+    # 就不算」把它濾掉。這一支不過濾（判準住在呼叫端），所以這裡看得到它。
+    assert d.entries() == [(1, "first", "bad"), (1, "second", "good"),
+                           (0, "", "")]
+    assert d.bin_labels()[1] == "first" and d.bin_outcomes()[1] == "bad"
