@@ -104,7 +104,7 @@ bd2b6c2523251e7f43333ff4d33788aceb6da270 d4t/ui/attach_sources.py
 d7b22eefab71fa356cf843110791075b6f90e889 d4t/ui/baseline.py
 87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
 c8486175a525e1bf1ec5b7ac141e480f7febfecc d4t/ui/buttons.py
-bd08f442fbfaccc164ba6e1f9852e7cdc903967d d4t/ui/canvas.py
+a963b27751fcf0ba038437d2384ca8e68e3cca7b d4t/ui/canvas.py
 c7c2cf42aded404eca8bcdf788f19ff333dde258 d4t/ui/canvas_edges.py
 f95b2bd90c5936c688e9d929dc63ac22a9598877 d4t/ui/card_menu.py
 e78f82f7bc4f40733f8f34d3a690fd7b975320c0 d4t/ui/cell_canvas.py
@@ -153,7 +153,7 @@ fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-bfcec5e3bceb70cde7acc0b35fa1d1287cf4b74c d4t/ui/studio.py
+1f8665a5b2df178015b6e06ed7d967639fbf020b d4t/ui/studio.py
 0a033283dc7745779c44c2a28026cbb836627661 d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
@@ -337,7 +337,7 @@ bfca03c9af98af641b7618993299825d80b71092 tests/test_sampling.py
 d4970b4251f7710ec2dc51413496330f07a1c2bf tests/test_scale.py
 696446681e693ca5914a7f7bda608597965b9f4a tests/test_shipped_recipes.py
 cfc99c167d84014f55bd0516ca45eb8704237d48 tests/test_show_template.py
-573c90af83e6fa5ad23872426c0dcf5d5873bb28 tests/test_size_ceilings.py
+5c5e503856f9249d157d46f00546007302fad2d7 tests/test_size_ceilings.py
 b916e62bdadbb86a8bcec464b3c5dc3669db66be tests/test_snr.py
 e6078aaff7a3983cb205f68f13d8867ffbcfa2e9 tests/test_steps.py
 a5d93a684cd1b419836199fc9c65f73bc42754cb tests/test_stream_content.py

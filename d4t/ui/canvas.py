@@ -2194,6 +2194,17 @@ class PipelineCanvas(QGraphicsView):
         self.ensureVisible(items[0], 80, 80)
         return len(items)
 
+    def select_card(self, node_id: Optional[str]) -> None:
+        """**這張卡被選了**：畫成選中、清掉樹的選取、捲進視野。
+
+        三件事一起發生，而且只在這一條路上一起發生（`studio.select_node`）——
+        所以它們是**畫布的一個事實**，不是呼叫端要記得照順序做的三件事。
+        清掉樹的選取是「一次只編一個東西」（卡片或樹的一步）。
+        """
+        self.set_selected(node_id)
+        self.set_tree_selected(None)
+        self.ensure_card_visible(node_id)
+
     def ensure_card_visible(self, node_id: Optional[str]) -> bool:
         """把一張卡捲進視野 —— **只捲，不亮也不選**（F117 A3／J2）。
 
