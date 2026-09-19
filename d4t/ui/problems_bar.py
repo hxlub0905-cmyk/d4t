@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import strings
+from . import strings, wording
 from .theme import TOKENS
 
 __all__ = ["ProblemsBar", "counts_of", "summary_of", "issue_rows"]
@@ -84,11 +84,17 @@ def summary_of(issues: Sequence[Any]) -> str:
                    else " — you can still run")
 
 
-def issue_rows(issues: Sequence[Any]) -> List[Dict[str, Any]]:
+def issue_rows(issues: Sequence[Any],
+               model: Any = None) -> List[Dict[str, Any]]:
     """lint 的發現 → 清單要顯示的列（**純資料**，排序規則住在這裡）。
 
     同一級的保持 lint 給的順序 —— 那個順序是照 pipeline 由上游到下游走出來
     的，而「先修上游那個」通常是對的（下游那幾條常常是它的回音）。
+
+    ``model`` 給了就用它把 node id 與參數名換成畫面上的字（`wording`，
+    F118）—— **沒給也有一句話**（退回 `detail`），因為這一支的其他使用者
+    （測試、CLI 的匯出）手上沒有 model。``detail`` 原樣留著：它是 lint 自己
+    的話，而 ``text`` 是畫面那一句，兩個問的不是同一件事。
     """
     rank = {level: i for i, level in enumerate(LEVEL_ORDER)}
     rows = []
@@ -99,6 +105,7 @@ def issue_rows(issues: Sequence[Any]) -> List[Dict[str, Any]]:
             "node_id": str(getattr(issue, "node_id", "") or ""),
             "title": str(getattr(issue, "title", "") or ""),
             "detail": str(getattr(issue, "detail", "") or ""),
+            "text": wording.issue_line(issue, model),
             "code": str(getattr(issue, "code", "") or ""),
             "_sort": (rank.get(level, len(rank)), i),
         })
@@ -167,9 +174,13 @@ class ProblemsBar(QWidget):
         self.set_issues(())
 
     # ---- 對外 -------------------------------------------------------------
-    def set_issues(self, issues: Sequence[Any]) -> None:
-        """換一份 lint 結果（宿主每次 model 變動時餵）。"""
-        self._rows = issue_rows(issues)
+    def set_issues(self, issues: Sequence[Any], model: Any = None) -> None:
+        """換一份 lint 結果（宿主每次 model 變動時餵）。
+
+        ``model`` 是拿來把內部識別碼換成畫面上的字的（F118）—— 宿主一定給得
+        出來，所以它預設 None 只是為了讓這個 widget 自己測得動。
+        """
+        self._rows = issue_rows(issues, model)
         c = counts_of(issues)
         self.label.setText(summary_of(issues))
         worst = next((lv for lv in LEVEL_ORDER if c[lv]), "")
@@ -187,7 +198,7 @@ class ProblemsBar(QWidget):
         self.list.clear()
         for row in self._rows:
             text = "%s  %s" % (LEVEL_MARK.get(row["level"], "·"),
-                               row["detail"] or row["title"])
+                               row["text"] or row["title"])
             item = QListWidgetItem(text, self.list)
             item.setData(Qt.UserRole, row["node_id"])
             item.setToolTip("%s\n%s" % (row["title"], row["detail"])

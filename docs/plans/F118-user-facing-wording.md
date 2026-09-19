@@ -1,8 +1,9 @@
 # F118 — 使用者面的字：訊息不准講開發者的話（F117 J1／I11／J5／J6）
 
-狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1 步做完**
-（`ui/wording.py` ＋ 四個呼叫端，不動 core）。下一步是第 2 步
-（`Issue` 加選配欄位）。§5 那 84 條文字斷言仍然是後面幾步真正的成本。
+狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1、2 步做完**
+（`ui/wording.py`、`Issue` 的四個選配欄位、`issue_line()` 接上四個顯示面）。
+下一步是第 3 步（搬最常出現的 6 條 lint）—— **那一步才會動到 §5 那 84 條
+文字斷言**，它仍然是這一輪真正的成本。
 
 > F117 走查把這件事記成四條（J1 P1、I11、J5、J6）。它們是**同一個病根**，
 > 所以收成一輪：[`F117-ui-review.md`](F117-ui-review.md)。
@@ -61,12 +62,21 @@ this route produces (['cd_axis_deg', 'cd_bright', 'cd_edge_score', 'cd_lines',
   `[glv_stats]` 是 `str(e)` 來的，而 `e.detail` 就是同一句話的乾淨版；
 * `Issue` 那一半**沒有**解決：句子是在 core 組好的，UI 拿到時已經是散文。
 
-### 63 個產地
+### 48 個產地（**不是 63** —— 第 2 步量出來的）
 
 ```
 d4t/core/pipeline/recipe.py   48
-d4t/core/ingest/klarf_core.py 15
 ```
+
+⚠ **`Issue` 有兩個，不是一個。** `klarf_core.py` 那 15 個是它**自己的**
+`Issue`（欄位是 `code / level / title / detail / count / fixable`），跟
+`recipe.Issue` 沒有繼承關係，也不經過 Problems 列 —— 它是 KLARF 健檢的結果。
+所以這一輪的範圍是 **48**，而 `klarf_core` 要不要跟進是另一個題目。
+
+那 48 個**全部是 keyword-only 呼叫**（第 2 步逐一確認過），所以加選配欄位
+不會有「位置參數對錯位」這種安靜的錯。其中**一個是轉手的**
+（`code=str(code)`，內容來自 `Step.kind_issues`）—— `tests/test_ui_wording.py`
+把那個數字寫死成 1，第二個轉手的地方出現時會紅。
 
 ### 一句話服務兩種讀者
 
@@ -88,11 +98,11 @@ d4t/core/ingest/klarf_core.py 15
 |---|---|---|
 | **A** | UI 拿到 `detail` 之後做字串後處理（正則把 `['x']` 換成 `x`、把 `route '…'` 拿掉）| **對散文做正則**。句子一改就失效，而且失效的方式是**安靜的**（換回原樣，沒有人會發現）|
 | **B** | core 直接把卡片名／label 組進句子 | core 要 import UI 的詞彙（`Step.label` 在 `core.pipeline.step` 上還好，但「只有一條 route 就不要講 route」是**畫面的判斷**，core 不知道使用者在看什麼）|
-| **C** ✅ | **core 出結構化欄位，UI 組句子** | 要動 63 個產地 —— 但可以**逐步**做（見 §4），而且每一步都可驗 |
+| **C** ✅ | **core 出結構化欄位，UI 組句子** | 要動 48 個產地 —— 但可以**逐步**做（見 §4），而且每一步都可驗 |
 
 ### 選 C，而且形狀已經有先例
 
-`Issue` 加**選配**欄位（預設空，所以 63 個產地不必一次全改）：
+`Issue` 加**選配**欄位（預設空，所以 48 個產地不必一次全改）：
 
 ```python
 @dataclass
@@ -111,7 +121,7 @@ class Issue:
 
 * **`detail` 不刪**：CLI（`d4t run` / lint）與測試照舊拿得到一句完整的話，
   而 CLI 的讀者本來就接受 `route 'ebi_patch'` 這種講法；
-* **UI 有結構就用結構、沒有就退回 `detail`** —— 所以 63 個產地可以一個一個搬，
+* **UI 有結構就用結構、沒有就退回 `detail`** —— 所以 48 個產地可以一個一個搬，
   每搬一個畫面就好一條，中途不會有「半好半壞」的破畫面。
 
 ### UI 那一側：一支 `wording.py`
@@ -141,7 +151,7 @@ Results 的 warning 四個地方都要用**，而那正是 F52（`numbers.py`）
 | 步 | 做什麼 | 關掉 | 風險 |
 |---|---|---|---|
 | **1** ✅ | **做完**。`ui/wording.py`（Qt-free）＋ `card` / `card_of_step` / `field` / `name_list` / `trace_error_text` / `step_error_text`，接了**四**個呼叫端（多一個 `Preview: stopped after “dn”`）。實際畫面：`Removed “dn”` → **`Removed “Write report”`**；`Preview problem: [glv_stats] no input connected…` → **`Preview problem: “GLV”: no input connected…`** | **I11**、J1 的一半 | 低 —— 沒有動 core |
-| **2** | `Issue` 加那四個選配欄位（預設空），UI 的 `issue_line()` 有就用、沒有就退回 `detail` | — | 低 —— 63 個產地一個都還沒改 |
+| **2** ✅ | **做完**。`Issue` 加那四個選配欄位（預設空）＋ `wording.issue_line()`（有結構就用、沒有就退回 `detail`、`detail` 空了退回 `title`），接進 Problems 列、畫布警示點、判定徽章、兩句「不能跑」。§5 那條便利貼也做了：`issue_line()` 對**每一個** `code` 都給得出一句話 | — | 低 —— 48 個產地一個都還沒改 |
 | **3** | 搬**最常出現的 6 條** lint（`unknown-feature`、`ambiguous-input`、`duplicate-region`、`no-input`、`unknown-step`、`wrong-content`）填那四個欄位 | **J1** 主體、J5 | 中 —— 會動到 §5 那批文字斷言 |
 | **4** | 問題清單改成兩行（結論在第一行、細節第二行）＋「帶我去」 | **J5**、**J6** | 低 |
 | **5** | 剩下 42 條 lint 逐步填（可以分好幾輪，**不急**）| 尾巴 | 低 |

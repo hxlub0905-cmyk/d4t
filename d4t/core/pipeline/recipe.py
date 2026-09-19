@@ -3146,6 +3146,29 @@ class Issue:
     title: str
     detail: str
 
+    # ---- 給畫面組句子用的欄位（F118）--------------------------------------
+    #
+    # ⚠ **全部選配，預設空** —— 48 個產地一個一個搬，中途不會半好半壞：
+    # UI 有結構就用結構，沒有就退回 `detail`（`ui/wording.issue_line`）。
+    #
+    # 為什麼句子不在這裡組（F118 §3）：`detail` 現在寫的是
+    # ``route 'ebi_patch': the variables ['nosuch_feature'] …`` —— 三個問題
+    # 疊在一句話裡（引擎的詞、Python 的 repr、把整條 route 的特徵全列出來）。
+    # 而其中一個**只有畫面答得出來**：「只有一條 route 的時候不要講 route」
+    # 要知道使用者現在在看什麼，core 不知道。
+    #
+    # ⚠ **`detail` 不刪**：CLI（`d4t run` 的 lint 清單）與測試照舊拿得到一句
+    # 完整的話，而那邊的讀者本來就接受 `route 'x'` 這種講法。
+    #: 這條在講哪一格（參數名）—— 畫面會把它換成那一格上面寫的字。
+    param: Optional[str] = None
+    #: 句子裡要列出來的名字（**畫面決定怎麼排版**：引號、逗號、列幾個就夠）。
+    names: Tuple[str, ...] = ()
+    #: 「你是不是要打這個」——最接近的幾個（拼錯字時比列出全部有用得多）。
+    suggest: Tuple[str, ...] = ()
+    #: 哪一條 route。畫面**只在多於一條時**才講 —— 單 route 的 recipe 上
+    #: 那個字只是雜訊。
+    route: Optional[str] = None
+
 
 def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
                       issues: List[Issue], nid: str,

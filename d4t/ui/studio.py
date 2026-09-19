@@ -1264,7 +1264,7 @@ class StudioWindow(QMainWindow):
             if prev is not None and (rank.get(str(issue.level), 1)
                                      >= rank.get(prev[1], 1)):
                 continue
-            out[nid] = (str(issue.detail or issue.title), str(issue.level))
+            out[nid] = (wording.issue_line(issue, self.model), str(issue.level))
         return out
 
     def _refresh_pipeline(self) -> None:
@@ -1274,7 +1274,7 @@ class StudioWindow(QMainWindow):
             issues: Sequence[Any] = self.model.validate()
         except Exception:  # 顯示用
             issues = []
-        self.problems.set_issues(issues)
+        self.problems.set_issues(issues, self.model)
         problems = self._node_problems(issues)
         nodes: List[Dict[str, Any]] = []
         for nid in self.model.node_order:
@@ -1479,7 +1479,7 @@ class StudioWindow(QMainWindow):
                 continue
             lvl = str(issue.level)
             if best is None or rank.get(lvl, 1) < rank.get(best[1], 1):
-                best = (str(issue.detail or issue.title), lvl)
+                best = (wording.issue_line(issue, self.model), lvl)
         return best or ("", "")
 
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:

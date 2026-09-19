@@ -38,7 +38,7 @@ from typing import Any, Optional, Sequence
 from d4t.core.pipeline import get_step
 
 __all__ = ["card", "card_of_step", "field", "name_list",
-           "step_error_text", "trace_error_text"]
+           "step_error_text", "trace_error_text", "issue_line"]
 
 
 def card_of_step(step_key: Any) -> str:
@@ -110,6 +110,55 @@ def name_list(names: Sequence[Any], limit: int = 4,
     if len(quoted) == 1:
         return quoted[0]
     return "%s %s %s" % (", ".join(quoted[:-1]), conj, quoted[-1])
+
+
+def issue_line(issue: Any, model: Any = None) -> str:
+    """一條 lint（`recipe.Issue`）→ **畫面上那一句**。
+
+    有結構就用結構，**沒有就原樣回 `detail`**（F118 §3）—— 48 個產地因此可以
+    一個一個搬：搬一個畫面就好一條，中途不會有「半好半壞」的破畫面。
+
+    畫面知道而 core 不知道的兩件事，都在這裡決定：
+
+    * **只有一條 route 就不要講 route。** `route` 是引擎的詞，而單 route 的
+      recipe（絕大多數）上那個字純粹是雜訊。多於一條時才講 —— 那時它是使用者
+      真的需要的定位資訊。
+    * **列幾個名字就夠。** `names` 是一串字，怎麼排版（引號、逗號、列到第幾個
+      就說「還有 N 個」）是畫面的事 —— 走查看到的那一句把整條 route 的二十幾個
+      feature 全列出來，一行變五行。
+
+    ⚠ 這一支**不改 `title`**：那一句是結論，而結論本來就該排在最前面（J6）。
+    只有在 `detail` 是空的時候才拿 `title` 來頂 —— **這一支不准回空字串**：
+    問題清單上一列空白比沒有那一列更糟（使用者看得到計數，卻讀不到內容）。
+    """
+    detail = (str(getattr(issue, "detail", "") or "").strip()
+              or str(getattr(issue, "title", "") or "").strip())
+    names = tuple(getattr(issue, "names", ()) or ())
+    suggest = tuple(getattr(issue, "suggest", ()) or ())
+    param = str(getattr(issue, "param", "") or "")
+    route = str(getattr(issue, "route", "") or "")
+    if not (names or suggest or param):
+        return detail                      # 還沒搬的那幾條：原樣
+
+    bits = []
+    nid = str(getattr(issue, "node_id", "") or "")
+    where = card(model, nid) if (model is not None and nid) else ""
+    if where and param:
+        step = getattr((getattr(model, "nodes", None) or {}).get(nid, None),
+                       "step", "")
+        bits.append("“%s” › %s" % (where, field(step, param)))
+    elif where:
+        bits.append("“%s”" % where)
+    if names:
+        bits.append(name_list(names))
+    if suggest:
+        bits.append("did you mean %s?" % name_list(suggest, limit=3,
+                                                   conj="or"))
+    # **多於一條 route 才講** —— 而那件事只有畫面答得出來。
+    if route and len(getattr(model, "routes", ()) or ()) > 1:
+        bits.append("on %s" % route)
+    line = " · ".join(b for b in bits if b)
+    return "%s — %s" % (line, detail) if (line and detail) else (line or detail)
 
 
 def trace_error_text(trace: Any, model: Any = None) -> str:
