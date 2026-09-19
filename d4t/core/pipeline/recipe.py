@@ -1117,7 +1117,10 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
             title="The decision uses a number nobody produces",
             detail="route '%s': %s uses %s, but no card in this route "
                    "writes those out (available here: %s). %s"
-                   % (kind, where, unknown, sorted(seen) or "none", tail)))
+                   % (kind, where, ", ".join(unknown),
+                      ", ".join(sorted(seen)) or "none", tail),
+            names=tuple(unknown), suggest=closest(unknown[0], seen),
+            route=str(kind), advice="%s %s" % (where, tail)))
 
     for i, item in enumerate(decide.let):
         if item.is_blank:
@@ -3168,6 +3171,48 @@ class Issue:
     #: 哪一條 route。畫面**只在多於一條時**才講 —— 單 route 的 recipe 上
     #: 那個字只是雜訊。
     route: Optional[str] = None
+    #: 那句「所以你該怎麼辦」。**`detail` 是把上面這些攤平成一句話的版本，
+    #: 而這一段是它的尾巴** —— 兩邊共用同一個字串，所以話只寫一次。
+    #:
+    #: ⚠ 有結構的時候畫面**不接 `detail`**（接了就是把剛剛拆開的東西再貼
+    #: 回去），只接這一段。
+    #:
+    #: ⚠ **句子裡提到別的卡時，卡片名在這裡就要是名字**（`card_name`）——
+    #: 第 3 步試過讓畫面翻（一個 `nodes` 欄位），結果是「`“A”` 和 `“B”`」
+    #: 這種**沒有動詞**的句子：那兩張卡之間是什麼關係，每一條 lint 都不一樣，
+    #: 而通用的組句器造不出那個動詞。`Step.label` 本來就住在 core，所以這件事
+    #: 在產地做又對又便宜；畫面留著的是**它才答得出來**的那兩件
+    #: （幾條 route、列到第幾個）。
+    advice: str = ""
+
+
+def card_name(nodes: Any, nid: Any) -> str:
+    """node id → 卡片庫上那張卡的名字（``dn`` → ``Denoise``）。
+
+    ⚠ **這一支在 core，而且應該在 core**：`Step.label` 本來就住在
+    `core.pipeline.step`，所以「那張卡叫什麼」core 自己答得出來 —— 而
+    `detail` 的讀者（CLI、log、匯出的檔案）跟畫面一樣讀不懂 ``'dn'``。
+    F118 §3 交給畫面的是**另外那兩件**：只有一條 route 就不要講 route，
+    以及一串名字列到第幾個就夠 —— 那兩件 CLI 的答案跟畫面不一樣。
+
+    認不得就回 node id 本身（同 `ui/wording.card`：**不要猜**）。
+    """
+    node = (nodes or {}).get(str(nid or ""))
+    cls = REGISTRY.get(str(getattr(node, "step", "") or "")) if node else None
+    return str(getattr(cls, "label", "") or "") or str(nid or "")
+
+
+def closest(name: Any, pool: Any, n: int = 3) -> Tuple[str, ...]:
+    """「你是不是要打這個」—— `pool` 裡最接近 `name` 的幾個。
+
+    打錯一個字的時候，**列出全部**（走查那一句列了二十幾個）幫不上忙，而
+    最接近的兩三個通常一眼就看得出來。放寬到 0.5 是故意的：預設的 0.6 對
+    ``glv_max`` ↔ ``glv_mad`` 這種只差兩個字母的名字**答不出東西來**。
+    """
+    import difflib
+    got = difflib.get_close_matches(str(name or ""), sorted(pool or ()),
+                                    n=n, cutoff=0.5)
+    return tuple(str(x) for x in got)
 
 
 def _clean_params_for(step_cls: Type[Step], raw: Dict[str, Any],
@@ -3277,7 +3322,9 @@ def _feature_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
 
 
 def _region_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
-                       region_owner: Dict[str, str]) -> List["Issue"]:
+                       region_owner: Dict[str, str],
+                       nodes: Optional[Dict[str, "RecipeNode"]] = None
+                       ) -> List["Issue"]:
     """這張卡定義的具名區域有沒有跟同一條 route 上別張卡撞名（就地更新表）。
 
     **這一條是 error，而特徵撞名（:func:`_feature_collisions`）只是 warning。**
@@ -3307,16 +3354,25 @@ def _region_collisions(step_cls, p: Dict[str, Any], nid: str, k: str,
             continue
         owner = region_owner.get(name)
         if owner is not None and owner != nid:
+            # ⚠ **名字只講一次**：`title` 已經說了是哪一個區域名，而這一段
+            # 接在畫面那句話的後面（`issue_line` 的前面已經有 `names`）——
+            # 再講一次就是同一個字在同一行出現三次。
+            #
+            # ⚠ 這裡是**卡片名不是 node id**，而兩張卡可能同名（兩張 Profile
+            # 正是最常見的撞法）。那不是退步：`node_id` 指著後面那張，使用者
+            # 點清單就選到它；另一張在畫布上有一條線指著。用 `'b'` 那種字
+            # 他一樣找不到，而且還看不懂。
+            advice = ("“%s” already defines a region with this name. The "
+                      "later card's box replaces the earlier one, so every "
+                      "card that measures it quietly gets this card's box - "
+                      "and the canvas still draws the line to that other "
+                      "card. Give one of the two a different region name."
+                      % card_name(nodes, owner))
             out.append(Issue(
                 code="duplicate-region", level="error", node_id=nid,
-                title=f"two cards both define the region '{name}'",
-                detail=f"route '{k}': '{owner}' already defines a region "
-                       f"called '{name}', and '{nid}' defines one with the "
-                       f"same name. The later card's box replaces the "
-                       f"earlier one, so every card that measures '{name}' "
-                       f"quietly gets '{nid}'s box - and the canvas still "
-                       f"draws the line to '{owner}'. Give one of the two "
-                       f"cards a different region name."))
+                title=("two cards both define the region “%s”" % name),
+                detail=f"route '{k}': the region is “{name}”. {advice}",
+                names=(str(name),), route=str(k), advice=advice))
         else:
             region_owner.setdefault(name, nid)
     return out
@@ -3458,7 +3514,9 @@ def _content_written(step_cls, p: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _wrong_content(step_cls, p: Dict[str, Any], nid: str, k: str,
-                   content: Dict[str, str]) -> List[Issue]:
+                   content: Dict[str, str],
+                   nodes: Optional[Dict[str, "RecipeNode"]] = None
+                   ) -> List[Issue]:
     """一條 label map 接進了一格只收灰階的輸入（F110）。
 
     **今天這條線完全合法，而三層都沒擋。** label map 的像素值*就是*層號
@@ -3481,18 +3539,22 @@ def _wrong_content(step_cls, p: Dict[str, Any], nid: str, k: str,
             what = content.get(v, "")
             if not v or not what or spec.accepts(what):
                 continue
+            advice = ("Send the label map straight to the Region card "
+                      "instead.")
             bad.append(Issue(
                 code="wrong-content", level="error", node_id=nid,
-                title=f"step '{nid}' is being fed a layout label map",
+                title=("“%s” is being fed a layout label map"
+                       % card_name(nodes, nid)),
                 detail=(
                     "route '%s': '%s' is a label map - every pixel value in it "
                     "IS a layer number, not a brightness. “%s” on this card "
                     "works on pictures, and running it on layer numbers "
                     "blends 1, 2 and 3 into values like 1.7 that are not any "
                     "layer at all. It would not fail; every region after it "
-                    "would just be wrong. Send the label map straight to the "
-                    "Region card instead."
-                    % (k, v, spec.label or spec.name))))
+                    "would just be wrong. %s"
+                    % (k, v, spec.label or spec.name, advice)),
+                param=str(spec.name), names=(str(v),), route=str(k),
+                advice=advice))
     return bad
 
 
@@ -3652,12 +3714,22 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     for nid, node in recipe.nodes.items():
         step_cls = registry.get(node.step)
         if step_cls is None:
+            # ⚠ **step key 原樣，不翻**（`ui/wording` 同一條規矩）：認不得的
+            # key 本身就是線索，而這條 lint 正是「這台的程式比較舊」最常見的
+            # 長相 —— 換成一個猜出來的漂亮名字會把線索蓋掉。
+            advice = ("This card is not in the card library. "
+                      + (skew or "Check the spelling, or open this recipe on "
+                                 "a machine that has that card."))
             issues.append(Issue(
                 code="unknown-step", level="error", node_id=nid,
                 title=f"Unknown card '{node.step}'",
                 detail=(f"step '{nid}' uses '{node.step}', which is not in the "
                         f"card library; available cards: {sorted(registry)}"
-                        + (f"  {skew}" if skew else ""))))
+                        + (f"  {skew}" if skew else "")),
+                # ⚠ **`names` 不填**：`title` 已經把那個 key 講了一次，
+                # 而畫面的定位前綴（卡片名）認不得它的時候回的也是同一個字
+                # —— 填了就變成「“glv_statz” · “glv_statz”」。
+                suggest=closest(node.step, registry), advice=advice))
             continue
         clean_params[nid] = _clean_params_for(step_cls, node.params, issues,
                                               nid, skew)
@@ -3813,13 +3885,17 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             continue
         prev = seen_inputs.get((e.dst, local))
         if prev is not None and prev != e.src:
+            advice = ("“%s” and “%s” both feed this input. Only one of "
+                      "them is used (the later one wins), so the other line "
+                      "does nothing. Delete the line you do not want."
+                      % (card_name(recipe.nodes, prev),
+                         card_name(recipe.nodes, e.src)))
             issues.append(Issue(
                 code="ambiguous-input", level="error", node_id=e.dst,
-                title=f"step '{e.dst}' has two lines into the same input",
-                detail=(f"both '{prev}' and '{e.src}' feed '{local}' into "
-                        f"'{e.dst}'. Only one of them is used (the later one "
-                        f"wins), so the other line does nothing. Delete the "
-                        f"line you do not want.")))
+                title=("“%s” has two lines into the same input"
+                       % card_name(recipe.nodes, e.dst)),
+                detail=f"route '{k}': {advice}",
+                param=str(e.dst_in), advice=advice))
         else:
             seen_inputs[(e.dst, local)] = e.src
 
@@ -3908,7 +3984,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 issues.extend(_feature_collisions(step_cls, p, nid, k,
                                                   feat_owner, used_features))
                 issues.extend(_region_collisions(step_cls, p, nid, k,
-                                                 region_owner))
+                                                 region_owner, recipe.nodes))
                 feats |= set(step_cls.resolve_features(p))
                 regions |= set(step_cls.resolve_regions_out(p))
                 # ⚠ 內容型別的**唯一來源是入口卡**（`load_sidecar` 就是一張
@@ -3922,15 +3998,22 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             not_connected = step_cls.missing_inputs(p)
             if not_connected:
                 labels = {s.name: (s.label or s.name) for s in step_cls.params}
+                advice = ("Drag a line from the card that produces the "
+                          "image into this one.")
                 issues.append(Issue(
                     code="not-connected", level="error", node_id=nid,
-                    title=f"step '{nid}' has no input yet",
-                    detail=("route '%s': %s — drag a line from the card that "
-                            "produces the image into this one. Available "
-                            "upstream: %s"
+                    title=("“%s” has no input yet"
+                           % card_name(recipe.nodes, nid)),
+                    detail=("route '%s': %s — %s Available upstream: %s"
                             % (k, ", ".join("“%s” is empty" % labels[n]
                                             for n in not_connected),
-                               ", ".join(sorted(avail)) or "(nothing yet)")))
+                               advice,
+                               ", ".join(sorted(avail)) or "(nothing yet)")),
+                    # ⚠ 這裡的 `names` 已經是**欄位上寫的字**（`labels`）而不是
+                    # 參數名 —— `ParamSpec.label` 本來就住在 core。畫面只負責
+                    # 排版（列到第幾個就夠），不再翻一次。
+                    names=tuple(labels[n] for n in not_connected),
+                    route=str(k), advice=advice)
                 )
                 continue
             missing = [x for x in step_cls.resolve_reads(p) if x not in avail]
@@ -4082,7 +4165,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             issues.extend(_uneven_treatment(step_cls, p, nid, k, history,
                                             from_input, registry))
             # 問的是**這張卡吃進來的**，所以排在它自己的宣告記進去之前。
-            issues.extend(_wrong_content(step_cls, p, nid, k, content))
+            issues.extend(_wrong_content(step_cls, p, nid, k, content,
+                                         recipe.nodes))
             content.update(_content_written(step_cls, p))
             issues.extend(_chart_metric_issues(recipe, step_cls, p, nid, k,
                                                registry))
@@ -4092,7 +4176,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     history.setdefault(key, []).append(sig)
 
             issues.extend(_region_collisions(step_cls, p, nid, k,
-                                             region_owner))
+                                             region_owner, recipe.nodes))
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))
             regions |= set(step_cls.resolve_regions_out(p))
@@ -4104,12 +4188,18 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
         if expr is not None and getattr(recipe, "decide", None) is None:
             unknown = sorted(expr.variables - feats)
             if unknown:
+                advice = ("Check the spelling, or add the card that "
+                          "measures it - the score may not be computable at "
+                          "run time.")
                 issues.append(Issue(
                     code="unknown-feature", level="warning", node_id=None,
-                    title="Score expression uses unknown features",
-                    detail=f"route '{k}': the variables {unknown} are not among "
-                           f"the features this route produces ({sorted(feats)}), "
-                           f"so the score may not be computable at run time"))
+                    title="The score uses a number nobody produces",
+                    detail="route '%s': the score uses %s, but no card in this "
+                           "route writes those out (available here: %s). %s"
+                           % (k, ", ".join(unknown),
+                              ", ".join(sorted(feats)) or "none", advice),
+                    names=tuple(unknown), suggest=closest(unknown[0], feats),
+                    route=str(k), advice=advice))
         decide = getattr(recipe, "decide", None)
         if decide is not None:
             issues.extend(_decide_unknown(decide, feats, k))

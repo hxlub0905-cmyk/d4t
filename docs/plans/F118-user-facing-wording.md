@@ -1,9 +1,9 @@
 # F118 — 使用者面的字：訊息不准講開發者的話（F117 J1／I11／J5／J6）
 
-狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1、2 步做完**
-（`ui/wording.py`、`Issue` 的四個選配欄位、`issue_line()` 接上四個顯示面）。
-下一步是第 3 步（搬最常出現的 6 條 lint）—— **那一步才會動到 §5 那 84 條
-文字斷言**，它仍然是這一輪真正的成本。
+狀態：**進行中（2026-09-19）** —— 設計經使用者同意，**第 1～3 步做完**
+（`ui/wording.py`、`Issue` 的選配欄位、最常出現的六條 lint 已經交結構）。
+下一步是第 4 步（問題清單兩行 ＋「帶我去」）。§5 那 84 條文字斷言實際只動到
+**4 條**，而且四條都變成更好的斷言（讀結構化欄位，不讀句子）—— 見 §5。
 
 > F117 走查把這件事記成四條（J1 P1、I11、J5、J6）。它們是**同一個病根**，
 > 所以收成一輪：[`F117-ui-review.md`](F117-ui-review.md)。
@@ -113,11 +113,35 @@ class Issue:
     title: str
     detail: str
     #: F118：給 UI 組句子用的結構化欄位。**空的就照舊用 `detail`**。
-    subject: Optional[str] = None      # 這條在講哪一張卡的哪一格（param 名）
+    param: Optional[str] = None        # 這條在講哪一格（UI 換成欄位 label）
     names: Tuple[str, ...] = ()        # 句子裡要列出來的名字（UI 決定怎麼排版）
     suggest: Tuple[str, ...] = ()      # 「你是不是要打這個」（最接近的幾個）
     route: Optional[str] = None        # 哪一條 route；UI 只在**多於一條**時印
+    advice: str = ""                   # 那句「所以你該怎麼辦」（UI 接這一段）
 ```
+
+⚠ **第 2、3 步改了兩件事，而兩件都是量出來的**（原文寫的是 `subject` 與
+四個欄位）：
+
+1. **`subject` → `param`。** 它一直就只拿來指「哪一格」，而畫面把它換成
+   `ParamSpec.label` —— 名字講清楚它是什麼。
+2. **多一個 `advice`。** 第 3 步真的去搬的時候才看得出來：畫面**不能**把
+   結構接上 `detail`，因為 `detail` 正是把同樣這些東西攤平成一句話的版本
+   —— 接上去那一行會**同時**有「“nosuch_feature”」跟「the variables
+   nosuch_feature are not among…」。`advice` 是那句話的尾巴（「所以你該
+   怎麼辦」），**兩邊共用同一個字串**，所以話只寫一次。
+
+### 試過而放棄的：`nodes` 欄位（句子裡提到別的卡）
+
+`ambiguous-input`／`duplicate-region` 的句子會提到**另一張卡**，第一版做成
+一個 `nodes` 欄位讓畫面翻成卡片名。結果是 ``“A” · “B”`` 這種**沒有動詞**的
+句子：那兩張卡之間是什麼關係（「都接進這一格」／「已經定義了同名的區域」）
+**每一條 lint 都不一樣**，而通用的組句器造不出那個動詞。
+
+所以那件事收回 core：`Step.label` 本來就住在 `core.pipeline.step`，
+`recipe.card_name()` 一行就答得出「那張卡叫什麼」，而且 `detail` 的讀者
+（CLI、log、匯出的檔案）跟畫面一樣讀不懂 ``'dn'``。**畫面留著的是它才答得
+出來的那兩件**：這份 recipe 有幾條 route、一串名字列到第幾個就夠。
 
 * **`detail` 不刪**：CLI（`d4t run` / lint）與測試照舊拿得到一句完整的話，
   而 CLI 的讀者本來就接受 `route 'ebi_patch'` 這種講法；
@@ -152,9 +176,9 @@ Results 的 warning 四個地方都要用**，而那正是 F52（`numbers.py`）
 |---|---|---|---|
 | **1** ✅ | **做完**。`ui/wording.py`（Qt-free）＋ `card` / `card_of_step` / `field` / `name_list` / `trace_error_text` / `step_error_text`，接了**四**個呼叫端（多一個 `Preview: stopped after “dn”`）。實際畫面：`Removed “dn”` → **`Removed “Write report”`**；`Preview problem: [glv_stats] no input connected…` → **`Preview problem: “GLV”: no input connected…`** | **I11**、J1 的一半 | 低 —— 沒有動 core |
 | **2** ✅ | **做完**。`Issue` 加那四個選配欄位（預設空）＋ `wording.issue_line()`（有結構就用、沒有就退回 `detail`、`detail` 空了退回 `title`），接進 Problems 列、畫布警示點、判定徽章、兩句「不能跑」。§5 那條便利貼也做了：`issue_line()` 對**每一個** `code` 都給得出一句話 | — | 低 —— 48 個產地一個都還沒改 |
-| **3** | 搬**最常出現的 6 條** lint（`unknown-feature`、`ambiguous-input`、`duplicate-region`、`no-input`、`unknown-step`、`wrong-content`）填那四個欄位 | **J1** 主體、J5 | 中 —— 會動到 §5 那批文字斷言 |
+| **3** ✅ | **做完**。搬了七個產地／六條 lint（`unknown-feature` ×2、`not-connected`、`unknown-step`、`ambiguous-input`、`duplicate-region`、`wrong-content`），＋ core 的 `card_name()`／`closest()` | **J1** 主體、J5 | 中 —— 實際只動到 4 條斷言 |
 | **4** | 問題清單改成兩行（結論在第一行、細節第二行）＋「帶我去」 | **J5**、**J6** | 低 |
-| **5** | 剩下 42 條 lint 逐步填（可以分好幾輪，**不急**）| 尾巴 | 低 |
+| **5** | 剩下 41 條 lint 逐步填（可以分好幾輪，**不急**）| 尾巴 | 低 |
 
 **第 1 步就會讓畫面明顯變好，而且它不動 core** —— 如果這一輪只做得完一步，
 就做那一步。
@@ -186,7 +210,23 @@ engine 把它們串成句子）。要變成「Measure on」只有兩條路：UI 
 
 ⚠ **一條新測試要先加**：`issue_line()` 對**每一個** `code` 都給得出一句話
 （沒填結構化欄位的就是 `detail`）—— 不然第 3 步搬到一半時，沒搬到的那些會
-安靜地掉回原樣而沒有人發現。
+安靜地掉回原樣而沒有人發現。**第 2 步加了**（`tests/test_ui_wording.py` §5，
+名冊是 ast 從 `recipe.py` 數出來的）。
+
+### 第 3 步實際動到幾條（量出來的）
+
+**4 條，不是 84 條。** 六條 lint 搬完之後跑全套，紅的是：
+
+| 測試 | 為什麼紅 | 改成什麼 |
+|---|---|---|
+| `test_region_names_are_unique` ×3 | ``i.title.split("'")[1]`` —— 從**句子裡**把區域名剖出來 | ``i.names[0]`` |
+| `test_region_names_are_unique` ×1 | 斷言 node id ``'a'``／``'b'`` 在句子裡 | 斷言卡片名在句子裡 ＋ `node_id` 指著後面那張 |
+| `test_ui_canvas_one_line_per_input` | 同上（``load``／``dn``） | 卡片名 ＋ `node_id` |
+| `test_ui_decision_badge` | 拿 `detail` 去比徽章上那句話 | 拿 `wording.issue_line()` 去比 |
+
+**四條都是第 3 類，而且四條都變成更好的斷言** —— 從「這句話怎麼寫」變成
+「這條 lint 判對了嗎」。84 這個數字之所以嚇人，是因為絕大多數落在第 1 類
+（`detail` 照舊是一句完整的話，只是裡面不再有 node id 與 Python 的 repr）。
 
 ---
 

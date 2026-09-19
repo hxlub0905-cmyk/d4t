@@ -250,7 +250,14 @@ FILE_CEILINGS = {
     # 不是先組成散文。+23 裡只有 4 行是欄位，其餘是**為什麼預設要是空的**：
     # 48 個產地要一條一條搬，而中途畫面不准是半好半壞的（`ui/wording.py`
     # 的 `issue_line()` 沒拿到結構就原樣回 `detail`）。
-    "d4t/core/pipeline/recipe.py": 4124,
+    # 2026-09-19（F118 第 3 步）：4,124 → **4,214**（+90）。最常出現的六條 lint
+    # 搬去交結構（`unknown-feature` ×2、`not-connected`、`unknown-step`、
+    # `ambiguous-input`、`duplicate-region`、`wrong-content`），＋ 兩支 core
+    # 自己就答得出來的翻譯（`card_name`：node id → 卡片名；`closest`：拼錯 →
+    # 最接近的幾個）。+90 裡大半是**為什麼這兩件在 core 而那兩件在畫面**：
+    # `Step.label` 本來就住在 core，所以「那張卡叫什麼」在產地做又對又便宜；
+    # 畫面留著的是它才答得出來的「幾條 route」與「列到第幾個就夠」。
+    "d4t/core/pipeline/recipe.py": 4214,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右

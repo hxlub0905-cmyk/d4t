@@ -125,7 +125,13 @@ def issue_line(issue: Any, model: Any = None) -> str:
       真的需要的定位資訊。
     * **列幾個名字就夠。** `names` 是一串字，怎麼排版（引號、逗號、列到第幾個
       就說「還有 N 個」）是畫面的事 —— 走查看到的那一句把整條 route 的二十幾個
-      feature 全列出來，一行變五行。
+      feature 全列出來，一行變五行。CLI 那一份要全部（`detail` 裡就是全部），
+      所以這是 `numbers.py` 那條界線的同一件事，不是兩套寫法。
+
+    ⚠ **有結構的時候接的是 `advice` 不是 `detail`。** `detail` 是把同樣這些
+    東西攤平成一句話的版本（給 CLI／檔案的讀者），接上去等於把剛剛拆開的
+    東西再貼回去 —— 那一句會**同時**有「“nosuch_feature”」和
+    「the variables nosuch_feature are not among…」。
 
     ⚠ 這一支**不改 `title`**：那一句是結論，而結論本來就該排在最前面（J6）。
     只有在 `detail` 是空的時候才拿 `title` 來頂 —— **這一支不准回空字串**：
@@ -137,7 +143,8 @@ def issue_line(issue: Any, model: Any = None) -> str:
     suggest = tuple(getattr(issue, "suggest", ()) or ())
     param = str(getattr(issue, "param", "") or "")
     route = str(getattr(issue, "route", "") or "")
-    if not (names or suggest or param):
+    advice = str(getattr(issue, "advice", "") or "").strip()
+    if not (names or suggest or param or advice):
         return detail                      # 還沒搬的那幾條：原樣
 
     bits = []
@@ -158,7 +165,8 @@ def issue_line(issue: Any, model: Any = None) -> str:
     if route and len(getattr(model, "routes", ()) or ()) > 1:
         bits.append("on %s" % route)
     line = " · ".join(b for b in bits if b)
-    return "%s — %s" % (line, detail) if (line and detail) else (line or detail)
+    tail = advice or detail
+    return "%s — %s" % (line, tail) if (line and tail) else (line or tail)
 
 
 def trace_error_text(trace: Any, model: Any = None) -> str:

@@ -160,5 +160,8 @@ def test_the_engine_reports_two_lines_into_one_input(window):
               if i.code == "ambiguous-input"]
     assert len(issues) == 1
     assert issues[0].level == "error"
-    assert load in issues[0].detail and dn in issues[0].detail, \
+    # ⚠ 講出來的是**卡片名**不是 node id（F118）：``load`` / ``dn`` 是自動產
+    # 的，不是使用者取的名字 —— 他要照著這句話去畫布上找那兩張卡。
+    assert "“Patch”" in issues[0].detail and "“Denoise”" in issues[0].detail, \
         "沒有講出是哪兩條線在搶（使用者要照著這句話去刪線）"
+    assert issues[0].node_id == tone        # 被搶的那張卡，點清單會選到它

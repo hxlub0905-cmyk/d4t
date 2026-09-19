@@ -37,6 +37,7 @@ from d4t.core.pipeline.recipe import (  # noqa: E402
 )
 from d4t.ui import studio as studio_mod, theme as theme_mod  # noqa: E402
 from d4t.ui import tree_scene as tree_mod  # noqa: E402
+from d4t.ui import wording  # noqa: E402
 
 FIXTURE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
@@ -136,9 +137,11 @@ def test_it_only_claims_the_lints_that_are_really_the_decisions(window):
     assert why and "nosuch_number" in why, why
     assert level == "warning", "把別人那條 error 挑走了"
 
+    # ⚠ **比的是畫面那一句**（`wording.issue_line`，F118），不是 `detail`：
+    # 徽章上那句話是它組出來的，而 `detail` 是給 CLI／檔案的那一份。
     claimed = [i for i in w.model.validate()
                if not getattr(i, "node_id", None)
-               and str(i.detail or i.title) == why]
+               and wording.issue_line(i, w.model) == why]
     assert claimed and claimed[0].code in DECISION_ISSUE_CODES
 
 
