@@ -53,6 +53,10 @@ class GaugePanel(QObject):
         self._inspector: Optional[Any] = None      # 原 StudioWindow._inspector
         #: 沒有投影曲線面板時回的那個**空的替身**（原 StudioWindow._no_profile）。
         self._no_profile: Optional[Any] = None
+        #: 圖的視窗現在畫的是**哪一張卡**的數字（F117 G8）。選取跑到別張卡
+        #: 上的時候，視窗那一行字要說得出這幾張圖是誰的。
+        self._charts_owner = ""
+        self._charts_window: Optional[Any] = None
 
     def show_bottom_page(self, index: int) -> None:
         """0 = 這張卡的儀表，1 = 特徵表。"""
@@ -233,18 +237,28 @@ class GaugePanel(QObject):
             win = UniformityWindow(self.w)
             win.style_changed.connect(self._on_chart_style_changed)
             self._charts_window = win
+        self._charts_owner = str(getattr(self._inspector, "title", "")
+                                 or "Charts folder")
         self._refresh_charts_window(self._inspector, force=True)
         win.show()
         win.raise_()
         win.activateWindow()
 
     def _refresh_charts_window(self, insp: Any, force: bool = False) -> None:
-        """把儀表現在那一顆餵給圖的視窗（開著才餵）。"""
+        """把儀表現在那一顆餵給圖的視窗（開著才餵）。
+
+        ⚠ **餵不了的時候要講一句，不能安靜地 return**（F117 G8）。這個視窗
+        只有「Charts folder」那張卡餵得動，而使用者選了別張卡之後它還亮著、
+        還畫著上一張卡的數字 —— 而畫面上一個字都沒說。那正是這個 repo 記過
+        七次的「跑得完、有數字、而且是錯的」。
+        """
         win = getattr(self, "_charts_window", None)
         if win is None or not (force or win.isVisible()):
             return
         if not hasattr(insp, "series") or not hasattr(insp, "charts"):
+            win.set_stale(self._charts_owner)
             return
+        self._charts_owner = str(getattr(insp, "title", "") or "this card")
         series = insp.series()
         win.set_context(series, look=str(insp.params.get("look", "") or ""),
                         axis=str(insp.params.get("axis", "") or "x"),

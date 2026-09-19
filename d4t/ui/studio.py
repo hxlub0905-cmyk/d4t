@@ -163,7 +163,7 @@ from .widgets import (
 
 from .workers import (
     CalibrateWorker, DatasetLoadWorker, OutputWorker, PreviewWorker,
-    RegionCheckWorker, TrialWorker,
+    RegionCheckWorker, TrialWorker, shutdown_window,
 )
 
 
@@ -4329,17 +4329,9 @@ class StudioWindow(QMainWindow):
         autosave.clear()
         # 只存 Tune 的比例與欄寬（F100，理由在 `WorkbenchLayout.remember`）。
         self.layout_modes.remember()
-        for dlg in (self.welcome_dialog, self.library_dialog, self.results):
-            try:
-                if dlg is not None:
-                    dlg.close()
-            except Exception:  # 關窗不准擋路
-                swallowed("studio.closeEvent")
-        for worker in (self.preview_worker, self.trial_worker,
-                       self.dataset_worker, self.attach_ctl.pair_worker,
-                       self.gallery_ctl.thumb_worker, self.output_worker):
-            try:
-                worker.stop()
-            except Exception:  # 關窗不准擋路
-                swallowed("studio.closeEvent")
+        # ⚠ **名單不寫在這裡**（F117 G9）：這裡以前列六個 worker，而視窗身上
+        # 有八個 —— 漏掉的那兩條在關程式時是
+        # `QThread: Destroyed while thread is still running`。現在
+        # `shutdown_window` 自己去找，加第七個的人什麼都不必記得。
+        shutdown_window(self)
         super().closeEvent(event)

@@ -198,6 +198,9 @@ class UniformityWindow(QWidget):
         self._kinds: List[str] = list(uc.CHARTS)
         self._frame: Any = None
         self._spec = ""
+        #: 現在畫的是**哪一張卡**的數字，而選取已經跑到別張卡上了
+        #: （空字串 = 跟著選取走）。見 :meth:`set_stale`。
+        self._stale = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 10, 12, 12)
@@ -234,6 +237,7 @@ class UniformityWindow(QWidget):
         放到哪一個角色）—— 別的圖用不到，沒給就是沒有散佈圖可畫。
         """
         self._series = dict(series or {})
+        self._stale = ""          # 有人餵新資料進來＝又跟上了
         self._frame = frame
         self._spec = str(spec or "")
         self._look = str(look or "")
@@ -261,6 +265,21 @@ class UniformityWindow(QWidget):
             self.grid.addWidget(view, i // cols, i % cols)
             self.views[kind] = view
 
+    def set_stale(self, owner: str) -> None:
+        """「畫面上這幾張圖是 ``owner`` 那張卡的，而你現在選的是別張。」
+
+        ``owner`` 空字串＝又跟上了。**不重畫、只改那一行字** —— 資料本來就
+        還是對的（是那張卡的），錯的是它看起來像在講現在選的這一張。
+        """
+        owner = str(owner or "")
+        if owner == self._stale:
+            return
+        self._stale = owner
+        self._refresh()
+
+    def stale_owner(self) -> str:
+        return self._stale
+
     def style_for(self, kind: str) -> Dict[str, Any]:
         """一張圖的設定 —— 見 :func:`chart_style_for`（UI 這一側唯一的入口）。"""
         return chart_style_for(self._look, kind, self._axis, self._metric)
@@ -271,10 +290,25 @@ class UniformityWindow(QWidget):
                           frame=self._frame, spec=self._spec)
         groups = self._series.get("groups") or []
         boxes = sum(len(g.get("values") or ()) for g in groups)
-        self.head.setText(
-            "%s  ·  %d region(s), %d box(es)"
-            % (self._metric or "—", len(groups), boxes)
-            if groups else "Nothing to plot yet")
+        if not groups:
+            # ⚠ **「Nothing to plot yet」講完了「是什麼」，沒講「怎麼辦」**
+            # （F117 G8）。四張空圖配一句沒有下一步的話，讀起來像壞掉了 ——
+            # 而真正的原因幾乎一定是同一個：還沒跑過試跑。
+            self.head.setText(
+                "Nothing to plot yet - run a trial first, then these four "
+                "charts draw the boxes that card measured.")
+        elif self._stale:
+            # **停在別張卡的數字上就要說出來**（F117 G8 的另一半）。這個視窗
+            # 只跟著「Charts folder」那張卡走，而使用者選了別的卡之後它還亮
+            # 著 —— 一個畫得出來、而且畫的是別人的數字的視窗，正是
+            # 「跑得完、有數字、而且是錯的」那個形狀。
+            self.head.setText(
+                "%s  ·  %d region(s), %d box(es)  ·  from “%s” - select that "
+                "card to follow along"
+                % (self._metric or "—", len(groups), boxes, self._stale))
+        else:
+            self.head.setText("%s  ·  %d region(s), %d box(es)"
+                              % (self._metric or "—", len(groups), boxes))
 
     # -- 設定 ---------------------------------------------------------------
     def open_settings(self) -> None:

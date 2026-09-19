@@ -123,7 +123,7 @@ d076f44d3e88b7a2b5e04bd80a6634a9f3f99e5b d4t/ui/chips.py
 609792e09dd861516568287882f085741f21fc67 d4t/ui/focus_visible.py
 ae82608db53dc1f37c582b74c1192261b2051978 d4t/ui/gallery.py
 47b7e2d1b8ce05c45ed8674a290a23d22479bb78 d4t/ui/gallery_controller.py
-134f10de3fa89450c5a03377776f702414eecc15 d4t/ui/gauge_panel.py
+c7b9f56e7635a148a25c8906d2eaa9dbc7d08027 d4t/ui/gauge_panel.py
 c6babb997a0f6e3c4703e9148d002afbaed23cda d4t/ui/gc_generator.py
 e7df3d112338385785cce94e375e27cee62c7127 d4t/ui/gc_paint.py
 41a693695bda5ebe9689961f36c063d5556831e4 d4t/ui/glyphs.py
@@ -153,7 +153,7 @@ acee90a6152ed5654699f853ebab9c7f30050832 d4t/ui/run_controller.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-96c3a57ea7d72d4df02e80a98c61e349b828ef38 d4t/ui/studio.py
+5d6473eaf2b77a3f161b7dfdd0ebd5cc9953c037 d4t/ui/studio.py
 0a033283dc7745779c44c2a28026cbb836627661 d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
 5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
@@ -161,7 +161,7 @@ e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 248b4e3610970b808637724d288f1751f20775bf d4t/ui/tree_panel.py
 2d5368b4f0a8a6b1d7aa76a045ca1787b240b39e d4t/ui/tree_scene.py
 3ef77f5c339cffd31d12127954e819113e0c0885 d4t/ui/truth_marks.py
-0c1c3333b76408b77cd3b5f461714145b363e961 d4t/ui/uniformity_window.py
+363b7e077297333d0e6a1556af81841bff9bddb1 d4t/ui/uniformity_window.py
 6da43c6279ecdf777612100e67613f482c269d33 d4t/ui/verdict_band.py
 97c95b0619fbd49e733f7570a271061d21dfe92f d4t/ui/viewmodel.py
 a4cb05e2efedb1d035357ce9a52e146c8bc17237 d4t/ui/welcome.py
@@ -171,7 +171,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 5f55b48a2b3d2db3d39a950065209d804346f8af d4t/ui/wiring_slot.py
 871aa7141e35b3e348cd8b1cc4bae1bf9a906d26 d4t/ui/wording.py
 c9417fddef0cb8c516cf8bafdeb240023f2f1341 d4t/ui/workbench.py
-b6158315a58b3c51e72191844f9911d9d14567b2 d4t/ui/workers.py
+82acc13a4004df7770d7ade4ae3e10468ad094ff d4t/ui/workers.py
 d9a2313926d0c80bc0ccacda378d9ea60f5e4b4d docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
@@ -186,7 +186,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-b832d671079c90ea69a6fd82f49a76c04d48e8cb docs/plans/F117-ui-review.md
+892dfd5e1be49dcce166ea937404640533c88ed3 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -365,6 +365,7 @@ bae1d04b7f660b68d08182c69c536ccaf0110e24 tests/test_ui_canvas_one_line_per_input
 dd44172aed175c05a9dfca9295969a2470b404a7 tests/test_ui_canvas_ports.py
 650c29eb505d72a276eb6ee3848c0425f1d81cac tests/test_ui_canvas_truth.py
 d8a004cf1f5cb33b9b3b7285265caea6a4721e57 tests/test_ui_chart_settings.py
+8f0ef2de7c4c1408fa65aa2e004272247d6d8b45 tests/test_ui_charts_window_says_whose.py
 6b3063053397eed7b5b2dff79a665297d0574095 tests/test_ui_contrast.py
 aa3582995d2196b03cc865f531628e7d22055f5c tests/test_ui_controls_readable.py
 1bbee8aa872f6531b55f963988acf9891832343b tests/test_ui_crashlog.py
@@ -443,6 +444,7 @@ dfcb8b4cae67f5759f0b2c9c9cb30e04eac73652 tests/test_ui_results_table.py
 57df409179f5a1b598488d870e3b81694ad2f08f tests/test_ui_route_by.py
 e795bcf30e1a6da05984b47e3981296eb01eb322 tests/test_ui_save_recipe.py
 2892c71951ae9f48ffd62d9ccdcd11edd867eb42 tests/test_ui_scope_profiles.py
+e564ca12074d9e2122bed167911a8de523528886 tests/test_ui_shutdown.py
 a1db517de73145ea6335bba5b7c92979bd9c7289 tests/test_ui_small_screen.py
 5d8ad3077c1ddf78a1848758217f51a710d8db98 tests/test_ui_splitters.py
 9e74f08478ccac523398487764e72763368ca078 tests/test_ui_strings.py

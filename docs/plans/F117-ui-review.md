@@ -95,8 +95,8 @@
 | J6 ✅ | warning 太長 | 先講結論 | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 4 步）**
 | K2 | Recipe 差異比較（兩份或存檔前後） | 逐卡逐參數 diff | 建議 |
 | K4 | 介面字級可調 | 90／100／115% | 建議 |
-| G8 | ❓ 選著 GLV 卡開均勻度圖表視窗是空白（從 `Write charts` 卡開正常） | 先重現；空狀態要說明 | ❓ |
-| G9 | ❓ Region check 視窗打開是空的；結束時有 `QThread: Destroyed while thread is still running` | 先重現；載入中要有提示；關窗停執行緒 | ❓ |
+| G8 ✅ | **做完** —— 重現之後是**兩件事**：①空狀態只寫 `Nothing to plot yet`，沒講下一步（現在補「run a trial first」）；②這個視窗只有 `Charts folder` 那張卡餵得動，選了別張卡之後 `_refresh_charts_window` **安靜地 return**，視窗還畫著上一張卡的數字而一個字都沒說（現在講「from “Charts folder” — select that card to follow along」）。⚠ 走查寫的「空白」是①，而②更危險 | 先重現；空狀態要說明 | ❓ |
+| G9 ✅ | **做完，而且是真的 bug** —— `closeEvent` 列了一張**六個** worker 的表，而視窗身上有**八個**：`region_check_worker` 與 `calibrate_worker` 從來沒有被停過（`QThread: Destroyed…` 是未定義行為，最壞是當掉）。名單改成 `workers.owned_workers()` 自己找，`tests/test_ui_shutdown.py` 問的是「找到的每一個都停了嗎」。順手：子視窗也讀 `_open_windows()` 那一份，不再抄第二份 | 先重現；載入中要有提示；關窗停執行緒 | ❓ |
 
 ---
 

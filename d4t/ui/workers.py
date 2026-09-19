@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, List, Optional
 from PySide6.QtCore import QObject, QThread, Signal
 
 import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
+from d4t.core.log import swallowed
 from d4t.core.ingest.dataset import (
     Dataset, load_dataset, load_doe_folder, load_folder, load_image_file,
 )
@@ -156,6 +157,77 @@ class _ThreadedWorker(QObject):
 
     def _before_stop(self) -> None:
         """子類覆寫：join 之前要設的中止旗標 / 要清的待跑佇列。"""
+
+
+def shutdown_window(win: Any) -> None:
+    """關窗要收的東西**全部**：先關子視窗，再 join 每一條背景執行緒。
+
+    為什麼這一支在這裡而不是 `studio.closeEvent` 裡列一張表
+    ------------------------------------------------------
+    列表的那一版**漏了兩條**（F117 G9，2026-09-20）：`region_check_worker`
+    與 `calibrate_worker` 都在 `StudioWindow` 身上，而那張表只寫了六個。
+    症狀是關程式的時候 Qt 印一行
+    ``QThread: Destroyed while thread is still running`` —— 那是
+    **未定義行為**（最壞是當掉），而且它只在那兩個功能真的被按過的那一次
+    出現，所以平常看不到。
+
+    現在這一支**自己去找**：凡是掛在視窗（或它的 controller）身上的
+    :class:`_ThreadedWorker` 都收。加第七個 worker 的人什麼都不必記得 ——
+    而 `tests/test_ui_shutdown.py` 會在它漏掉的那天紅。
+
+    ⚠ **視窗先關、執行緒後停**：關窗會斷掉那幾個 ``ready`` 訊號的接收端，
+    而 `stop()` 之後才關的話，最後一批結果會送到一個正在拆的 widget 上。
+    """
+    for dlg in window_children(win):
+        try:
+            dlg.close()
+        except Exception:      # 關窗不准擋路
+            swallowed("workers.shutdown_window")
+    for worker in owned_workers(win):
+        try:
+            worker.stop()
+        except Exception:      # 同上
+            swallowed("workers.shutdown_window")
+
+
+#: 去哪幾個 controller 身上找 worker（它們是 F116 從 `studio.py` 拆出去的）。
+WORKER_HOSTS = ("attach_ctl", "gallery_ctl", "run_ctl", "gauges")
+
+
+def owned_workers(win: Any) -> List["_ThreadedWorker"]:
+    """視窗與它的 controller 身上所有的背景執行緒（去重，順序穩定）。"""
+    out: List["_ThreadedWorker"] = []
+    seen = set()
+    for host in (win,) + tuple(getattr(win, h, None) for h in WORKER_HOSTS):
+        if host is None:
+            continue
+        for name in sorted(dir(host)):
+            if name.startswith("__"):
+                continue
+            try:
+                value = getattr(host, name)
+            except Exception:  # property 在拆窗途中可能會抱怨
+                swallowed("workers.owned_workers")
+                continue
+            if isinstance(value, _ThreadedWorker) and id(value) not in seen:
+                seen.add(id(value))
+                out.append(value)
+    return out
+
+
+def window_children(win: Any) -> List[Any]:
+    """關窗要一起關掉的子視窗。
+
+    ``_open_windows()`` 是「Windows 下拉列上那幾個」的**唯一**一份名單
+    （U15），所以這裡讀它而不是再抄一份 —— 抄第二份出來的那份一定會漂。
+    """
+    out = [getattr(win, "welcome_dialog", None),
+           getattr(win, "library_dialog", None)]
+    try:
+        out += [w for _, w in win._open_windows()]
+    except Exception:          # 還沒組好就關（測試會走到）
+        swallowed("workers.window_children")
+    return [w for w in out if w is not None]
 
 
 # ---------------------------------------------------------------------------
