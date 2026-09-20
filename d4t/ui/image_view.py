@@ -808,7 +808,7 @@ class ImageView(QWidget):
         cx = self._offset.x() + iw * s / 2.0
         cy = self._offset.y() + ih * s / 2.0
         box = QRectF(cx - side / 2.0, cy - side / 2.0, side, side)
-        col = QColor(TOKENS["min_accent"])
+        col = QColor(TOKENS["mark_kernel"])
         pen = QPen(col, 1.4, Qt.DashLine)
         pen.setCosmetic(True)          # 縮很小的時候線不能跟著消失
         p.setPen(pen)

@@ -101,3 +101,64 @@ def test_the_region_dividers_are_actually_visible(name):
     assert ratio >= 1.25, (name, pal["divider"], pal["bg_page"], ratio)
     # 但不能搶過卡片邊框那一級的東西：比 `border_hover` 淡
     assert ratio < theme.contrast_ratio(pal["border_hover"], pal["bg_page"])
+
+
+# --------------------------------------------------------------------------- #
+# 畫布（F117 A6）
+# --------------------------------------------------------------------------- #
+#: 畫布上**承載意思**的那幾個東西要清 3.0（WCAG 1.4.11 對非文字的門檻）。
+#:
+#: ⚠ **走查說的是「深色模式對比比淺色低」，而量出來剛好相反。** 記在這裡，
+#: 因為下一個人會再從那份走查讀到那句話：
+#:
+#: ===================  ======  ======
+#: 量到的（修之前）      dark    light
+#: ===================  ======  ======
+#: 連線 vs 畫布底        2.99    2.10
+#: 卡片框 vs 畫布底      1.51    1.03
+#: ===================  ======  ======
+#:
+#: **兩套都不及格，而淺色是比較糟的那一個** —— 淺色的卡片框只有 1.03，等於
+#: 那條框不存在，卡片全靠底色差 1.22 跟畫布分開。
+CANVAS_PAIRS = (
+    ("canvas_edge", "canvas_bg", "連線 —— 資料從哪來全靠它（鐵則 10）"),
+    ("canvas_card_border", "canvas_bg", "卡片的外框"),
+    ("canvas_edge_active", "canvas_bg", "選中／hover 的那條線"),
+)
+
+
+@pytest.mark.parametrize("name", sorted(theme.PALETTES))
+@pytest.mark.parametrize("fg,bg,why", CANVAS_PAIRS)
+def test_what_carries_meaning_on_the_canvas_is_visible(name, fg, bg, why):
+    pal = theme.PALETTES[name]
+    ratio = theme.contrast_ratio(pal[fg], pal[bg])
+    assert ratio >= 3.0 - 1e-6, (name, why, pal[fg], pal[bg], round(ratio, 2))
+
+
+@pytest.mark.parametrize("name", sorted(theme.PALETTES))
+def test_the_grid_stays_faint(name):
+    """⚠ **格線刻意不在上面那張表裡。**
+
+    它是**背景的紋理**，不是承載意思的東西 —— 把它拉到 3.0，畫布會變成一張
+    點陣紙，而卡片與線要跟那些點搶注意力。這一條守的是反方向：它要看得見
+    （> 1.1），但不准比卡片的框還搶眼。
+    """
+    pal = theme.PALETTES[name]
+    grid = theme.contrast_ratio(pal["canvas_grid"], pal["canvas_bg"])
+    card = theme.contrast_ratio(pal["canvas_card_border"], pal["canvas_bg"])
+    assert grid > 1.1, (name, grid)
+    assert grid < card, (name, grid, card)
+
+
+def test_there_is_only_one_accent_family():
+    """F117 I2：`max_accent*` 是 `accent*` 的逐位元組複本而且沒有人用。
+
+    ⚠ 兩個名字指同一個顏色，就是調色盤開始漂的樣子：改了一個，另一個安靜地
+    留在原地。`min_accent` 那一組也拿掉了 —— 它唯一的用處是**畫在影像上的**
+    核心框，那不是強調色，所以它改名叫 `mark_kernel` 並搬去記號那一段。
+    """
+    for name, pal in sorted(theme.PALETTES.items()):
+        strays = sorted(k for k in pal
+                        if k.startswith(("min_accent", "max_accent")))
+        assert not strays, (name, strays)
+        assert "mark_kernel" in pal, name

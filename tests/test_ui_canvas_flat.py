@@ -127,8 +127,17 @@ def test_nothing_darker_than_the_backdrop_is_painted_under_a_card(qapp,
     body = QRectF(item.scenePos(),
                   QPointF(item.scenePos().x() + canvas_mod.NODE_W,
                           item.scenePos().y() + item.height()))
-    # 卡片右下角外面 12×12 的一塊 —— 舊的陰影偏移 (1.5, 2.5)，就落在這裡
-    probe = QRectF(body.right() - 2.0, body.bottom() - 2.0, 14.0, 14.0)
+    # 卡片右下角**外面**的一塊 —— 舊的陰影偏移 (1.5, 2.5)，就落在這裡。
+    #
+    # ⚠ **探測框從邊框外面 2 px 開始，不是從卡片裡面 2 px 開始**（F117 A6）。
+    # 第一版從 `body.right() - 2.0` 起算，所以它**框住了卡片自己的邊框** ——
+    # 那時候那條框是 `border_default`（淺色下對畫布只有 1.03 的對比），暗不到
+    # 哪裡去，所以框進去也沒關係。
+    #
+    # A6 把卡片框換成看得見的 `canvas_card_border` 之後，同一個探測框讀到
+    # ΔL* 36.7，而這支測試說「陰影回來了」—— **它分不出邊框與陰影，只是以前
+    # 邊框剛好夠淡**。2 px 的餘裕留給圓角的反鋸齒。
+    probe = QRectF(body.right() + 2.0, body.bottom() + 2.0, 14.0, 14.0)
     img = QImage(28, 28, QImage.Format_ARGB32)
     # **用底色預填，不要用透明。** `QGraphicsScene.render` 不會呼叫 view 的
     # `drawBackground`（那支是畫在 view 上的），所以沒有圖元的地方會留白 ——
@@ -144,7 +153,7 @@ def test_nothing_darker_than_the_backdrop_is_painted_under_a_card(qapp,
     back = _lab_L(theme_mod.PALETTES[theme_name]["canvas_bg"])
     darkest = min(_lab_L(img.pixelColor(x, y).name())
                   for x in range(img.width()) for y in range(img.height()))
-    # 卡片本身的 1px 邊框可能擦到探測框的邊，所以留 2.5 的餘裕；
+    # 探測框現在整塊在卡片外面，所以這裡量的是純粹的畫布底色；
     # 舊的陰影是 ΔL* 15.7，離這條線很遠。
     assert back - darkest < 2.5, (
         "%s：卡片外面畫了比底色暗 ΔL* %.1f 的東西 —— 陰影回來了"

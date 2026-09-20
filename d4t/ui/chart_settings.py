@@ -42,6 +42,7 @@ from . import fit_screen, geometry
 from .uniformity_window import ChartView, chart_style_for
 from .theme import TOKENS, region_hex
 from .widgets import ChoiceChips, apply_button_cursors, small_button
+from . import buttons as buttons_mod
 
 __all__ = ["ChartSettingsDialog", "ColourButton"]
 
@@ -578,6 +579,7 @@ class ChartSettingsDialog(QDialog):
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons_mod.mark_primary(buttons)
         reset = QPushButton("Reset to defaults", self)
         reset.setToolTip("Put every setting on this page back to the way it "
                          "started. Nothing is written until you press OK.")

@@ -1003,7 +1003,10 @@ class _NodeItem(QGraphicsItem):
             border = QColor(TOKENS["accent"])
             border.setAlpha(150)
         else:
-            border = QColor(TOKENS["border_default"])
+            # **畫布有自己的卡片框色**（F117 A6）。`border_default` 是配面板
+            # 底色調的，畫在畫布上只有 **1.03** 的對比（淺色）—— 那條框等於
+            # 不存在，卡片只靠底色差 1.22 跟畫布分開。
+            border = QColor(TOKENS["canvas_card_border"])
         # 停用的節點畫虛線框（n8n 的慣例）—— 不是消失，是「還在，但這次不跑」。
         pen = QPen(border, 2.0 if selected else (1.4 if self._hover and enabled
                                                  else 1.0))

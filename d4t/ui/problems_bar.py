@@ -257,6 +257,18 @@ class ProblemsBar(QWidget):
             self.set_open(False)
         else:
             self.hint.setVisible(self._open and bool(self.hint.text()))
+        # **沒有話要說就整條不畫**（F117 H2）。走查記的是「底部兩條狀態列」——
+        # 而它們長得一模一樣（一行字 ＋ 右邊一顆鈕），使用者分不出哪一條在講
+        # 什麼。那兩條**確實是兩件事**（這一條講的是常駐的狀態「現在能不能
+        # 跑」，狀態列講的是剛剛發生了什麼），所以答案不是把它們併成一條。
+        #
+        # 答案是：`Nothing is blocking a run.` 是一句**永遠不會帶來消息**的
+        # 話，而它佔著 26 px 常駐在畫面最底下。收掉之後，第二條只在它真的有
+        # 話要說的時候出現 —— 那時候它帶著 ✕／⚠ 與顏色，跟狀態列一眼分得開。
+        #
+        # ⚠ 這也是這個 repo 自己的規矩：**一條常駐的 warning 會被學會忽略，
+        # 而真的那一條也跟著被忽略**（`Issue` 的 `info` 那一級寫著同一句）。
+        self.setVisible(bool(self._rows))
 
     def counts(self) -> Dict[str, int]:
         return {level: sum(1 for r in self._rows if r["level"] == level)

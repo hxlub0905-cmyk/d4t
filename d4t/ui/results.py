@@ -32,6 +32,8 @@ Results 視窗         分數分佈 · Gallery · 輸出
 """
 from __future__ import annotations
 
+import re
+
 from typing import Any, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
@@ -576,6 +578,13 @@ class ResultsWindow(QMainWindow):
         super().closeEvent(event)
 
 
+#: 「跑完了但還沒寫」那一句 —— `extra_only` 把它從 Results 的狀態列剪掉。
+#: ⚠ 用 `Run only` 起頭到句末：句子裡帶著 Output 卡的張數（「the 2 Output
+#: cards」），所以不能整句字面比對。
+_WRITE_HINT = re.compile(
+    r"(·\s*)?Run only - nothing written yet\..*?write\.", re.S)
+
+
 def extra_only(message: str) -> str:
     """一句跑完的訊息 → **只留工具列沒講到的那一半**（R4，2026-08-24）。
 
@@ -590,9 +599,18 @@ def extra_only(message: str) -> str:
     text = str(message or "").strip()
     if not text:
         return ""
+    # **「還沒寫出去」那一句在 Results 裡是多餘的**（F117 H2）。它說的是
+    # 「按 Results 裡的 Write outputs」—— 而讀到它的人**就在 Results**，那顆
+    # 鈕就在他上面，tooltip 還寫著「Nothing is written until you press this」。
+    # 同一件事在同一個視窗上講兩次，而其中一次還在叫他去他已經在的地方。
+    #
+    # ⚠ **Studio 那一邊留著**：在那裡它是唯一講得出這件事的地方。
+    text = _WRITE_HINT.sub("", text).strip().strip("·").strip()
     head, sep, tail = text.partition("  ")
     stopped = head.lower().startswith("run stopped")
-    rest = (sep + tail).strip()
+    # ⚠ 剪掉中間一句之後，留下來的那一段常常以分隔點開頭（`·  2 warnings…`）。
+    # 一個孤零零的點在句首讀起來像畫面壞了 —— 同 F117 K3 那一行的規矩。
+    rest = (sep + tail).strip().lstrip("·").strip()
     if stopped:
         return ("Stopped part-way - these numbers are where it got to, "
                 "not the whole batch." + ("  " + rest if rest else ""))

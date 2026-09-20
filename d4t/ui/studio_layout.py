@@ -49,6 +49,7 @@ from .canvas import PipelineCanvas
 from .decide_panel import DecidePanel
 from .feature_panel import FeaturePanel
 from .image_view import ImageView
+from . import wording
 from .problems_bar import ProblemsBar
 from .results import ResultsWindow
 from .splitters import HairlineSplitter
@@ -832,7 +833,10 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     for i, src in enumerate(scope.INPUT_SOURCES):
         row = QHBoxLayout()
         row.setSpacing(10)
-        row.addStretch(1)
+        # ⚠ **不再把兩側撐開**（F117 H3）。這一欄在 1366 上只有 509 px 寬，而
+        # 兩邊各留一份彈簧等於把 159 px 讓給空白 —— 說明因此從兩行變三行，
+        # 三列一起多出 70 px 高，而那一塊在 768 高的螢幕上本來就要捲。
+        # 整塊由外層置中，一列裡面不需要再置中一次。
         b = QPushButton(src.title, win.empty_state)
         if i == 0:
             b.setObjectName("primary")     # 最常見的那一條是主要動作
@@ -841,14 +845,22 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
             partial(open_dialogs.open_source, win, src.key))
         win.empty_source_buttons[src.key] = b
         row.addWidget(b)
-        what = QLabel(src.what if src.has_klarf else
-                      "%s No KLARF, so no write-back." % src.what,
-                      win.empty_state)
+        # **一句話，全文在 tooltip**（F117 H3）。那三段說明各有 115～169 個
+        # 字，在這一欄（200 px）折成 7～9 行、整塊 128～154 px 高 —— 而 1366×768
+        # 上這一塊看得到的只有 **160 px**，所以**三列全部被切掉**（走查只看到
+        # 第三列被切，實際上第一列從第 160 px 起就沒了）。
+        #
+        # ⚠ 使用者站在這個畫面前面時手上已經有檔案了，他要回答的是「我這一堆
+        # 算哪一種」—— 那是一句話答得完的問題。細節（副檔名、要不要 KLARF）
+        # 留給 tooltip 與開檔對話框。
+        full = (src.what if src.has_klarf else
+                "%s No KLARF, so no write-back." % src.what)
+        what = QLabel(wording.headline(full), win.empty_state)
         what.setObjectName("paramHint")
         what.setWordWrap(True)
         what.setMinimumWidth(200)
-        row.addWidget(what, 2)
-        row.addStretch(1)
+        what.setToolTip(full)
+        row.addWidget(what, 1)
         rows.addLayout(row)
     estack.addLayout(rows)
 

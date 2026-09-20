@@ -61,6 +61,7 @@ from . import fit_screen
 # 是一份**當時的複本** —— 換了 profile 而這裡停在舊值，症狀是「設定說
 # 關著、畫面上還在」。`tests/test_ui_scope_profiles.py` 擋著。
 from . import scope
+from . import wording
 from . import strings
 from .scope import recipe_is_supported
 from .theme import SEG_LABELS, TOKENS, seg_hex
@@ -245,28 +246,10 @@ def list_recipe_files(directory: Any = None) -> List[Path]:
 #: 清單上那一行摘要最多幾個字（F117 G3）。出貨那三份的第一句有 150～400 個
 #: 字 —— 整句放進清單就變成一面牆，而使用者在那個清單上要做的是「掃過去挑
 #: 一份」。完整的一段在右邊那一塊。
-HEADLINE_MAX = 72
-
-
-def _headline(text: Any) -> str:
-    """一段描述 → **清單上那一行**（第一句，太長就切在字之間加省略號）。
-
-    ⚠ 句號不是唯一的結尾：出貨的三份裡有一份的第一句是問句
-    （``is the gray level even across the field?``）。
-    """
-    body = " ".join(str(text or "").split())
-    if not body:
-        return ""
-    cut = min((i for i in (body.find(c) for c in ".?!") if i > 0),
-              default=-1)
-    # ⚠ **問號與驚嘆號留著，句號不留**：一個問句沒有問號讀起來像被切斷了
-    # （出貨那三份裡真的有一份是問句），而句尾的句號在一行摘要上是雜訊。
-    end = cut + (1 if 0 < cut < len(body) and body[cut] in "?!" else 0)
-    first = body[:end] if 0 < cut <= HEADLINE_MAX else body
-    if len(first) <= HEADLINE_MAX:
-        return first
-    clip = first[:HEADLINE_MAX].rsplit(" ", 1)[0]
-    return "%s…" % clip
+#: 轉出口 —— **本體住 `ui/wording.py`**（F117 H3 起兩個地方共用）。
+#: 既有的測試 import 的是這兩個名字，所以它們留在這裡。
+HEADLINE_MAX = wording.HEADLINE_MAX
+_headline = wording.headline
 
 
 def _count_classes(decide: Dict[str, Any]) -> int:

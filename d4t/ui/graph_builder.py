@@ -36,6 +36,7 @@ from ..core.pipeline import chart_spec as cspec
 from . import fit_screen
 from .uniformity_window import ChartView, chart_style_for
 from .widgets import ChoiceChips, small_button
+from . import buttons as buttons_mod
 
 __all__ = ["GraphBuilderDialog", "NONE_WORD", "PICK_WORD", "SpecEditor"]
 
@@ -373,6 +374,7 @@ class GraphBuilderDialog(QDialog):
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons_mod.mark_primary(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)

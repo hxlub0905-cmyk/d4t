@@ -152,14 +152,14 @@ _LIGHT: Dict[str, Any] = {
     #: 兩套主題同一個值 —— 底色是影像，不是主題。
     "mark_alert": "#ff2020",
     "mark_aim": "#50dc78",
-    "min_accent": "#c2731f",
-    "min_accent_bg": "#fdf3e6",
-    "min_accent_border": "#eed3ad",
-    "min_accent_text": "#8f5615",
-    "max_accent": "#3574d6",
-    "max_accent_bg": "#eaf1fc",
-    "max_accent_border": "#c2d6f2",
-    "max_accent_text": "#2b5eb0",
+    #: **去雜訊的核心框**（F117 I2 起叫這個名字）。它跟上面那兩個一樣是畫在
+    #: 使用者的影像上的，所以它住在這一段，不是強調色那一段。
+    #:
+    #: ⚠ 它以前叫 `min_accent`，而旁邊還有一整組 `max_accent*`（藍）——
+    #: 那一組是 `accent*` 的**逐位元組複本**，而且**沒有任何人用**。兩個名字
+    #: 指同一個顏色，就是調色盤開始漂的樣子：改了一個，另一個安靜地留在原地。
+    #: `min_accent_bg` / `_border` / `_text` 也一樣沒有人用，一起拿掉。
+    "mark_kernel": "#c2731f",
     # -- d4t 三段式 segment 色（去飽和，只當色條/圓點用）-------------------
     "seg_image": "#4a7ba7",
     "seg_algo": "#b0722f",
@@ -240,7 +240,8 @@ _LIGHT: Dict[str, Any] = {
     #: 點陣底的點。**底色壓深了，點要跟著壓**（F81）—— 不動的話點對底的
     #: ΔL* 會從 10.4 掉到 7.6，那層對齊參考會安靜地變淡一階。
     "canvas_grid": "#c6cdd8",
-    "canvas_edge": "#9aa3ae",
+    "canvas_edge": "#7d8691",
+    "canvas_card_border": "#7f868e",
     "canvas_edge_active": "#3574d6",
     # -- typography ----------------------------------------------------------
     "font_stack": ("'Segoe UI','PingFang TC','Microsoft JhengHei',"
@@ -337,14 +338,7 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     #: 見亮色那一份：疊在影像上的記號，兩套主題同一個值。
     "mark_alert": "#ff2020",
     "mark_aim": "#50dc78",
-    "min_accent": "#d8934a",
-    "min_accent_bg": "#2b2219",
-    "min_accent_border": "#5a4630",
-    "min_accent_text": "#e0a86a",
-    "max_accent": "#4b8bf5",
-    "max_accent_bg": "#1d2a3f",
-    "max_accent_border": "#33507d",
-    "max_accent_text": "#7aaaf8",
+    "mark_kernel": "#d8934a",
 
     "seg_image": "#6f9fc8",
     "seg_algo": "#d1994f",
@@ -396,7 +390,8 @@ _DARK: Dict[str, Any] = dict(_LIGHT, **{
     # F13-⑤：點陣底是**對齊的參考**，而深色主題原本量到 1.44 的對比 ——
     # 幾乎看不見，等於沒有參考。提到 ~1.9：看得見，又不會跟連線搶。
     "canvas_grid": "#3f4653",
-    "canvas_edge": "#5c6474",
+    "canvas_edge": "#5d6575",
+    "canvas_card_border": "#626977",
     "canvas_edge_active": "#4b8bf5",
 })
 

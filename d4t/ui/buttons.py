@@ -15,11 +15,44 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import (
+    QDialogButtonBox, QPushButton, QSizePolicy, QWidget,
+)
 
 from . import strings
 
-__all__ = ["small_button", "FilterChip", "clear_layout_parked"]
+__all__ = ["small_button", "FilterChip", "clear_layout_parked",
+           "mark_primary"]
+
+
+def mark_primary(box: QDialogButtonBox) -> Optional[QPushButton]:
+    """一排對話框鈕裡，**把「答應」那一顆標成主要動作**（F117 I12）。
+
+    走查記的是「範本庫的 `Load` 是藍的、Chart settings 的 `OK` 是白的」。
+    原因不是有人選了兩種樣式，是**兩種來路**：自己 `QPushButton` 再
+    `setObjectName("primary")` 的都是藍的，而 `QDialogButtonBox` 生出來的
+    那一顆沒有人去標。同一個畫面上「按這裡完成」因此有兩種長相。
+
+    ⚠ **只標 Accept 那一顆。** 一排 `Close` 的 box（看一看就關掉那種）**沒有
+    主要動作** —— 硬標一顆藍的，等於把「離開」講成「完成」。
+
+    回傳被標的那顆（沒有就 ``None``），方便呼叫端再改字。
+    """
+    btn = box.button(QDialogButtonBox.Ok) or box.button(QDialogButtonBox.Apply)
+    if btn is None:
+        for b in box.buttons():
+            if box.buttonRole(b) == QDialogButtonBox.AcceptRole:
+                btn = b
+                break
+    if btn is None:
+        return None
+    btn.setObjectName("primary")
+    # ⚠ **改了 objectName 要重算樣式**：Qt 的 QSS 是在 polish 的時候比對
+    # selector 的，而這顆鈕早就 polish 過了 —— 不 unpolish 的話它會留在白色，
+    # 而程式碼看起來完全正確。
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
+    return btn
 
 
 

@@ -15,7 +15,8 @@
 **A4／C1／I8／B3**（讀得到：畫布分得到高度、數值看得到、段標不比內容小、卡片說明兩行）、
 **G3／G4／K3／K1**（範本庫上寫給人看的字、說明不被捲軸壓住、剩餘時間、手冊在 app 裡打得開）、
 **B1／B4／J4／I7**（畫布與卡片上那一群：灰掉的按鈕、`Write charts` 的三格、刪卡之後的補線、每張卡的 img/s）、
-**F5／F3／F8／F7**（離開這個工具的東西：CSV 欄名、KLARF 座標、圖表的刻度與圖例、報表版面）。
+**F5／F3／F8／F7**（離開這個工具的東西：CSV 欄名、KLARF 座標、圖表的刻度與圖例、報表版面）、
+**H2／H3／I12／I2／A6**（樣式一致性：兩條狀態列、空白畫面被切、按鈕兩種長相、兩個強調色、畫布對比）。
 
 ⚠ **E6 與 I3 沒重現出來**，原樣留著（走查是在 Linux／Noto Sans CJK 上做的，這兩條可能是環境）。
 中文化（H5）這一輪**不碰**（使用者決定：那一條要先有 2–3 位目標使用者試用）。
@@ -74,7 +75,7 @@
 | # | 問題 | 建議 | 查證 |
 |---|---|---|---|
 | A5 ✅ | **做完** —— 面板拿得到畫布的收合狀態（`set_tree_collapsed`），樹收著時改講「double-click the Decision card on the canvas to show the tree, then click a diamond」。原本記的：判定區卡片寫 `tree hidden — double-click to show`，判定面板卻寫「click a diamond on the canvas」—— 樹收著時看不到菱形| 面板那句在樹收起時改成「雙擊判定區展開」 | ✅ `tree_scene.py:328` |
-| A6 | 深色模式：深色卡片配深色底、連線細灰，對比比淺色低 | 畫布納入 `test_ui_contrast` | ✅ 截圖（主觀程度中） |
+| A6 ✅ | **做完，而走查的判斷是反的。** 量出來：連線 vs 畫布底 dark **2.99** / light **2.10**；卡片框 vs 畫布底 dark **1.51** / light **1.03**。**兩套都不及格，而淺色是比較糟的那一個** —— 淺色的卡片框只有 1.03，等於那條框不存在，卡片全靠底色差 1.22 跟畫布分開。修法：`canvas_edge` 兩套都拉過 3.0（WCAG 1.4.11 非文字門檻），卡片框改用新的 `canvas_card_border`（**不動 `border_default`** —— 那一個是配面板底色調的，整批改會波及每一塊面板）。⚠ **格線刻意不拉**：它是背景紋理不是承載意思的東西，拉到 3.0 畫布會變成一張點陣紙，而卡片與線要跟那些點搶注意力 —— 有一條反向測試釘住「格線要比卡片框淡」。原本記的：深色模式對比比淺色低 | 畫布納入 `test_ui_contrast` | ✅ 截圖（主觀程度中）｜ 守門：`tests/test_ui_contrast.py`（畫布那三對 ＋ 格線的反向）|
 | B1 ✅ | **做完** —— 沒接線的時候**那一排不畫**，只留標題與那句 `Wire a Region card into “Region” first.`。⚠ **不是 `title=""`**：標題留著，因為它講的是「接好線之後這裡會有一個選擇」—— 整段收掉的話，使用者不會知道自己少了什麼。順帶把舊的那條規則變成結構上的保證：灰掉的東西 Qt 只擋得住滑鼠，鍵盤與直接呼叫擋不到，而**不存在的東西沒有這個問題**。原本記的：三顆在沒接 Region 時都灰掉，第一眼是一排不能按的東西 | 未啟用時收成一行提示；停用的樣式再明顯一點 | ✅ 截圖 ｜ 守門：`tests/test_ui_glv_intent.py`（含反向：接好線那三顆要回來）|
 | B2 ✅ | **做完** —— `multi_choice` 也收 `choice_labels`，格子上寫 `Gap (gray levels)` / `Spread (%)` / `Tilt across`，**值還是鍵**（跟著 box 的屬性走，不跟著 `box.text()` 走 —— 讀字的那一版會把白話名字存進 recipe）。原本記的：均勻度 GLV 的「How even are the boxes」直接用 feature 名當選項（`range`、`range_pct`、`cv_pct`、`slope_x`）| 顯示白話 label，key 不變 | ✅ 截圖 |
 | B3 ✅ | **做完** —— 卡片說明改成**兩行**（`_HintLabel(max_lines=2)`），放不下的還是有省略號、全文照舊在 tooltip。⚠ 自己折行：Qt 的 `elidedText` 只認一行，而 `wordWrap=True` 的 QLabel **不會省略** —— 它會一直長高，把底下的參數推出畫面。⚠ 切在字之間，不切在字中間。原本記的：卡片說明一行截斷，沒有展開方式| 兩行＋more | ✅ |
@@ -98,15 +99,15 @@
 | G5 | Simgen 區塊順序 1、2 左，3 右，4 左；週期欄顯示 `4.00`（是 setRange 的下限，不是預設值） | 閱讀順序調整；沒有 Golden Cell 時欄位空白 | ✅ |
 | G6 ✅ | **做完** —— `facet` → 「Split into panels by」；preset 一顆都按不動時多一句「Run a trial first…」（⚠ 停用的 widget 收不到 tooltip，所以那句話要寫在畫面上）。原本記的：Graph builder 沒資料時 preset 灰掉像普通字；`facet`（`chart_spec.ROLE_FACET`）沒有白話 label| 加說明；`Split into panels by` | ✅ |
 | G4b | Template 對話框主按鈕寫死 `Rebuild from image…`，第一次打開也是 | 沒有模板時叫 `Build from image…` | ✅ `template_dialog.py:246` |
-| H2 | 底部兩條狀態列；`Run only – nothing written yet…` 在 Results 又出現一次 | 合併 | ✅（主觀）|
-| H3 | 空白狀態三種資料說明太長，第三種被截 | 一句話＋更多 | ✅ |
-| I2 | 兩個強調色（藍、橘棕） | 收成一個 | ✅（主觀）|
+| H2 ✅ | **做完，而沒有把兩條併成一條** —— 它們確實是兩件事（問題列講**常駐的狀態**「現在能不能跑」，狀態列講**剛剛發生了什麼**；併起來的話一句 `Run finished` 會把一條擋著跑的錯誤洗掉）。真正的毛病是 `Nothing is blocking a run.` 是一句**永遠不會帶來消息**的話，卻佔著畫面最底下 26 px 常駐著 —— 收掉之後第二條只在它真的有話要說時出現，那時它帶著 ✕／⚠ 與顏色，一眼分得開。至於在 Results 又出現一次的那句「跑完了還沒寫」：讀到它的人**就在 Results**，而那顆 `Write outputs` 就在他上面（tooltip 還寫著同一件事）—— `extra_only` 把它剪掉，⚠ 順手把剪完留下的孤兒分隔點也清掉。原本記的：底部兩條狀態列 | 合併 | ✅（主觀）｜ 守門：`tests/test_ui_one_of_each.py` |
+| H3 ✅ | **做完，而走查說少了** —— 那三段說明各 115～169 字，在那一欄折成 7～9 行、整塊 **623 px** 高；而 1366×768 上那一塊看得到的只有 **160 px**，所以**三列全部**要捲（走查只看到第三列被切）。改成**一句話 ＋ 全文進 tooltip**（`wording.headline`，跟範本庫那一行共用同一支），並拿掉一列兩側的彈簧（那一欄只有 509 px 寬，兩邊各留一份等於把 159 px 讓給空白，說明因此從兩行變三行）。量出來 **623 → 337 px**，前兩列不必捲就看得到。⚠ 第三列仍然要捲一下 —— 要三列全進 160 px 就得砍掉標題那一塊，那是另一個決定。原本記的：空白狀態三種資料說明太長，第三種被截 | 一句話＋更多 | ✅ ｜ 守門：`tests/test_ui_one_of_each.py`（釘 ≤360 px）|
+| I2 ✅ | **做完，而量過之後發現那「兩個強調色」其實是三組沒人決定過的東西**：`max_accent*`（藍）是 `accent*` 的**逐位元組複本**、而且**零個呼叫者**；`min_accent_bg`／`_border`／`_text` 也零個；`min_accent`（橘棕）只有**一個**用處 —— 畫在使用者影像上的去雜訊核心框。⚠ 兩個名字指同一個顏色就是調色盤開始漂的樣子：改了一個，另一個安靜地留在原地。處置：`max_accent*` 與 `min_accent_bg/_border/_text` 刪掉，`min_accent` 改名 `mark_kernel` 並搬去「畫在影像上的記號」那一段（它本來就不是強調色）| 收成一個 | ✅（主觀）｜ 守門：`tests/test_ui_contrast.py` |
 | I5 | ✅ **做完**（含 F6 的數字那一半）—— 但病灶比記的更深：`core/export/html.py` 的 `number()` 用的是 `%.4g`，**正是 F52 算過之後否決掉的那一個**。除了 `1.638e+04`，它還讓 `99.995` 在報表上變成 `100`（**沒有人回報過，但那就是 F52 第 1 條的危害**）| 規則搬進 `d4t/core/numbers.py`（Qt-free），畫面與報表共用；NaN 的收尾各自保留（報表空白、畫面 `NaN`）。**core 不 import ui**，所以是往下放不是往上借 | ✅ 測試逐值比對兩邊，另加一條「core 不准 import ui」|
 | I6 | 畫布、Features、Results 之間可以互相指：滑過 Features 一列亮起來源卡、點 Results 欄名跳到那張卡（`reveal_cards` 已有，可沿用） | 延伸既有機制 | 建議 |
 | I7 ✅ | **做完** —— 卡片上那一行只留給**失敗**（永遠講）與**瓶頸**（`loud_nodes`）。⚠ 門檻是一句話：**它一張比其他所有卡加起來還久**（`SLOW_SHARE = 0.5`）。第一版寫三分之一，而它在兩張卡的批次上破功：兩張一樣快的各佔 50%，於是其中一張被指成瓶頸 —— 而那兩張一模一樣。⚠ **不是把數字丟掉**：每一張卡的速率照樣量得到，它搬進 tooltip（`Last run: …`）—— 丟掉一個量得到的數字，跟把它印七遍一樣糟 | 只在失敗或特別慢時顯示 | 主觀 ｜ 守門：`tests/test_ui_quiet_canvas.py`（13 條，含「反向：數字不准弄丟」）|
 | I8 ✅ | **做完** —— `paramSection` 從 `font_tiny`（10px）改成 `font_body`（13px）。它底下的欄位名就是 13px —— 一個**比內容小**的標題讀起來像註腳，眼睛會從它上面滑過去。它仍然是招牌（較淡的顏色＋底線），只是不再比自己的內容小。原本記的：參數區段標題（`1 · Where to measure`）比欄位名小| 調字級 | ✅ |
 | I11 ✅ | 刪卡後狀態列只寫 `Removed "dn"`，沒有復原提示 | `已移除 Denoise · 復原（Ctrl+Z）` | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 1 步）**
-| I12 | 對話框主按鈕樣式不一（範本庫 `Load` 藍、Chart settings `OK` 白） | 統一 | ✅ |
+| I12 ✅ | **做完，而原因不是有人選了兩種樣式，是兩種來路**：自己 `QPushButton` 再 `setObjectName("primary")` 的都是藍的，而 `QDialogButtonBox` 生出來的那一顆**沒有人去標**。新增 `buttons.mark_primary(box)`（四個對話框各叫一次）。⚠ **只標 Accept 那一顆**：一排只有 `Close` 的 box **沒有主要動作**，硬標一顆藍的等於把「離開」講成「完成」。⚠ 改了 `objectName` 要 `unpolish`／`polish` —— Qt 的 QSS 是 polish 時比對 selector 的，不重算的話那顆鈕會留在白色，而程式碼看起來完全正確 | 統一 | ✅ ｜ 守門：`tests/test_ui_one_of_each.py`（反向：每一支有 `Ok` 的 box 都要走那支 helper，例外要指得出名字）|
 | I13 ✅ | **做完** —— `->` 全部改成 `→`（8 處；`→` 在 WGL4 裡，Segoe UI 蓋得到，而 repo 本來就有 25 處在用它）。`tests/test_ui_symbols.py` 擋回頭，配一條反向測試（把走查看到的那句話餵回去，確認判準會咬它）。原本記的：符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`）| 統一 | ✅ |
 | I15 ✅ | **做完** —— 新的 `ui/frozen_column.py`：疊第二個 view 上去（Qt 官方那個 frozen-column 的做法），**共用 model 與 selection model**（各自一份的話，點左邊選到的列跟右邊亮起來的不是同一列）。⚠ 主表那一欄照樣留著不藏 —— 藏起來的話它的寬度就不再參與版面，右邊的內容會滑到凍結欄底下。⚠ 接法是包住 `resizeEvent`，不是叫呼叫端記得呼叫 `sync()`。原本記的：Results 表格橫向捲動時 defect 欄會跑掉（表頭本來就固定）| 凍結第一欄 | ✅ |
 | I16 ✅ | **做完** —— 新的 `ui/geometry.py`（`remember`／`restore`），三個視窗都接上。⚠ 還原完一定過一次 `keep_on_screen`（拔掉第二個螢幕之後，存下來的位置會落在沒有螢幕的地方 —— 那是一個按了沒反應的按鈕）。⚠ 最小化／全螢幕時**不存**。⚠ 它是「第四個會寫磁碟的東西」，所以先做出覆寫點 `geometry.SETTINGS`（CLAUDE.md §4）。原本記的：Results、Chart settings、範本庫不記得視窗大小位置（`d4t/ui` 內沒有 `saveGeometry`）| QSettings 記住並經過 `keep_on_screen` | ✅ |

@@ -100,6 +100,7 @@ from .cell_canvas import (
 )
 from .theme import TOKENS
 from .widgets import IconButton, apply_button_cursors, restyle
+from . import buttons as buttons_mod
 
 __all__ = ["TemplateDialog", "BLURRED_BELOW"]
 
@@ -205,6 +206,7 @@ class TemplateDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
         self.buttons.button(QDialogButtonBox.Ok).setText("Use this setup")
+        buttons_mod.mark_primary(self.buttons)
         self.buttons.accepted.connect(self._on_accept)
         self.buttons.rejected.connect(self.reject)
         outer.addWidget(self.buttons)

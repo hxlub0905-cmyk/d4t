@@ -38,7 +38,35 @@ from typing import Any, Optional, Sequence
 from d4t.core.pipeline import get_step
 
 __all__ = ["card", "card_of_step", "field", "name_list",
-           "step_error_text", "trace_error_text", "issue_line"]
+           "step_error_text", "trace_error_text", "issue_line",
+           "headline", "HEADLINE_MAX"]
+
+#: 一行摘要最長幾個字（F117 G3 定的，H3 起兩個地方共用）。
+HEADLINE_MAX = 72
+
+
+def headline(text: Any, limit: int = HEADLINE_MAX) -> str:
+    """一段說明 → **一行摘要**（第一句，太長就切在字之間加省略號）。
+
+    兩個地方用它：範本庫上那一列（F117 G3），以及空白畫面上那三列「這條路吃
+    什麼樣的檔案」（F117 H3）。**同一件事只寫在一個地方** —— 兩份的那一天，
+    其中一份會學會留問號而另一份不會。
+
+    ⚠ **句號不是唯一的結尾**：出貨的 recipe 裡有一份的第一句是問句
+    （``is the gray level even across the field?``）。
+    ⚠ **問號與驚嘆號留著，句號不留**：一個問句沒有問號讀起來像被切斷了，
+    而句尾的句號在一行摘要上是雜訊。
+    """
+    body = " ".join(str(text or "").split())
+    if not body:
+        return ""
+    limit = max(1, int(limit))
+    cut = min((i for i in (body.find(c) for c in ".?!") if i > 0), default=-1)
+    end = cut + (1 if 0 < cut < len(body) and body[cut] in "?!" else 0)
+    first = body[:end] if 0 < cut <= limit else body
+    if len(first) <= limit:
+        return first
+    return "%s…" % first[:limit].rsplit(" ", 1)[0]
 
 
 def card_of_step(step_key: Any) -> str:

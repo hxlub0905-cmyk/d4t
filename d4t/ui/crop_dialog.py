@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 from . import fit_screen
 from .theme import TOKENS
 from .widgets import apply_button_cursors
+from . import buttons as buttons_mod
 
 __all__ = ["CropView", "CropDialog", "MIN_SIDE", "crop_array"]
 
@@ -288,6 +289,7 @@ class CropDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
         self.buttons.button(QDialogButtonBox.Ok).setText("Stack from this box")
+        buttons_mod.mark_primary(self.buttons)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
