@@ -192,6 +192,7 @@ class TemplateDialog(QDialog):
         # 1,023 px，而那個數字會頂著整個對話框縮不進一台 1024×768 的螢幕 ——
         # 一個在版面樹上完全看不出來的原因。
         left_lay.addWidget(fit_screen.scroll_row(self._build_tool_row(), left))
+        left_lay.addWidget(self._build_tool_hint())
         left_lay.addWidget(self.canvas, 1)
         split.addWidget(left)
         split.addWidget(self._build_side_panel())
@@ -547,11 +548,22 @@ class TemplateDialog(QDialog):
         row.addWidget(self.btn_array_ok)
         lay.addLayout(row)
 
-        self.tool_hint = QLabel("", box)
+        # ⚠ **那句說明不在這個 box 裡**（F117 G4）：整個 box 會被包進
+        # `fit_screen.scroll_row`，而那一支把高度鎖成「一列鈕的高度 ＋ 捲軸」
+        # —— 一句會換行的說明放進去，第二行就被切掉，而橫向捲軸正好壓在它
+        # 上面。它現在住在捲軸**外面**（見 `_build_tool_hint`）。
+        return box
+
+    def _build_tool_hint(self) -> QLabel:
+        """工具列底下那句「現在這個工具怎麼用」—— **在捲軸外面**（F117 G4）。
+
+        鈕排不下要橫向捲（U1），而一句說明排不下要**換行** —— 兩種相反的
+        處理方式不能待在同一個容器裡。
+        """
+        self.tool_hint = QLabel("", self)
         self.tool_hint.setObjectName("paramHint")
         self.tool_hint.setWordWrap(True)
-        lay.addWidget(self.tool_hint)
-        return box
+        return self.tool_hint
 
     # ---- 工具列的動作 -------------------------------------------------------
     def set_tool(self, key: str) -> None:

@@ -629,6 +629,8 @@ class GlvStatsStep(MultiSourceStep):
     """Gray level：量一塊的灰階，可以再說「跟誰比」（見模組 docstring）。"""
 
     key = "glv_stats"
+    #: 這張卡有一本手冊（F117 K1）—— 參數區那一行 "Manual" 打開它。
+    manual = "USING-UNIFORMITY.md"
     #: ``key`` 不動（recipe 的鍵）。短名是使用者要的（F16）。
     # ⚠ **只有 `label` 換掉**（使用者 2026-08-25：「Measure 的 card 順序幫我
     # 改命名&重排：GLV → CD → Focus index」）。`key`（`glv_stats`）是 recipe

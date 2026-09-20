@@ -1326,6 +1326,8 @@ class OutputCharStep(_OutputStep):
     """
 
     key = "output_char"
+    #: 這張卡有一本手冊（F117 K1）—— 參數區那一行 "Manual" 打開它。
+    manual = "USING-CHARACTERIZATION.md"
     label = "Write comparison"
     PATH = "folder"
     WHAT = "folder"
@@ -1593,6 +1595,8 @@ class OutputUniformityStep(_OutputStep):
     """
 
     key = "output_uniformity"
+    #: 這張卡有一本手冊（F117 K1）—— 參數區那一行 "Manual" 打開它。
+    manual = "USING-UNIFORMITY.md"
     #: ⚠ **只有 `label` 改過**（F88 第六刀，使用者 2026-09-07：「改成 write
     #: charts」）。`key` 是 recipe 的鍵、資料夾裡的檔名沿用它 —— 兩者都不動，
     #: 所以這一次改名的代價是零（CLAUDE.md 那張價目表的最後一列）。

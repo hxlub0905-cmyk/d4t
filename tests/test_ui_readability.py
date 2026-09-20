@@ -125,24 +125,38 @@ LONG = ("Measure gray level statistics inside each region - the mean, the "
         "spread, and how far the odd box is from the others.")
 
 
+def _hint(qapp, text, width, lines=2):
+    """一個**真的是那個寬度**的 `_HintLabel`。
+
+    ⚠ **`resize()` 對一個從來沒有 `show()` 過的 widget 不會送出 resizeEvent**
+    （Qt 把它延到第一次顯示）。第一版的這幾條就是這樣：`resize(260, 40)` 之後
+    量到的其實是**出生時那個 640 px**，而 640 剛好也折成兩行 —— 測試是綠的，
+    而它量的不是它說的那個東西。
+
+    這跟 F117 D4 那次 `` 被吃掉是同一類的錯：**一條只會綠的測試比沒有測試
+    糟，它讓人以為那件事有人在看。**
+    """
+    lab = _HintLabel(text, max_lines=lines)
+    lab.show()
+    lab.resize(width, 40)
+    qapp.processEvents()
+    return lab
+
+
 def test_a_long_card_help_gets_two_lines(qapp):
-    lab = _HintLabel(LONG, max_lines=2)
-    lab.resize(260, 40)
+    lab = _hint(qapp, LONG, 260)
+    one = _hint(qapp, LONG, 260, lines=1)
     try:
-        lines = lab.text().splitlines()
-        assert len(lines) == 2, lines
+        assert len(lab.text().splitlines()) == 2, lab.text()
         # 兩行看得到的字要比一行多（不然這一輪什麼都沒買到）。
-        one = _HintLabel(LONG, max_lines=1)
-        one.resize(260, 20)
         assert len(lab.text()) > len(one.text())
-        one.deleteLater()
     finally:
         lab.deleteLater()
+        one.deleteLater()
 
 
 def test_a_short_one_is_left_alone(qapp):
-    lab = _HintLabel("Short one.", max_lines=2)
-    lab.resize(260, 40)
+    lab = _hint(qapp, "Short one.", 260)
     try:
         assert lab.text() == "Short one."
         assert "…" not in lab.text()
@@ -154,19 +168,23 @@ def test_it_still_says_there_is_more(qapp):
     """⚠ 兩行**不是**「全部都看得到」—— 放不下的還是要有省略號。
 
     沒有那個記號的話，被切掉的那半句看起來像作者只寫了半句。
+
+    ⚠ **寬度從字型算出來，不寫死 px**：字型換一個，寫死的那個數字就換一個
+    意思，而這一條要問的是「放不下的時候」。
     """
     lab = _HintLabel(LONG, max_lines=2)
-    lab.resize(200, 40)
+    narrow = max(60, lab.fontMetrics().horizontalAdvance(LONG) // 6)
+    lab.deleteLater()
+    lab = _hint(qapp, LONG, narrow)
     try:
-        assert lab.text().endswith("…")
+        assert lab.text().endswith("…"), lab.text()
     finally:
         lab.deleteLater()
 
 
 def test_it_breaks_between_words_not_inside_one(qapp):
     """⚠ Qt 硬切的結果看起來像畫面壞掉（`canvas._draw_elided` 記過同一件事）。"""
-    lab = _HintLabel(LONG, max_lines=2)
-    lab.resize(260, 40)
+    lab = _hint(qapp, LONG, 260)
     try:
         first = lab.text().splitlines()[0]
         assert LONG.startswith(first), "第一行不是原句的字首 —— 切在字中間了"
@@ -176,7 +194,7 @@ def test_it_breaks_between_words_not_inside_one(qapp):
 
 
 def test_the_wrapper_handles_nothing_gracefully(qapp):
-    lab = _HintLabel("", max_lines=2)
+    lab = _hint(qapp, "", 260)
     try:
         assert lab.text() == ""
         assert _wrap_elided("", lab.fontMetrics(), 100, 2) == ""

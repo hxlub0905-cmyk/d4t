@@ -222,6 +222,8 @@ class PairSourceStep(Step):
     """另一份資料的對應那一顆 → 一條影像流。"""
 
     key = "pair_source"
+    #: 這張卡有一本手冊（F117 K1）—— 參數區那一行 "Manual" 打開它。
+    manual = "USING-CHARACTERIZATION.md"
     # F110：24 → 11。「with another」在卡片庫那一列上不帶資訊 ——
     # 配對本來就是跟別的東西配。
     label = "Pair source"

@@ -242,6 +242,59 @@ def list_recipe_files(directory: Any = None) -> List[Path]:
     return sorted(d.glob("*.json"))
 
 
+#: 清單上那一行摘要最多幾個字（F117 G3）。出貨那三份的第一句有 150～400 個
+#: 字 —— 整句放進清單就變成一面牆，而使用者在那個清單上要做的是「掃過去挑
+#: 一份」。完整的一段在右邊那一塊。
+HEADLINE_MAX = 72
+
+
+def _headline(text: Any) -> str:
+    """一段描述 → **清單上那一行**（第一句，太長就切在字之間加省略號）。
+
+    ⚠ 句號不是唯一的結尾：出貨的三份裡有一份的第一句是問句
+    （``is the gray level even across the field?``）。
+    """
+    body = " ".join(str(text or "").split())
+    if not body:
+        return ""
+    cut = min((i for i in (body.find(c) for c in ".?!") if i > 0),
+              default=-1)
+    # ⚠ **問號與驚嘆號留著，句號不留**：一個問句沒有問號讀起來像被切斷了
+    # （出貨那三份裡真的有一份是問句），而句尾的句號在一行摘要上是雜訊。
+    end = cut + (1 if 0 < cut < len(body) and body[cut] in "?!" else 0)
+    first = body[:end] if 0 < cut <= HEADLINE_MAX else body
+    if len(first) <= HEADLINE_MAX:
+        return first
+    clip = first[:HEADLINE_MAX].rsplit(" ", 1)[0]
+    return "%s…" % clip
+
+
+def _count_classes(decide: Dict[str, Any]) -> int:
+    """判定樹上有幾個類別（葉子）—— 給庫上那一行「分成幾類」用。
+
+    ⚠ 讀的是**生的 JSON**，不是 `DecideSpec`：這一支的規矩是「不驗證、不炸」
+    （壞掉的檔案要變成一列紅字，不是讓整個庫開不起來）。
+    """
+    seen = set()
+
+    def walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        if "bin" in node:
+            seen.add(node.get("bin"))
+            return
+        walk(node.get("yes"))
+        walk(node.get("no"))
+
+    walk(decide.get("tree"))
+    for rule in (decide.get("rules") or []):
+        if isinstance(rule, dict):
+            seen.add(rule.get("bin"))
+    if decide.get("rules"):
+        seen.add((decide.get("otherwise") or {}).get("bin"))
+    return len(seen)
+
+
 def read_recipe_info(path: Any) -> Dict[str, Any]:
     """讀一份 recipe JSON → 給庫對話框顯示用的摘要（**不做驗證、不炸**）。
 
@@ -253,6 +306,10 @@ def read_recipe_info(path: Any) -> Dict[str, Any]:
         "path": str(p), "file": p.name, "recipe_id": p.stem,
         "description": "", "routes": [], "route_steps": {},
         "n_steps": 0, "expr": "", "threshold": None, "author": "",
+        # **有沒有判定樹**（F117 G3）：沒有這一格的時候，一份走判定樹的
+        # recipe 在庫上寫著 `score = (no score expression)` —— 讀起來像
+        # 「這一份不會判定」，而它其實是**用另一種方式**判定的。
+        "has_tree": False, "n_classes": 0,
         "version": None, "error": "",
     }
     try:
@@ -274,6 +331,12 @@ def read_recipe_info(path: Any) -> Dict[str, Any]:
         info["routes"] = [str(k) for k in routes]
         info["route_steps"] = {str(k): len(list(v or [])) for k, v in routes.items()}
     info["n_steps"] = len(dict(d.get("nodes") or {}))
+
+    decide = d.get("decide") or {}
+    if isinstance(decide, dict):
+        info["has_tree"] = decide.get("tree") is not None or bool(
+            decide.get("rules"))
+        info["n_classes"] = _count_classes(decide)
 
     score = d.get("score") or {}
     if isinstance(score, dict):
@@ -714,11 +777,22 @@ class RecipeLibraryDialog(QDialog):
     # ---- 顯示 -------------------------------------------------------------
     @staticmethod
     def _item_text(info: Dict[str, Any]) -> str:
+        """清單上一列：**一句摘要在上、資料型別與步驟數在下**（F117 G3）。
+
+        以前第一行是 ``recipe_id``（`ebi_die_to_die`）、第二行是
+        ``route: ebi_patch`` —— 兩個都是 recipe JSON 的鍵，而使用者要決定的
+        是「哪一份最接近我的層」。描述是他自己寫的那一句，所以它排第一。
+
+        沒有描述的那一份退回檔名（**不是 `recipe_id`**）：他在檔案總管裡看到
+        的就是那個字。
+        """
         if info["error"]:
             return "%s\n(unreadable: %s)" % (info["file"], info["error"])
-        routes = ", ".join(info["routes"]) or "(no route)"
-        return "%s\nroute: %s · %d steps" % (
-            info["recipe_id"], routes, int(info["n_steps"]))
+        head = _headline(info.get("description"))
+        kinds = ", ".join(scope.kind_word(r) for r in info["routes"]) \
+            or "(no route)"
+        return "%s\n%s · %d steps" % (head or info["file"], kinds,
+                                      int(info["n_steps"]))
 
     def _on_row_changed(self, row: int) -> None:
         if not (0 <= int(row) < len(self._entries)):
@@ -737,11 +811,23 @@ class RecipeLibraryDialog(QDialog):
             return "This file could not be read:\n%s" % info["error"]
         lines = [info["description"] or "(this recipe has no description)", ""]
         for route in info["routes"]:
-            lines.append("• route %s: %d steps"
-                         % (route, int(info["route_steps"].get(route, 0))))
+            lines.append("• %s: %d steps"
+                         % (scope.kind_word(route),
+                            int(info["route_steps"].get(route, 0))))
         lines.append("")
-        lines.append("score = %s" % (info["expr"] or "(no score expression)"))
-        if info["threshold"] is not None:
+        # ⚠ **走判定樹的 recipe 沒有分數表達式，而那不是「沒有判定」**
+        # （F117 G3）。以前這裡寫 `score = (no score expression)`，讀起來像
+        # 這一份不會判定 —— 而它是用另一種方式判定的。
+        if info.get("has_tree"):
+            n = int(info.get("n_classes") or 0)
+            lines.append("Sorts with a decision tree on the canvas%s"
+                         % (" (%d classes)" % n if n else ""))
+        else:
+            lines.append("score = %s"
+                         % (info["expr"] or "(no score expression)"))
+        # 門檻跟著 score 走 —— 走判定樹的那一份印它一樣會讓人以為判定是
+        # 「跟一個數字比大小」（同上面那一行的理由）。
+        if info["threshold"] is not None and not info.get("has_tree"):
             lines.append("threshold = %g (score >= threshold → bin 1)"
                          % float(info["threshold"]))
         if info["author"]:

@@ -1002,6 +1002,13 @@ class Step(ABC):
     writes: ClassVar[List[str]] = []
     features_out: ClassVar[List[str]] = []
     requires_ref: ClassVar[bool] = False  # True → rsem 單張資料流不可用（除非上游造出 ref）
+    #: **這張卡的使用手冊**（F117 K1）：``docs/`` 底下的檔名，例如
+    #: ``"USING-CD.md"``。空字串 = 沒有手冊（多數卡片一句 ``help`` 就夠）。
+    #:
+    #: 為什麼住在卡片上而不是 UI 的一張對照表：那張表會變成「按卡片名字分支」
+    #: 的第 N 處（`tests/test_size_ceilings.py` 數著），而且它跟卡片隔了一個
+    #: 目錄 —— 卡片改名的那天沒有人會想到去改它。手冊是**這張卡自己的**事。
+    manual: ClassVar[str] = ""
 
     # ---- 參數 -------------------------------------------------------------
     @classmethod
@@ -1708,6 +1715,7 @@ class Step(ABC):
             "scale": cls.scale,
             "group": cls.resolve_group(),
             "help": cls.help,
+            "manual": cls.manual,
             "requires_ref": cls.requires_ref,
             "params": [
                 {

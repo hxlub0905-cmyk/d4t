@@ -42,6 +42,7 @@ __all__ = [
     "PROFILES", "DEFAULT_PROFILE", "current_profile", "use_profile",
     "profile_from_env",
     "INPUT_SOURCES", "ATTACHMENTS", "InputSource",
+    "KIND_WORDS", "kind_word",
     "is_supported_kind", "visible_steps", "recipe_is_supported",
     "unsupported_kind_message",
 ]
@@ -64,6 +65,25 @@ __all__ = [
 #: 這裡與 `INPUT_SOURCES`。六個入口對使用者太多是他原話裡的另一半。
 SUPPORTED_KINDS: Sequence[str] = ("ebi_patch", "rsem", "folder",
                                   "doe_folder")
+
+#: **資料型別在畫面上怎麼講**（F117 G3）。``ebi_patch`` 是 recipe JSON 的鍵，
+#: 而範本庫上以前直接印它 —— 一個第一次開這個工具的人看不懂那個字。
+#:
+#: ⚠ **短句，不是一段說明**：它出現在清單的第二行（跟步驟數並排），而完整
+#: 的一句在 :data:`INPUT_SOURCES` 的 ``what`` 上（那是開檔對話框讀的）。
+#: 兩個長度不同是因為讀的時機不同，不是因為抄了兩份。
+KIND_WORDS = {
+    "ebi_patch": "patch images",
+    "rsem": "one image per defect",
+    "folder": "a folder of images",
+    "doe_folder": "imaging conditions",
+}
+
+
+def kind_word(kind: str) -> str:
+    """``"ebi_patch"`` → ``"patch images"``。認不得的原樣回去（**不要猜**）。"""
+    key = str(kind or "").strip()
+    return KIND_WORDS.get(key, key)
 
 #: 只有在不支援的型別下才有意義、因此不列進卡片庫的 step key。
 #:

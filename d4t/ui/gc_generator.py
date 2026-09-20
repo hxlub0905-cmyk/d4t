@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import fit_screen
+from . import strings
 from . import theme
 from .gc_paint import (
     MODE_BRUSH, MODE_ERASE, MODE_RECT, GcPaintView,
@@ -130,6 +131,10 @@ class _GenWorker(QThread):
 # --------------------------------------------------------------------------- #
 # 主視窗
 # --------------------------------------------------------------------------- #
+#: 這個視窗的使用手冊（F117 K1）。
+MANUAL = "USING-SIMGEN.md"
+
+
 class GcGeneratorWindow(QMainWindow):
     """貼一張 GC → 看鋪出來長怎樣 → 產兩份 lot。"""
 
@@ -155,12 +160,33 @@ class GcGeneratorWindow(QMainWindow):
         grid.addWidget(self._defect_box(), 2, 0)
         grid.addWidget(self._params_box(), 3, 0)
         grid.addWidget(self._run_box(), 3, 1)
+        grid.addWidget(self._manual_link(), 4, 0, 1, 2, Qt.AlignRight)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(0, 1)
         fit_screen.fit(self, 1060, 900)
         self._sync()
 
     # -- 版面 ---------------------------------------------------------------
+    def _manual_link(self) -> QWidget:
+        """手冊入口（F117 K1）。
+
+        ⚠ 這一個不是卡片，所以檔名寫在這裡 —— 而**它是唯一一個**。卡片的
+        手冊住在卡片自己身上（:attr:`Step.manual`），不在任何一張對照表上。
+        """
+        from . import manual as manual_mod
+
+        lab = QLabel("", self)
+        lab.setObjectName("paramHint")
+        lab.setTextFormat(Qt.RichText)
+        ok = manual_mod.path_for(MANUAL) is not None
+        lab.setText('<a href="#manual">%s</a>' % strings.tr("Manual →")
+                    if ok else "")
+        lab.setVisible(ok)
+        lab.setCursor(Qt.PointingHandCursor)
+        lab.linkActivated.connect(lambda _h: manual_mod.show(MANUAL, self))
+        self.lnk_manual = lab
+        return lab
+
     def _source_box(self) -> QWidget:
         box = QGroupBox("1 · The Golden Cell", self)
         lay = QVBoxLayout(box)

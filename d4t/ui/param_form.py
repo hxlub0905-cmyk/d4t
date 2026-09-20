@@ -132,8 +132,22 @@ class ParamForm(QWidget):
         # 看不出後面還有多少。全文照舊在 tooltip（說明是查閱用的，不佔版面）。
         self._step_help = _HintLabel("", max_lines=2)
         self._step_help.setObjectName("paramStepHelp")
+        # **手冊入口長在用得到它的那張卡上**（F117 K1）。五份 `USING-*.md` 以前
+        # 只在 repo 裡，而廠內使用者不會去翻 —— 他也不知道有那個東西。
+        #
+        # ⚠ 只有**宣告了手冊的卡**才看得到這一行（多數卡片一句 `help` 就夠）。
+        # 一個每張卡都在、而多數時候點下去沒東西的連結，第三次之後就沒有人再
+        # 點了 —— 連真的有手冊的那幾張也一起。
+        self._manual_link = QLabel("", self)
+        self._manual_link.setObjectName("paramHint")
+        self._manual_link.setTextFormat(Qt.RichText)
+        self._manual_link.setCursor(Qt.PointingHandCursor)
+        self._manual_link.linkActivated.connect(self._open_manual)
+        self._manual_link.setVisible(False)
+        self._manual = ""
         outer.addWidget(self._title)
         outer.addWidget(self._step_help)
+        outer.addWidget(self._manual_link)
 
         # 「這張卡的資料從哪來」（F14-1，使用者定調：工具列那幾顆 Open
         # 「會混淆」）。入口長在**讀那份資料的那張卡上** —— 以前它在工具列，
@@ -345,6 +359,35 @@ class ParamForm(QWidget):
     def histogram(self) -> List[float]:
         return list(self._hist)
 
+    # ---- 手冊 -------------------------------------------------------------
+    def manual(self) -> str:
+        """目前這張卡宣告的手冊檔名（沒有就是空字串）。"""
+        return self._manual
+
+    def _set_manual(self, name: str) -> None:
+        """⚠ **檔案不在就不要給連結。**
+
+        `docs/` 沒跟著裝過去的機器上，一個點下去說「找不到」的連結比沒有連結
+        更糟 —— 它每一次都在提醒使用者這個工具少了一塊。
+        """
+        from . import manual as manual_mod
+
+        self._manual = str(name or "")
+        ok = bool(self._manual) and manual_mod.path_for(self._manual) is not None
+        # ⚠ **連結上不寫手冊的標題。** 手冊是中文寫的、而這個畫面是英文的
+        # （中文化是另一件事，見 F117 H5）—— 一行中英夾雜的連結讀起來像沒做完。
+        # 「這張卡的手冊」在這個位置（卡名、那句 help 的正下方）不會有第二種
+        # 解釋，標題留給視窗自己的標題列。
+        self._manual_link.setText(
+            '<a href="#manual">%s</a>' % strings.tr("Manual →") if ok else "")
+        self._manual_link.setVisible(ok)
+
+    def _open_manual(self, _href: str = "") -> None:
+        from . import manual as manual_mod
+
+        if self._manual:
+            manual_mod.show(self._manual, self)
+
     def set_step(self, describe: Optional[Dict[str, Any]],
                  current_params: Optional[Dict[str, Any]] = None,
                  stream_choices: Optional[Sequence[str]] = None,
@@ -387,6 +430,7 @@ class ParamForm(QWidget):
                 self._title.setVisible(False)
                 self._step_help.set_full_text("")
                 self._step_help.setVisible(False)
+                self._set_manual("")
                 self._placeholder.setVisible(True)
                 return
             self._title.setText(str(describe.get("label")
@@ -396,6 +440,7 @@ class ParamForm(QWidget):
             self._step_help.set_full_text(step_help)
             self._step_help.setToolTip(strings.tr(step_help))
             self._step_help.setVisible(bool(step_help))
+            self._set_manual(str(describe.get("manual", "")))
             self._placeholder.setVisible(False)
             self._values = {}
             self._advanced = set()

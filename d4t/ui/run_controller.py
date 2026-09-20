@@ -80,6 +80,36 @@ DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".d4t", "cache")
 TRIAL_WORKERS = None
 
 
+#: 要跑過幾顆、花過幾秒，才開始講「還要多久」（F117 K3）。
+#:
+#: ⚠ **頭幾顆不能算數**：第一顆要載影像、暖快取、開 worker，它比後面每一顆
+#: 都慢好幾倍。拿它去乘六萬，畫面上會出現一個大到荒謬的數字 —— 而一個一看
+#: 就知道是假的估計，會讓使用者連真的那個也不信。
+ETA_MIN_DONE = 5
+ETA_MIN_SECONDS = 2.0
+
+
+def eta_text(done: int, total: int, started: Optional[float]) -> str:
+    """``"about 2 min left"`` —— 證據不夠就回空字串（**不猜**）。
+
+    用的是**整批的平均**而不是瞬時速度：平均自己會平滑，而瞬時速度會讓那個
+    數字每半秒跳一次 —— 一個跳來跳去的估計讀起來像壞掉的。
+    """
+    if not started or done < ETA_MIN_DONE or done >= total:
+        return ""
+    elapsed = time.time() - float(started)
+    if elapsed < ETA_MIN_SECONDS:
+        return ""
+    left = elapsed / float(done) * float(total - done)
+    if left < 10:
+        return "almost done"
+    if left < 90:
+        return "about %d s left" % (int(left / 5 + 0.5) * 5)
+    if left < 3600:
+        return "about %d min left" % int(left / 60 + 0.5)
+    return "about %.1f h left" % (left / 3600.0)
+
+
 class RunController(QObject):
     """試跑／整批／寫出去。從 `StudioWindow` 搬來（F116 第 5 步）。"""
 
@@ -429,7 +459,12 @@ class RunController(QObject):
 
     def _on_trial_progress(self, done: int, total: int) -> None:
         self.w._progress_set(int(done), int(total), "%v / %m defects")
-        self.w._status("Running: %d / %d" % (int(done), int(total)))
+        # **還要多久**（F117 K3）：`.I01` 一批可以到六萬顆，而「3 / 60000」
+        # 答不出使用者唯一的問題 —— 現在要不要走開去做別的事。
+        left = eta_text(int(done), int(total), self._trial_t0)
+        self.w._status("Running: %d / %d%s"
+                       % (int(done), int(total),
+                          "  ·  %s" % left if left else ""))
 
     def _on_trial_done_async(self, results: Any) -> None:
         self.w._apply_trial_results(list(results or []),

@@ -37,7 +37,7 @@ _SIDE_BY_SIDE = {
 _MODAL = {
     "WelcomeDialog", "TemplateDialog", "ChartSettingsDialog",
     "GraphBuilderDialog", "CurveDialog", "StatusHistoryDialog",
-    "RecipeLibraryDialog", "CropDialog",
+    "RecipeLibraryDialog", "CropDialog", "ManualDialog",
 }
 
 _TOP_LEVEL_BASES = ("QMainWindow", "QDialog")

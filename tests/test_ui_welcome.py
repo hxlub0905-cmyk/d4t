@@ -48,6 +48,7 @@ def _load_qt() -> None:
     from PySide6.QtWidgets import QApplication  # noqa: F401
 
     from d4t.ui import studio as studio_mod  # noqa: F401
+    from d4t.ui import scope  # noqa: F401
     from d4t.ui import theme as theme_mod  # noqa: F401
     from d4t.ui import welcome as welcome_mod  # noqa: F401
 
@@ -274,11 +275,15 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp, library
             assert info["expr"] == raw["score"]["expr"]
             assert info["threshold"] == pytest.approx(raw["score"]["threshold"])
 
-            # 清單那一列要看得到 recipe 名稱與 route
-            text = dlg.item_text(i)
-            assert raw["recipe_id"] in text
+            # 清單那一列：**作者寫的那一句** ＋ 資料型別的白話（F117 G3）。
+            # ⚠ 以前這裡要的是 `recipe_id` 與生的 `route` 鍵 —— 兩個都是
+            # JSON 的鍵，而使用者在那個清單上要決定的是「哪一份最接近我的
+            # 層」。這一條問的仍然是同一件事（每個字都來自 JSON），只是
+            # 「哪個字」換了。
+            head, second = dlg.item_text(i).splitlines()[:2]
+            assert raw["description"].startswith(head.rstrip("…")), (head, raw)
             for route in raw["routes"]:
-                assert route in text
+                assert scope.kind_word(route) in second, (second, route)
 
             # 右邊細節要看得到說明與分數式
             assert dlg.select(i) is True
@@ -286,7 +291,7 @@ def test_library_shows_description_routes_steps_and_expr_from_json(qapp, library
             assert raw["description"] in detail
             assert raw["score"]["expr"] in detail
             for route in raw["routes"]:
-                assert route in detail
+                assert scope.kind_word(route) in detail
     finally:
         dlg.close()
 
