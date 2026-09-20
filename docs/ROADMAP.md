@@ -29,6 +29,21 @@
   的常駐訊號。拿掉的理由是「先把整個 engine 用好」，而 Phase 1 同一天就收斂了
   —— 那個前提到期。計畫書：[`docs/history/plans/F34-save-recipe.md`](history/plans/F34-save-recipe.md)。
 
+**UI 那一輪（2026-09-19 ～ 09-20）**：`studio.py` 拆完（F116，7,753 → 4,300 行，
+內容住 `ui/` 底下七支 controller／模組），接著把外部 UI 走查的 58 條**做掉 53**
+（F117，十九群；其中「使用者面的字」與「哪一個 bin 是好消息」各自獨立成
+[F118](history/plans/F118-user-facing-wording.md)／
+[F119](history/plans/F119-which-bin-is-good-news.md)）。
+
+剩下的 5 條與**為什麼沒做**在 [`plans/F117-ui-review.md`](plans/F117-ui-review.md)
+的狀態欄 —— 其中一條（**H5 中文化**）在等使用者決定：機制都在，而他定調要先有
+2–3 位目標使用者試用過再說。另外兩條（K2 recipe diff、K4 字級可調）是新功能，
+使用者 2026-09-20 說先不用。
+
+⚠ 那一輪**順帶查出三個走查沒記到的真 bug**（`Esc` 那句話在說謊、`d4t run --csv`
+有第四份手抄的 CSV writer、Studio 換一份 recipe 不會重填 `carry`），而它們都不是
+「畫面不好看」那一類 —— **去量一次走查說的東西，比照著它的建議做更有價值**。
+
 ---
 
 ## Phase 1 —— 讓數字可信（**收斂**，2026-08-16）
