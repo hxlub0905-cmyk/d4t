@@ -49,6 +49,7 @@ from .canvas import PipelineCanvas
 from .decide_panel import DecidePanel
 from .feature_panel import FeaturePanel
 from .image_view import ImageView
+from . import cross_links
 from . import wording
 from .problems_bar import ProblemsBar
 from .results import ResultsWindow
@@ -935,6 +936,15 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     # 名字仍叫 `feature_panel`，取用口跟舊的那張表同名同義。
     win.feature_panel = FeaturePanel(win)
     win.feature_panel.setMinimumHeight(120)
+    # **滑過一段數字＝在畫布上指出算它的那張卡**（F117 I6）。用的是
+    # `reveal_cards`（hover 那一套），不是 `select_card` —— 選取會把右邊的設定
+    # 整個換掉，而使用者現在只是在看數字，他要的是眼睛找到來源。
+    #
+    # ⚠ **接 `partial` 不接一個新的 `StudioWindow` 方法**：那一格的方法數是
+    # `HARD_CAPS`（只准往下）。內容本來就住在 `cross_links`，而在那裡也比較
+    # 好測 —— 測試直接叫那一支，不必先開一個視窗。
+    win.feature_panel.card_hovered.connect(
+        partial(cross_links.hover_card, win))
 
     win.inspector_host = QWidget(win)
     ihost = QVBoxLayout(win.inspector_host)

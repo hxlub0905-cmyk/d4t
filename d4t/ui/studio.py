@@ -105,6 +105,7 @@ from d4t.core.pipeline.recipe import (
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from . import autosave
+from . import cross_links
 from . import card_menu
 from functools import partial
 
@@ -749,6 +750,10 @@ class StudioWindow(QMainWindow):
         # 跳到產出它的卡（有區域就把那一塊亮起來）。
         self.results.trace_requested.connect(
             self.gallery_ctl._on_trace_requested)
+        # **欄名 → 算它的那張卡**（F117 I6）。接 `partial` 不接一個新的方法：
+        # 那一格的方法數是 `HARD_CAPS`，而內容本來就住在 `cross_links`。
+        self.results.card_requested.connect(
+            partial(cross_links.go_to_feature, self))
         self.results.truth_marked.connect(self._on_truth_marked)
         self.results.why_item_activated.connect(self.gallery_ctl._on_why_item)
 

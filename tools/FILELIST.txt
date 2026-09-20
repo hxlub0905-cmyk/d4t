@@ -7,7 +7,7 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 77c58b2d57df83b95d1a036603466bfa7659c05b README.md
-931c66cf5b481c90e5e2f1a0a08bd633b116473a SESSION_LOG.md
+33ecd489cb30457c17ba36475bf7fa3b7cebec09 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
 d5f88db59f6da263deba1716ab16c7ddd88fdc98 d4t/__main__.py
@@ -113,9 +113,10 @@ d076f44d3e88b7a2b5e04bd80a6634a9f3f99e5b d4t/ui/chips.py
 1456ca791afced0be73ecadb874afbdf0f5de7f0 d4t/ui/clipboard.py
 7935652b2c400dcfa78c66dccfd608b61de3b0e9 d4t/ui/crashlog.py
 feaa528e0276a19cd1e6ec43507f3684b57bbaab d4t/ui/crop_dialog.py
+49fde71960791082203194f5709fccebf81850d6 d4t/ui/cross_links.py
 5941d0f76d0b310455435ca2548639d02c73cecc d4t/ui/decide_panel.py
 9475e553fa9c604e9d301b99c6c5e77bd828fc28 d4t/ui/edit_plan.py
-61d60c43095f72958fc54d49737274f18bec71e1 d4t/ui/feature_panel.py
+3fea0845e35705d81839e31cb36790ae859103f4 d4t/ui/feature_panel.py
 f9e0842eac2b39db8c8c82358517963cc29eb235 d4t/ui/feature_text.py
 53065dce2154c0baf72fc53c96c26818f325c130 d4t/ui/feature_tree.py
 5f36d00b87e518edd388be9c63c2cdefce8b1ebc d4t/ui/fields.py
@@ -146,8 +147,8 @@ c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
 9bcae50b6478688608568c6c8242688343af9d38 d4t/ui/region_words.py
-1c9f047109de7126c28d4bda9fa4c9b6d05a9f26 d4t/ui/results.py
-0c8a5ac90a3d3209a1c653d145de3749576d67ec d4t/ui/results_table.py
+d9f103ee6ea2ebba48c4ce47e00e987ffc8a8c85 d4t/ui/results.py
+4a732bbb220f24288ed22d3c88b77f87d0b3be10 d4t/ui/results_table.py
 fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
 90f836d5544ec9dfa0e52db867e002ffa10bbce9 d4t/ui/run_controller.py
@@ -156,8 +157,8 @@ fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
-b3399a33b4bab225d584f4e9a71921aff0257f16 d4t/ui/studio.py
-6fb1fc5741fe2a8c67799d5b0780f733ef44a7c4 d4t/ui/studio_layout.py
+bd8beca73261bb84333e00499ae91ccf651bd917 d4t/ui/studio.py
+ac0f36b1bd8280b6c0c7aa4dfe3598ef4ce698a9 d4t/ui/studio_layout.py
 70e7e925f09f87e1c32031c235ae8998c2070512 d4t/ui/template_dialog.py
 0fffe2a5e2c53bbb082a979f6a72fff7c9c25841 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
@@ -175,7 +176,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 934c5ac7cecab2b250c431fdbd5a273d57c88b0b d4t/ui/wording.py
 133bc87c427642bfce9f4c9c533d589b8e597efe d4t/ui/workbench.py
 82acc13a4004df7770d7ade4ae3e10468ad094ff d4t/ui/workers.py
-3e0a1ebbb945aeb556c43282f5d8e0c718f71aea docs/ARCHITECTURE.md
+49136f2e9d83a48f63125ccd5ae75955a1dcce4a docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
@@ -189,7 +190,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-899afd98f237bc1a294c7e8884946c36c5d2d755 docs/plans/F117-ui-review.md
+c36df72ced611d8dbd515d074f78b8250cadfb1d docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -378,6 +379,7 @@ e0a07f81a5e3426855e19c4bbcf8b6609a0e2365 tests/test_ui_contrast.py
 aa3582995d2196b03cc865f531628e7d22055f5c tests/test_ui_controls_readable.py
 1bbee8aa872f6531b55f963988acf9891832343b tests/test_ui_crashlog.py
 f8b0676a8c831f92e23e128f8d30087922c985c9 tests/test_ui_crop_dialog.py
+499a7968142c1ad196a1813c72fcd9c9fdae14f9 tests/test_ui_cross_links.py
 6d79d36fc1c30d26f2ba7925d1bac63688e7cdc1 tests/test_ui_crossing_inspector.py
 6ce8b34f4aefbb77fc62a802cefc8e0c78cc7de5 tests/test_ui_decide_panel_redesign.py
 7e187f54c3529e8b414c3c924625331a6c3fe81b tests/test_ui_decision_badge.py

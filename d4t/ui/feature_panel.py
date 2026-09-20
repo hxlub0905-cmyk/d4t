@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QSizePolicy, QVBoxLayout, QWidget,
@@ -292,6 +292,13 @@ class FeaturePanel(QScrollArea):
     """
 
     feature_clicked = Signal(str)
+    #: 滑鼠進到某一段（＝某一張卡的那幾個數字）—— 送出那張卡的 node id；
+    #: 離開送空字串（F117 I6）。
+    #:
+    #: **為什麼是「一段」而不是「一列」**：一段就是一張卡，而一列屬於它所在的
+    #: 那一段 —— 滑過任何一列都會經過這一段。逐列發訊號的話，同一張卡在使用者
+    #: 的手往下移的路上會被指十幾次，而畫布那邊每一次都要清掉再亮一次。
+    card_hovered = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -329,6 +336,19 @@ class FeaturePanel(QScrollArea):
             for got in sec.get("elsewhere") or ():
                 self._values[got["name"]] = got["value"]
         self._rebuild()
+
+    def eventFilter(self, obj, event):  # Qt hook
+        """段落進出 → :attr:`card_hovered`（F117 I6）。
+
+        ⚠ **離開時送空字串，不是不送。** 畫布那邊要有一個「熄掉」的訊號 ——
+        不送的話，滑鼠移出面板之後那張卡會一直亮著，而使用者早就不在看它了。
+        """
+        kind = event.type()
+        if kind in (QEvent.Enter, QEvent.Leave):
+            nid = str(obj.property("d4tNode") or "")
+            if nid:
+                self.card_hovered.emit(nid if kind == QEvent.Enter else "")
+        return super().eventFilter(obj, event)
 
     def set_search(self, text: str) -> None:
         self._search = str(text or "").strip().lower()
@@ -382,6 +402,16 @@ class FeaturePanel(QScrollArea):
     def _section_widget(self, sec: Dict[str, Any]) -> QWidget:
         box = QFrame(self._host)
         box.setObjectName("featureSection")
+        # **滑過這一段＝在畫布上指出那張卡**（F117 I6）。
+        #
+        # ⚠ 用 `enterEvent`／`leaveEvent` 而不是追滑鼠座標：`QFrame` 本來就
+        # 收得到這兩個事件，而它們**進出各一次** —— 追座標要自己去分辨「還在
+        # 同一段裡」，那是把 Qt 已經算好的事再算一遍。
+        nid = str(sec.get("node_id") or "")
+        if nid:
+            box.setAttribute(Qt.WA_Hover, True)
+            box.installEventFilter(self)
+            box.setProperty("d4tNode", nid)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)

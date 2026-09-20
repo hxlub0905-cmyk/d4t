@@ -100,6 +100,7 @@ __all__ = [
 # ⚠ **這一段 2026-09-02 搬到 `feature_tree.py`**（F76 刀 3）：Preview 欄的新
 # 面板要吃同一棵樹，而同一件事兩份說法一定會漂 —— 區域顏色那個 bug 就是漂
 # 出來的第一個症狀。這裡留的是取用口，行為一個位元組都沒有變。
+from . import strings
 from .feature_tree import (
     BADGE_COLUMN, CLASS_COLUMN, column_tree, fixed_columns, stat_label,
 )
@@ -133,6 +134,14 @@ def table_columns(results: Sequence[Dict[str, Any]],
     """
     return list(column_tree(results, verdict_features, specs,
                             diagnostics)["columns"])
+
+
+#: 這幾欄**不是任何一張卡量出來的** —— 它們是引擎與判定段寫的，所以欄名的
+#: 選單上沒有「跳到那張卡」那一項（F117 I6）。
+_NOT_MEASURED = frozenset((
+    BADGE_COLUMN, CLASS_COLUMN, "defect_id", "ok", "error", "score", "bin",
+    "truth",
+))
 
 
 def _stat_menu_text(metric_id: str) -> str:
@@ -809,6 +818,11 @@ class ResultsTable(QTableView):
     #: 使用者點了判定欄（score / bin / class）＝「這一顆**為什麼**判成這樣」
     #: —— 回溯面板（PR-3）。值是 defect_id；面板開不開由宿主決定。
     trace_requested = Signal(str)
+    #: 欄名的右鍵選單 → **跳到算這一欄的那張卡**（F117 I6）。送的是特徵名。
+    #:
+    #: ⚠ **右鍵不是左鍵**：表頭的左鍵已經是排序（`setSortingEnabled`），
+    #: 搶走它等於把一個每天都在用的手勢換成一個偶爾用的。
+    card_requested = Signal(str)
     #: 手動改過的 bin 變了（改了、改回去、或整批清掉）。帶的是**現在還有
     #: 幾顆是手動的** —— 宿主用它講那句「這只在畫面上」。
     bin_overrides_changed = Signal(int)
@@ -846,6 +860,8 @@ class ResultsTable(QTableView):
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(22)
         head = self.horizontalHeader()
+        head.setContextMenuPolicy(Qt.CustomContextMenu)
+        head.customContextMenuRequested.connect(self._on_header_menu)
         head.setSectionResizeMode(QHeaderView.Interactive)
         head.setStretchLastSection(False)
         head.setHighlightSections(False)
@@ -961,6 +977,28 @@ class ResultsTable(QTableView):
         return ok
 
     # ---- 右鍵：改 bin ------------------------------------------------------
+    def _on_header_menu(self, pos) -> None:
+        """欄名上的右鍵 → 「跳到算這一欄的那張卡」（F117 I6）。
+
+        ⚠ **只有特徵欄有這一項。** `defect_id` / `bin` / `score` 那幾欄不是
+        任何一張卡量出來的，而一個點下去只會說「找不到」的選單項，比沒有那一
+        項更傷。
+        """
+        head = self.horizontalHeader()
+        section = head.logicalIndexAt(pos)
+        cols = self.columns()
+        if not (0 <= section < len(cols)):
+            return
+        name = str(cols[section])
+        if name in _NOT_MEASURED:
+            return
+        menu = QMenu(self)
+        act = menu.addAction(strings.tr("Go to the card that measures this"))
+        act.setToolTip("Selects that card on the canvas, so you can see how "
+                       "this number is worked out.")
+        if menu.exec(head.mapToGlobal(pos)) is act:
+            self.card_requested.emit(name)
+
     def _on_context_menu(self, pos) -> None:
         """選了幾列就改幾列 —— **複審是一次看一群，不是一顆一顆**。
 
@@ -1122,6 +1160,7 @@ class ResultsTablePane(QWidget):
         self.defect_activated = self.table.defect_activated
         self.defect_selected = self.table.defect_selected
         self.trace_requested = self.table.trace_requested
+        self.card_requested = self.table.card_requested
         self.bin_overrides_changed = self.table.bin_overrides_changed
         self.truth_marked = self.table.truth_marked
 

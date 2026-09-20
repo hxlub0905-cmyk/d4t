@@ -454,6 +454,9 @@ d4t/
     ├── geometry.py           #   子視窗記得上次多大、在哪（F117 I16）。還原完
     │                         #     一定過一次 `keep_on_screen`；⚠ 它是第四個會寫
     │                         #     磁碟的東西，所以有覆寫點 `geometry.SETTINGS`
+    ├── cross_links.py        #   畫布 › Features › Results 互相指（F117 I6）。
+    │                         #     滑過一段數字＝`reveal_cards`（看一眼，不動
+    │                         #     設定）；欄名的選單＝`select_node`（帶我去）
     ├── manual.py             #   `docs/USING-*.md` 在 app 裡打得開（F117 K1）。
     │                         #     **自己畫 Markdown** —— ⚠ 不准把檔案交給作業
     │                         #     系統開，受限的機器上那一步會安靜地失敗。

@@ -93,6 +93,8 @@ class ResultsWindow(QMainWindow):
     #: 表格上點了 score / bin / class 欄 = 「這一顆為什麼判成這樣」（PR-3）。
     #: Studio 接了算 trace 再回頭餵 :meth:`show_why` —— 本視窗不碰 recipe。
     trace_requested = Signal(str)
+    #: 欄名的右鍵選單 → 跳到算那一欄的那張卡（F117 I6）。送的是特徵名。
+    card_requested = Signal(str)
     #: 回溯面板點了一項：``(defect_id, 特徵名)``。跳去哪由 Studio 決定。
     why_item_activated = Signal(str, str)
     #: 使用者在表上標了真缺陷／誤報（X2）：``{defect_id: True|False|None}``。
@@ -159,6 +161,7 @@ class ResultsWindow(QMainWindow):
         self.table.defect_selected.connect(self.defect_selected)
         self.gallery.defect_selected.connect(self.defect_selected)
         self.table.trace_requested.connect(self.trace_requested)
+        self.table.card_requested.connect(self.card_requested)
         self.table.bin_overrides_changed.connect(self._on_bin_overrides_changed)
         self.table.truth_marked.connect(self.truth_marked)
         # **兩種看法、同一個排序與篩選**（2026-09-09，使用者：「希望它跟
