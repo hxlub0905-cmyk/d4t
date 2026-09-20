@@ -1207,9 +1207,14 @@ QLabel#paramTitle { color: $text_primary; font-size: $font_title; font-weight: 7
 QLabel#paramStepHelp { color: $text_secondary; font-size: $font_small; }
 /* Section heading in the parameter form. A signpost, not content: it has to
    read as a heading (weight, colour, space above) without competing with the
-   parameters themselves. */
+   parameters themselves.
+   F117 I8: it used to be $font_tiny (10px) while the field names under it are
+   13px - a heading SMALLER than the things it heads, which reads as a caption
+   and lets the eye slide past it. It is a signpost, so it keeps the quieter
+   colour and the rule underneath; what it stops doing is being smaller than
+   its own contents. */
 QLabel#paramSection {
-    color: $text_secondary; font-size: $font_tiny; font-weight: 600;
+    color: $text_secondary; font-size: $font_body; font-weight: 600;
     padding: 10px 0 2px 2px; border-bottom: $hairline solid $border_default;
 }
 /* "Show N more settings". Deliberately not a real-looking button: it does not

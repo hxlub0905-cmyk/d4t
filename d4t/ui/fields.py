@@ -59,6 +59,38 @@ _SLIDER_MAX_INT_SPAN = 5000
 _SLIDER_MAX_INT_SPAN = 5000
 
 
+def _wrap_elided(text: str, fm: Any, width: int, lines: int) -> str:
+    """把 ``text`` 折成最多 ``lines`` 行，**最後一行放不下就省略**。
+
+    為什麼要自己折（F117 B3）：Qt 的 `elidedText` 只認一行，而一個
+    ``wordWrap=True`` 的 QLabel **不會省略** —— 它會一直長高，把底下的參數
+    推出畫面。兩件事都不行，所以這裡自己來。
+
+    ⚠ **切在字之間，不切在字中間**：Qt 硬切的結果看起來像畫面壞掉
+    （`canvas._draw_elided` 記過同一件事）。
+    """
+    words = str(text or "").split()
+    if not words:
+        return ""
+    out: List[str] = []
+    cur = ""
+    for word in words:
+        trial = "%s %s" % (cur, word) if cur else word
+        if cur and fm.horizontalAdvance(trial) > width:
+            out.append(cur)
+            cur = word
+            if len(out) == lines - 1:
+                break
+        else:
+            cur = trial
+    rest = words[sum(len(line.split()) for line in out):]
+    tail = " ".join(rest)
+    if len(out) < lines:
+        out.append(fm.elidedText(tail, Qt.ElideRight, width)
+                   if fm.horizontalAdvance(tail) > width else tail)
+    return "\n".join(out)
+
+
 class _HintLabel(QLabel):
     """列面上那句「非讀不可」的字（錯誤／不生效註記）。
 
@@ -70,13 +102,22 @@ class _HintLabel(QLabel):
     中間，看起來像畫面壞掉（同 canvas 的 ``_draw_elided``）。
     """
 
-    def __init__(self, text: str = "", parent: Optional[QWidget] = None):
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None,
+                 max_lines: int = 1):
         super().__init__(parent)
         self.setObjectName("paramHint")
         self._full = str(text)
         self._expanded = False
+        #: 收合的時候最多幾行（F117 B3）。一行放不下一句卡片說明是常態
+        #: （最短的那幾句也有 60 幾個字），而**一行的省略號看不出後面還有
+        #: 多少** —— 兩行讓多數句子整句讀得完，讀不完的那幾句至少看得出
+        #: 它被切了。
+        self._max_lines = max(1, int(max_lines))
         self.setWordWrap(False)
         self._sync()
+
+    def max_lines(self) -> int:
+        return self._max_lines
 
     def full_text(self) -> str:
         return self._full
@@ -109,10 +150,17 @@ class _HintLabel(QLabel):
             self.setWordWrap(True)
             super().setText(self._full)
             return
-        self.setWordWrap(False)
         w = max(40, self.width())
-        super().setText(self.fontMetrics().elidedText(
-            self._full, Qt.ElideRight, w))
+        if self._max_lines <= 1:
+            self.setWordWrap(False)
+            super().setText(self.fontMetrics().elidedText(
+                self._full, Qt.ElideRight, w))
+            return
+        # **自己折行**：Qt 的 `elidedText` 只認一行，而 `wordWrap=True` 的
+        # QLabel 不會省略 —— 它會一直長高，把底下的參數推出畫面。
+        self.setWordWrap(True)
+        super().setText(_wrap_elided(self._full, self.fontMetrics(), w,
+                                     self._max_lines))
 
 
 #: 這幾種編輯器是**一整塊**，不是一行 —— 它們那一列的名字要對齊到最上面。

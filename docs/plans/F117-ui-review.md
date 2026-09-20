@@ -36,8 +36,8 @@
 
 | # | 問題 | 建議 | 查證 |
 |---|---|---|---|
-| A4 | Tune 模式畫布只剩約 300 px 高，7 張卡就縮到 50%，副標與埠名讀不到；而沒選卡時下方參數區只有一行 `(Pick a card…)` 卻占一半以上。**Build 模式下同一份 recipe 在 61% 是讀得到的**，所以問題在 Tune 的空間分配 | 沒選卡時收起參數區；或讓 Tune 的畫布最小高度大一點 | ✅ 兩種模式截圖比對 |
-| C1 | Features 面板的**數值被長說明擠到可視範圍外**：值在最右欄，面板預設寬度要水平捲 ~270 px 才看得到，第一眼只看到名字與說明 | 值放在名字旁邊（第二欄），說明放第三欄或 tooltip | ✅ 捲到最右截圖確認值存在 |
+| A4 ✅ | **做完** —— `CANVAS_SHARE_TUNE` 0.40 → **0.50**（畫布 263 → 328 px）。那個數字是**評審給的**：Build 的 61% 讀得到、Tune 的 50% 讀不到，縮放大致跟受限的那一邊成正比，`0.40 × 1.22 ≈ 0.49`。⚠ `CANVAS_MIN_PX` **沒有跟著動**（小螢幕的最後一道防線）。⚠ 連帶 `IMAGE_SHARE_TUNE` 0.50 → 0.45 —— 影像佔得比畫布多的那一刻，儀表整塊掉到設定區下面（U8 的「同一條視線」，`test_ui_layout_modes` 當場抓到）。原本記的：Tune 模式畫布只剩約 300 px 高，7 張卡就縮到 50%，副標與埠名讀不到；而沒選卡時下方參數區只有一行 `(Pick a card…)` 卻占一半以上。**Build 模式下同一份 recipe 在 61% 是讀得到的**，所以問題在 Tune 的空間分配| 沒選卡時收起參數區；或讓 Tune 的畫布最小高度大一點 | ✅ 兩種模式截圖比對 |
+| C1 ✅ | **做完** —— 一列改成 `名字 | 值 | 單位 | 說明`。說明以前是 `Expanding` 的，它把值一路推到可視範圍外，而**數字正是那個面板存在的理由**；現在說明收在後面、最小寬度 0（窄的時候先被擠掉，全文在 tooltip）。名字有最小寬度，值才排得成一欄（⚠ 是**最小**不是固定：截名字比讓值跳更糟，名字是要打進分數表達式的字）。原本記的：Features 面板的**數值被長說明擠到可視範圍外**：值在最右欄，面板預設寬度要水平捲 ~270 px 才看得到，第一眼只看到名字與說明| 值放在名字旁邊（第二欄），說明放第三欄或 tooltip | ✅ 捲到最右截圖確認值存在 |
 | E1 ✅ | **做完** —— 判錯的那一格自己說出來：`real · called nuisance`（⚠ **字也要講**，U13：紅色對色覺缺陷者不可分辨），底色是第二個通道，表頭寫 `truth (2 wrong)`。⚠ 判準**跟正確率那一行同一條**（`bin != 0` 算判定為真缺陷）—— 各訂一套的那天，紅著的列數會跟上面的數字對不起來。⚠ 跑失敗／沒標答案的那幾顆**不算判錯**（沒得比）。原本記的：有 ground truth 時上方寫 `missed 4`，但**縮圖沒有任何標記**、表格有 `truth` 欄卻沒有把「判定≠答案」的列標出來，要自己逐列比| 判錯的格子／列加紅框；篩選加「只看判錯的」 | ✅ `gallery._paint_tile` 只看 ok/bin；`results_table` 的 truth 只有文字 |
 | F1 | ✅ **做完** —— 而且**三個輸出檔都有**這個坑：CSV、xlsx 的「明細」頁、以及 HTML 報表（它自己寫 `defect/ok/score/bin` 再接特徵欄）| 新增 `detail_feature_keys()`（= `feature_keys` 扣掉 `BASE_COLUMNS`），三個寫檔的地方都用它。⚠ **`feature_keys` 本身沒有動** —— Features 面板與特徵統計要的是「這批跑出了哪些數字」，`score` 是其中之一；扣掉是**明細表**的事。原本的建議是改 `feature_keys()`，那會讓畫面上少一列 | ✅ 三條測試：CSV 表頭不重複、HTML 表頭不重複、`feature_keys` 沒變 |
 | G3 | Recipe 範本庫：清單顯示 recipe id（`ebi_die_to_die`）與 `route: ebi_patch`；右邊整塊說明；`score = (no score expression)` 會讓人以為沒有判定（判定其實在樹上） | 顯示名稱＋一句摘要；`route` 換成資料類型白話；score 那行在有判定樹時改寫或拿掉 | ✅ 截圖 |
@@ -58,7 +58,7 @@
 | A6 | 深色模式：深色卡片配深色底、連線細灰，對比比淺色低 | 畫布納入 `test_ui_contrast` | ✅ 截圖（主觀程度中） |
 | B1 | GLV 最上面「What to measure」三顆在沒接 Region 時都灰掉，第一眼是一排不能按的東西；停用與未選的差別不大 | 未啟用時收成一行提示；停用的樣式再明顯一點 | ✅ 截圖 |
 | B2 ✅ | **做完** —— `multi_choice` 也收 `choice_labels`，格子上寫 `Gap (gray levels)` / `Spread (%)` / `Tilt across`，**值還是鍵**（跟著 box 的屬性走，不跟著 `box.text()` 走 —— 讀字的那一版會把白話名字存進 recipe）。原本記的：均勻度 GLV 的「How even are the boxes」直接用 feature 名當選項（`range`、`range_pct`、`cv_pct`、`slope_x`）| 顯示白話 label，key 不變 | ✅ 截圖 |
-| B3 | 卡片說明一行截斷，沒有展開方式 | 兩行＋more | ✅ |
+| B3 ✅ | **做完** —— 卡片說明改成**兩行**（`_HintLabel(max_lines=2)`），放不下的還是有省略號、全文照舊在 tooltip。⚠ 自己折行：Qt 的 `elidedText` 只認一行，而 `wordWrap=True` 的 QLabel **不會省略** —— 它會一直長高，把底下的參數推出畫面。⚠ 切在字之間，不切在字中間。原本記的：卡片說明一行截斷，沒有展開方式| 兩行＋more | ✅ |
 | B4 | `Write charts` 卡：`At most this many defects 0`（0＝無上限？）、第五格勾選框叫 `chart`、`Enabled` 當 label | 0 顯示 `All`；`Your own chart`；具體動詞 | ✅ |
 | C2 | Features 同名多列：`clip_frac` 三列、`peak` 兩列。說明文字有寫「kept under this name because a later card wrote over it」，但要讀完那句才懂 | 名字後面直接帶來源卡（`clip_frac · Normalize(ref)`） | ✅（屬既有設計的呈現問題）|
 | D1 ✅ | **做完 —— 而且句子本身也不是對的。** `Esc` 走的是 `pipeline.clear_selection()`，那一支只放掉**畫布**那一份選取，而預覽停在哪裡看的是 `win.selected_node`（`_run_preview` 的 `upto`）—— 按了 Esc 框不見了，預覽照樣停在同一張卡上。修了兩件事：①`studio_layout.clear_selection()` 兩份一起放並重跑預覽；②最後那幾個字做成**連結**（同 `decide_path` 的先例 U11），Esc 照樣有效、寫在 tooltip 上。原本記的：「preview stops at "norm" — press Esc to run the decision too」：Esc 是「取消選取」，句子是對的，但很難被想到| 旁邊放一顆 `Run to the end` | ✅ |
@@ -85,7 +85,7 @@
 | I5 | ✅ **做完**（含 F6 的數字那一半）—— 但病灶比記的更深：`core/export/html.py` 的 `number()` 用的是 `%.4g`，**正是 F52 算過之後否決掉的那一個**。除了 `1.638e+04`，它還讓 `99.995` 在報表上變成 `100`（**沒有人回報過，但那就是 F52 第 1 條的危害**）| 規則搬進 `d4t/core/numbers.py`（Qt-free），畫面與報表共用；NaN 的收尾各自保留（報表空白、畫面 `NaN`）。**core 不 import ui**，所以是往下放不是往上借 | ✅ 測試逐值比對兩邊，另加一條「core 不准 import ui」|
 | I6 | 畫布、Features、Results 之間可以互相指：滑過 Features 一列亮起來源卡、點 Results 欄名跳到那張卡（`reveal_cards` 已有，可沿用） | 延伸既有機制 | 建議 |
 | I7 | 每張卡都印 `20 ok · 2051 img/s` | 只在失敗或特別慢時顯示 | 主觀 |
-| I8 | 參數區段標題（`1 · Where to measure`）比欄位名小 | 調字級 | ✅ |
+| I8 ✅ | **做完** —— `paramSection` 從 `font_tiny`（10px）改成 `font_body`（13px）。它底下的欄位名就是 13px —— 一個**比內容小**的標題讀起來像註腳，眼睛會從它上面滑過去。它仍然是招牌（較淡的顏色＋底線），只是不再比自己的內容小。原本記的：參數區段標題（`1 · Where to measure`）比欄位名小| 調字級 | ✅ |
 | I11 ✅ | 刪卡後狀態列只寫 `Removed "dn"`，沒有復原提示 | `已移除 Denoise · 復原（Ctrl+Z）` | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 1 步）**
 | I12 | 對話框主按鈕樣式不一（範本庫 `Load` 藍、Chart settings `OK` 白） | 統一 | ✅ |
 | I13 ✅ | **做完** —— `->` 全部改成 `→`（8 處；`→` 在 WGL4 裡，Segoe UI 蓋得到，而 repo 本來就有 25 處在用它）。`tests/test_ui_symbols.py` 擋回頭，配一條反向測試（把走查看到的那句話餵回去，確認判準會咬它）。原本記的：符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`）| 統一 | ✅ |

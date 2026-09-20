@@ -128,7 +128,9 @@ class ParamForm(QWidget):
         self._title.setObjectName("paramTitle")
         # 卡片自己的一句話。收成一行（放不下就 ``像這樣…``）、全文住 tooltip
         # —— 跟參數列同一個決定（2026-08-14）：說明是查閱用的，不佔版面。
-        self._step_help = _HintLabel("")
+        # **兩行**（F117 B3）：一行放不下一句卡片說明是常態，而一行的省略號
+        # 看不出後面還有多少。全文照舊在 tooltip（說明是查閱用的，不佔版面）。
+        self._step_help = _HintLabel("", max_lines=2)
         self._step_help.setObjectName("paramStepHelp")
         outer.addWidget(self._title)
         outer.addWidget(self._step_help)

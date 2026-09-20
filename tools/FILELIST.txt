@@ -115,10 +115,10 @@ d076f44d3e88b7a2b5e04bd80a6634a9f3f99e5b d4t/ui/chips.py
 1c624e7ed4567174f84b00469aa064375537c862 d4t/ui/crop_dialog.py
 5941d0f76d0b310455435ca2548639d02c73cecc d4t/ui/decide_panel.py
 9475e553fa9c604e9d301b99c6c5e77bd828fc28 d4t/ui/edit_plan.py
-85971b010d882a877401905910c15f97c1ddcd50 d4t/ui/feature_panel.py
+525ef29368dd2dba7596ee60fcc1312187f2725b d4t/ui/feature_panel.py
 034c55517b7b5c99060dce0eb77d462f2ad9bb17 d4t/ui/feature_text.py
 53065dce2154c0baf72fc53c96c26818f325c130 d4t/ui/feature_tree.py
-81d812fd54d5051cde09909d4950ee9e2df88e2f d4t/ui/fields.py
+eaf698d534c36b15aa9abe0d9ad021f8daaf67dc d4t/ui/fields.py
 54394401c3f2e10bbffe34eb952a045338286943 d4t/ui/fit_screen.py
 609792e09dd861516568287882f085741f21fc67 d4t/ui/focus_visible.py
 9a665deb398460e3616e3e3f2ef535ed952acfcd d4t/ui/frozen_column.py
@@ -140,7 +140,7 @@ d577ffb1139dedd58a91b63dc21ad922108098c9 d4t/ui/locales/zh_TW.json
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
-45c81c5ea8659fb6946f692f393eaa55d29eace5 d4t/ui/param_form.py
+e4922b86d598dd1b9a679c6dbf14d7065a89b320 d4t/ui/param_form.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 8b27913e9a32d324381a1e00dca9e53b267711fc d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
@@ -158,7 +158,7 @@ dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
 b47bfe77e7b80e2a579b685cb1d21f43b9434f14 d4t/ui/studio.py
 cb9ba34deede3d52dd4457eac9f638804ef66e9e d4t/ui/studio_layout.py
 07df392651137c6cad0a3f742a4c3c4575d2d447 d4t/ui/template_dialog.py
-5232721acb297265ec27470063c3fdcdce1fae25 d4t/ui/theme.py
+a30422d460388b39e22a48f9974b9bd06633837a d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 248b4e3610970b808637724d288f1751f20775bf d4t/ui/tree_panel.py
 2d5368b4f0a8a6b1d7aa76a045ca1787b240b39e d4t/ui/tree_scene.py
@@ -172,7 +172,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 177aee81e7bb41dfc5c83fdd0ebe469d84f0e6b2 d4t/ui/windows_menu.py
 5f55b48a2b3d2db3d39a950065209d804346f8af d4t/ui/wiring_slot.py
 871aa7141e35b3e348cd8b1cc4bae1bf9a906d26 d4t/ui/wording.py
-c9417fddef0cb8c516cf8bafdeb240023f2f1341 d4t/ui/workbench.py
+133bc87c427642bfce9f4c9c533d589b8e597efe d4t/ui/workbench.py
 82acc13a4004df7770d7ade4ae3e10468ad094ff d4t/ui/workers.py
 fa326d00c2fac5269bf7bce59941b6b2d4c2f730 docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
@@ -188,7 +188,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-1d4f86278d10ad69b7be095ccab8adec476c0c52 docs/plans/F117-ui-review.md
+f4d9887f3545adee4e2dee0d88e4d03c4daa71f1 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -435,6 +435,7 @@ d7fc1d0894914f00950a97cc3314e6c9b870d6fb tests/test_ui_outcome_chips.py
 d346560d0285c87606673279e3417ad6109e7c38 tests/test_ui_panels_pr2.py
 6a3f59e4edeb47dc32395c89d7ebf0fc702a8eea tests/test_ui_preview_why.py
 a34f4bc35c3ba61865120a2f96deb5c815dbd95a tests/test_ui_problems_bar.py
+9d1599f269b4defb2935303fd2870e13ddeba878 tests/test_ui_readability.py
 af11d2dc509035a4c8551497c1b125a44bbac976 tests/test_ui_region_check.py
 8e66ad2bdea14a377ee9b756a30273ec0a32c992 tests/test_ui_region_edges.py
 3f89f089eb6babc96ea6bc50abd8266676d9e389 tests/test_ui_region_hydration.py

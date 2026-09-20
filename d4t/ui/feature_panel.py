@@ -62,6 +62,12 @@ __all__ = ["FeaturePanel", "panel_model", "VARIANT_COLUMNS",
 #: 的說明欄寫著「75th percentile」，值卻是 21。
 VARIANT_COLUMNS = ("typical", "worst", "outlier")
 
+#: 一列上那兩欄的最小寬度（F117 C1）。名字有寬度，值才對得齊；
+#: 值有寬度，一欄數字才讀得成一欄。量的是最常見的那幾個名字
+#: （`cmp_delta_median`、`glv_worst_baseline`）。
+NAME_W = 150
+VALUE_W = 72
+
 #: 欄名（使用者 2026-09-02 在 mock 上定的字；改字只改這裡）。
 #:
 #: ``""`` 是「沒有變體」那一欄 —— 大部分卡片只有這一欄，而那時候整段就是
@@ -493,22 +499,36 @@ def _flat_widget(row: Dict[str, Any], parent: QWidget) -> QWidget:
         % (" color:%s; font-weight:600;" % TOKENS["accent_active"]
            if row["verdict"] else ""))
     name.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    # ⚠ **名字有一個最小寬度，值才排得成一欄**（F117 C1）。沒有它的話每一列
+    # 的值都黏在自己名字後面，長短不一。⚠ 它是**最小**不是固定：比 `NAME_W`
+    # 長的名字（`glv_worst_baseline`）照樣把自己那一列的值往右推 —— 截名字
+    # 比讓值跳更糟，而名字是使用者要打進分數表達式的字。
+    name.setMinimumWidth(NAME_W)
     lay.addWidget(name)
-    gloss = QLabel(str(row["gloss"] or ""), host)
-    gloss.setObjectName("paramHint")
-    # **絕對量與相對量用顏色分**（F18 補課第三輪，使用者：「絕對量的跟相對量的
-    # 還是要分類好，不然不清楚命名規則會很痛苦」）：相對量走強調色。文字本身
-    # 也講得出來（`… vs mg`），所以不是只靠顏色。
-    if row.get("kind") == FEATURE_RELATIVE:
-        gloss.setStyleSheet("color:%s;" % TOKENS["accent_active"])
-    gloss.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    lay.addWidget(gloss, 1)
+    # ⚠ **值排在名字旁邊，不排在最右邊**（F117 C1）。以前說明那一欄是
+    # `Expanding` 的，它把值與單位一路推到可視範圍外 —— 面板預設寬度要橫捲
+    # 約 270 px 才看得到數字，而**數字正是這個面板存在的理由**。說明改成收在
+    # 後面：它是查閱用的（同設定區那條「說明不佔版面」的決定）。
     value = QLabel(format_feature_value(row["value"]), host)
     value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
     value.setStyleSheet("font-family:monospace;")
+    value.setMinimumWidth(VALUE_W)
     lay.addWidget(value)
     unit = QLabel(str(row["unit"] or ""), host)
     unit.setObjectName("paramHint")
     unit.setMinimumWidth(34)
     lay.addWidget(unit)
+    gloss = QLabel(str(row["gloss"] or ""), host)
+    gloss.setObjectName("paramHint")
+    gloss.setToolTip(str(row["gloss"] or ""))     # 擠掉的那幾個字讀得回來
+    # **絕對量與相對量用顏色分**（F18 補課第三輪，使用者：「絕對量的跟相對量的
+    # 還是要分類好，不然不清楚命名規則會很痛苦」）：相對量走強調色。文字本身
+    # 也講得出來（`… vs mg`），所以不是只靠顏色。
+    if row.get("kind") == FEATURE_RELATIVE:
+        gloss.setStyleSheet("color:%s;" % TOKENS["accent_active"])
+    # ⚠ **最小寬度 0**：說明不准把面板撐寬。窄的時候它先被擠掉，而名字與值
+    # 還在 —— 那個取捨的方向就是 C1 記的那件事。
+    gloss.setMinimumWidth(0)
+    gloss.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    lay.addWidget(gloss, 1)
     return host
