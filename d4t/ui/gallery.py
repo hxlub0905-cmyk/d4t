@@ -33,7 +33,9 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QEvent, QPoint, QPointF, QRect, QSize, Qt, Signal,
+)
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QToolTip,
@@ -53,7 +55,23 @@ from . import theme
 from .theme import TOKENS
 from .widgets import FilterChip, apply_button_cursors, to_uint8
 
-__all__ = ["GalleryPanel", "make_thumb", "THUMB_SIZES", "CACHE_CAP"]
+__all__ = ["GalleryPanel", "make_thumb", "THUMB_SIZES", "CACHE_CAP",
+           "CENTRED_KINDS"]
+
+#: **哪幾種資料的影像是「繞著 defect 切出來的」**（F117 E3）。
+#:
+#: 走查記的是「縮圖沒有標出 defect 位置」。對這兩種，那個位置**是已知的**：
+#: patch 是檢測機繞著那一顆切出來的、RSEM 是一顆一張 —— defect 就在正中間。
+#: 標一個十字等於把那件事講出來，而使用者在一牆縮圖裡找的正是「我該看哪裡」。
+#:
+#: ⚠ **`folder` / `doe_folder` 不標。** 那兩種沒有 KLARF、也沒有「defect 在
+#: 哪」這回事（整張圖就是那一顆）—— 在那上面畫一個十字是**憑空指一個地方**，
+#: 而使用者會以為那裡真的有東西。
+#:
+#: ⚠ **量測卡標出來的框沒有畫在這裡。** 那要知道原圖的長寬才映得回縮圖
+#: （`thumb_placement` 要 shape），而縮圖那條鏈（`load_thumb` → `ThumbWorker`）
+#: 只回一個陣列。那是另一輪的事。
+CENTRED_KINDS = ("ebi_patch", "rsem")
 
 #: 縮圖大小選項（顯示名稱, 邊長 px）—— 小 / 中 / 大。
 THUMB_SIZES: Tuple[Tuple[str, int], ...] = (("S", 64), ("M", 96), ("L", 144))
@@ -291,6 +309,9 @@ class _GridView(QAbstractScrollArea):
     _MARGIN = 10
     _GAP = 8
     _PAD = 6
+    #: 中心十字的半徑與線寬（px）。小而不搶戲 —— 它是「看這裡」，不是主角。
+    _CROSS_R = 5.0
+    _CROSS_W = 1.2
     _BAR_H = 4                              # bin 色條
     #: 說明文字兩行（R5）：第一行是類別名，第二行是 ``#id · bin · 值``。
     #: **高度是免費的** —— 這一格會捲，而寬度不會（同 F26 那條）。
@@ -313,6 +334,8 @@ class _GridView(QAbstractScrollArea):
         self._view: List[int] = []            # 顯示順序 -> _items 索引
         self._selected: List[str] = []
         self._anchor = -1
+        #: 這一批是哪一種資料（F117 E3）—— 決定縮圖上要不要標中心。
+        self._kind = ""
 
         self._sort_key: Optional[str] = None
         self._sort_desc = True
@@ -324,6 +347,16 @@ class _GridView(QAbstractScrollArea):
         self._last_request: Tuple[int, int] = (-1, -1)
 
     # -- 資料 ---------------------------------------------------------------
+    def set_kind(self, kind: str) -> None:
+        """這一批是哪一種資料 —— 決定縮圖上要不要標中心（F117 E3）。"""
+        before = str(getattr(self, "_kind", "") or "")
+        self._kind = str(kind or "")
+        if self._kind != before:
+            self.refresh()
+
+    def kind(self) -> str:
+        return str(getattr(self, "_kind", "") or "")
+
     def set_items(self, items: Sequence[Dict[str, Any]]) -> None:
         norm: List[Dict[str, Any]] = []
         pos: Dict[str, int] = {}
@@ -651,6 +684,7 @@ class _GridView(QAbstractScrollArea):
             x = img_rect.left() + (img_rect.width() - pm.width()) // 2
             y = img_rect.top() + (img_rect.height() - pm.height()) // 2
             p.drawPixmap(QPoint(x, y), pm)
+            self._paint_centre_mark(p, QRect(x, y, pm.width(), pm.height()))
 
         top, sub = caption_lines_of(item, self._sort_key or "score")
         cap_rect = QRect(rect.left() + self._PAD, img_rect.bottom() + 3,
@@ -672,6 +706,27 @@ class _GridView(QAbstractScrollArea):
         p.drawText(sub_rect, Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(sub, Qt.ElideMiddle,
                                               sub_rect.width()))
+
+    def _paint_centre_mark(self, p: QPainter, on: QRect) -> None:
+        """「defect 在這裡」的十字（F117 E3）—— 只畫在繞著它切出來的影像上。
+
+        ⚠ 用 `mark_aim`（theme 的「畫在別人照片上」那一組），不是介面的綠：
+        底色是使用者的影像，而那一組刻意跟 `REGION_COLORS` 分得開。
+        """
+        if str(self._kind or "") not in CENTRED_KINDS:
+            return
+        cx, cy = on.center().x() + 0.5, on.center().y() + 0.5
+        r = self._CROSS_R
+        col = QColor(TOKENS["mark_aim"])
+        col.setAlphaF(0.85)
+        p.setPen(QPen(col, self._CROSS_W))
+        p.setBrush(Qt.NoBrush)
+        # **中間留白** —— 十字壓在 defect 正上方的話，要標的那幾個像素就被
+        # 蓋掉了（`image_view` 的準心是同一個道理）。
+        p.drawLine(QPointF(cx - r, cy), QPointF(cx - r * 0.35, cy))
+        p.drawLine(QPointF(cx + r * 0.35, cy), QPointF(cx + r, cy))
+        p.drawLine(QPointF(cx, cy - r), QPointF(cx, cy - r * 0.35))
+        p.drawLine(QPointF(cx, cy + r * 0.35), QPointF(cx, cy + r))
 
     # -- 互動 ---------------------------------------------------------------
     def viewportEvent(self, e) -> bool:  # Qt hook
@@ -941,6 +996,13 @@ class GalleryPanel(QWidget):
         """
         self.grid.set_items(items)
         self._refresh_header()
+
+    def set_kind(self, kind: str) -> None:
+        """這一批是哪一種資料（F117 E3）—— 門面，內容在 `grid`。"""
+        self.grid.set_kind(kind)
+
+    def kind(self) -> str:
+        return self.grid.kind()
 
     def set_thumb(self, defect_id: str, arr: Optional[np.ndarray]) -> bool:
         """補上單顆的縮圖（背景執行緒算好後回主執行緒呼叫）。"""

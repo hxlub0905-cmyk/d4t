@@ -7,7 +7,7 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 77c58b2d57df83b95d1a036603466bfa7659c05b README.md
-3049a1cefe0b0dbf81c8bbbb15bd5d631294a505 SESSION_LOG.md
+931c66cf5b481c90e5e2f1a0a08bd633b116473a SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
 d5f88db59f6da263deba1716ab16c7ddd88fdc98 d4t/__main__.py
@@ -69,7 +69,7 @@ fc42a98b3efa65fd3d4ab09e1c0a75dbc94840c1 d4t/core/pipeline/curve.py
 26b348a8525cbd923e325fe0b6d75413317a3e69 d4t/core/pipeline/expression.py
 fe29341d95083cb42a4e3915d2caf4964370ad98 d4t/core/pipeline/recipe.py
 f9758a867504c40c30b0974bb9cd81afe033a8b6 d4t/core/pipeline/sampling.py
-7a7325eb97b801bf9b0257378b43521466f1befb d4t/core/pipeline/step.py
+35ec5746b7a22696ee3fb219cfe8a32da177e7ed d4t/core/pipeline/step.py
 78f4e6b77a07748b6f6bd2c8072cea8023929c1a d4t/core/pipeline/verdict_features.py
 168c2e3811844d0267a24f4a69963848bd594e60 d4t/core/pipeline/verdict_trace.py
 e4379264e37ab47c37974e94415b2c72386e8932 d4t/core/steps/__init__.py
@@ -115,17 +115,17 @@ d076f44d3e88b7a2b5e04bd80a6634a9f3f99e5b d4t/ui/chips.py
 feaa528e0276a19cd1e6ec43507f3684b57bbaab d4t/ui/crop_dialog.py
 5941d0f76d0b310455435ca2548639d02c73cecc d4t/ui/decide_panel.py
 9475e553fa9c604e9d301b99c6c5e77bd828fc28 d4t/ui/edit_plan.py
-525ef29368dd2dba7596ee60fcc1312187f2725b d4t/ui/feature_panel.py
-034c55517b7b5c99060dce0eb77d462f2ad9bb17 d4t/ui/feature_text.py
+61d60c43095f72958fc54d49737274f18bec71e1 d4t/ui/feature_panel.py
+f9e0842eac2b39db8c8c82358517963cc29eb235 d4t/ui/feature_text.py
 53065dce2154c0baf72fc53c96c26818f325c130 d4t/ui/feature_tree.py
 5f36d00b87e518edd388be9c63c2cdefce8b1ebc d4t/ui/fields.py
 54394401c3f2e10bbffe34eb952a045338286943 d4t/ui/fit_screen.py
 609792e09dd861516568287882f085741f21fc67 d4t/ui/focus_visible.py
 9a665deb398460e3616e3e3f2ef535ed952acfcd d4t/ui/frozen_column.py
-ae82608db53dc1f37c582b74c1192261b2051978 d4t/ui/gallery.py
-47b7e2d1b8ce05c45ed8674a290a23d22479bb78 d4t/ui/gallery_controller.py
+57fe4a9015f88f31c01c49165105beb7de087aab d4t/ui/gallery.py
+8fff3b056c350bff74c3c007aec9709a63bf7a87 d4t/ui/gallery_controller.py
 c7b9f56e7635a148a25c8906d2eaa9dbc7d08027 d4t/ui/gauge_panel.py
-3476beb8f9a4a21083b38ccbff71090575673147 d4t/ui/gc_generator.py
+68e0f36340b0ae36c34eb20a364734e01199cab9 d4t/ui/gc_generator.py
 e7df3d112338385785cce94e375e27cee62c7127 d4t/ui/gc_paint.py
 54d21b7efda8a095f7a873334037e63804c4c10c d4t/ui/geometry.py
 41a693695bda5ebe9689961f36c063d5556831e4 d4t/ui/glyphs.py
@@ -167,7 +167,7 @@ e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 363b7e077297333d0e6a1556af81841bff9bddb1 d4t/ui/uniformity_window.py
 0611dc036f87182c1b34b9671744c5c538abc2fc d4t/ui/verdict_band.py
 3cdabed325512860deecc47942e95e64ece4ae74 d4t/ui/viewmodel.py
-9bcf8e2703d28a40a8ad299e1828cee93bf7d4b6 d4t/ui/welcome.py
+3dc2cfe7f1dacef2a74fcd7af43a42d4c4367f1c d4t/ui/welcome.py
 1eb8e9d6aebe6030949046333341c1a92f0822ff d4t/ui/why_panel.py
 eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 177aee81e7bb41dfc5c83fdd0ebe469d84f0e6b2 d4t/ui/windows_menu.py
@@ -189,7 +189,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
-e957775c96b16e656ebdd6833c7c182cc7bed34e docs/plans/F117-ui-review.md
+899afd98f237bc1a294c7e8884946c36c5d2d755 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -460,6 +460,7 @@ dfcb8b4cae67f5759f0b2c9c9cb30e04eac73652 tests/test_ui_results_table.py
 57df409179f5a1b598488d870e3b81694ad2f08f tests/test_ui_route_by.py
 1a258c2860e497767bda51d17d23bce603882708 tests/test_ui_run_to_the_end.py
 e795bcf30e1a6da05984b47e3981296eb01eb322 tests/test_ui_save_recipe.py
+54bea3698b797ac2a72f554a6e68816683a3efe7 tests/test_ui_says_which_one.py
 2892c71951ae9f48ffd62d9ccdcd11edd867eb42 tests/test_ui_scope_profiles.py
 e564ca12074d9e2122bed167911a8de523528886 tests/test_ui_shutdown.py
 a1db517de73145ea6335bba5b7c92979bd9c7289 tests/test_ui_small_screen.py

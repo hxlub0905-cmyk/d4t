@@ -205,6 +205,9 @@ class GalleryController(QObject):
         # 使用者標完之後畫面上不會有任何變化（X2）。
         self.w.results.set_table(results, names, layout, alarms,
                                dict(self.w.ground_truth or {}))  # 表格那一半（R7）
+        # **這一批是哪一種資料**（F117 E3）：patch 與 RSEM 的影像是繞著那一顆
+        # 切出來的，所以縮圖標得出「defect 在這裡」；另外兩種沒有那回事。
+        self.w.gallery.set_kind(str(getattr(self.w.dataset, "kind", "") or ""))
         self.w.gallery.set_items([
             {
                 "defect_id": str(r.get("defect_id", "")),

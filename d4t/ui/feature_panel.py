@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
+from .feature_text import VARIANT_COLUMNS as _VARIANT_COLUMNS
 from .widgets import (
     FEATURE_RELATIVE, feature_gloss, feature_html, feature_unit, metric_face,
 )
@@ -54,13 +55,9 @@ from .widgets import (
 __all__ = ["FeaturePanel", "panel_model", "VARIANT_COLUMNS",
            "VARIANT_COLUMN_LABELS"]
 
-#: **哪幾個 variant 攤成欄，以及由左到右的順序**。
-#:
-#: 順序是「先講常態，再講嫌疑人」：這一批長什麼樣 → 贏家那格 → 這個量自己
-#: 最極端的那格。``outlier_box`` **不是一欄** —— 它是一個**地址**，貼在
-#: ``outlier`` 那一格的值旁邊（``188 ← #46``）。以前它自己佔一列，而那一列
-#: 的說明欄寫著「75th percentile」，值卻是 21。
-VARIANT_COLUMNS = ("typical", "worst", "outlier")
+#: 轉出口 —— **本體住 `ui/feature_text.py`**（F117 C2 搬的，說明也在那裡）。
+#: 既有的 import 都指著這個名字，所以它留在這裡。
+VARIANT_COLUMNS = _VARIANT_COLUMNS
 
 #: 一列上那兩欄的最小寬度（F117 C1）。名字有寬度，值才對得齊；
 #: 值有寬度，一欄數字才讀得成一欄。量的是最常見的那幾個名字

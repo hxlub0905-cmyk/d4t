@@ -217,6 +217,23 @@ def _card_says(spec: Any) -> str:
 #: ROI 框的顏色與畫布上區域埠的顏色（`MultiSourceStep.CURRENT_REGION_INDEX`
 #: 用同一個序）—— 三個地方同一個顏色，而來源只有一份。各自挑一份的話，
 #: "top,bot" 在一邊是 0/1、在另一邊是 1/0，而**顏色指錯區域比沒有顏色糟得多**。
+#: **哪幾個 variant 攤成欄，以及由左到右的順序**。
+#:
+#: 順序是「先講常態，再講嫌疑人」：這一批長什麼樣 → 贏家那格 → 這個量自己
+#: 最極端的那格。``outlier_box`` **不是一欄** —— 它是一個**地址**，貼在
+#: ``outlier`` 那一格的值旁邊（``188 ← #46``）。以前它自己佔一列，而那一列
+#: 的說明欄寫著「75th percentile」，值卻是 21。
+#:
+#: ⚠ **它住在這裡而不是 `feature_panel`**（F117 C2 搬的）：`feature_html`
+#: 要知道「這個 variant 有沒有別人在畫」才不會畫兩次，而 `feature_panel`
+#: import 這一支 —— 反過來是循環。第一版在這裡抄了一份，而那一份**當場就
+#: 漏了 `worst`**：測試一跑就紅，而那正是「抄第二份」最好的結局。
+VARIANT_COLUMNS = ("typical", "worst", "outlier")
+
+#: 這幾個 variant **由別人畫**（上面那張表是表頭的欄名，`outlier_box` 是貼在
+#: 值旁邊的地址），所以名字上不再畫一次 —— 畫兩次就是重複。
+_VARIANT_DRAWN_ELSEWHERE = VARIANT_COLUMNS + ("outlier_box",)
+
 FEATURE_SUP = "region"
 FEATURE_SUB = "stream"
 
@@ -232,6 +249,17 @@ def feature_html(name: str, parts: Optional[Dict[str, Any]] = None) -> str:
     if not base:
         return text
     out = [_escape(base)]
+    # **救回來的那一段畫在名字前面**（F117 C2）。`ref_clip_frac` 的 base 還是
+    # `clip_frac`，所以少了這一段，三個被救回來的 `clip_frac` 在畫面上長得
+    # 一模一樣 —— 而它們是三個不同的數字。
+    #
+    # ⚠ 它畫成**下標**，跟流名同一種長相：兩者講的正好是同一件事（這個數字是
+    # 在哪一條流上量的），而救援用的前綴多數時候本來就是流名
+    # （`engine.feature_prefix`，退路才是節點 id）。
+    qualifier = str(got.get("qualifier", "") or "")
+    if qualifier:
+        out.append('<sub style="color:%s">%s</sub>'
+                   % (TOKENS["text_hint"], _escape(qualifier)))
     region = str(got.get(FEATURE_SUP, "") or "")
     if region:
         colour = theme.region_hex(int(got.get("region_index", 0) or 0))
@@ -241,6 +269,19 @@ def feature_html(name: str, parts: Optional[Dict[str, Any]] = None) -> str:
     if stream:
         out.append('<sub style="color:%s">%s</sub>'
                    % (TOKENS["text_hint"], _escape(stream)))
+    # **名字裡的 variant 也要畫出來**（F117 C2）。`peak` 與 `peak_missing`
+    # 的 base 都是 `peak` —— 一張表上兩列一模一樣的名字配不同的數字。
+    #
+    # ⚠ **只畫沒有別人在畫的那幾個**：`typical` / `outlier` 那一族是**表頭的
+    # 欄名**（`feature_panel.VARIANT_COLUMNS`），在名字上再畫一次就是重複。
+    # ⚠ `rescued` 也不畫 —— **上面那一段下標已經把它分出來了**。兩個都畫的話
+    # 那一列讀起來是 `clip_frac(ref) rescued`，而第二個字沒有多講任何東西
+    # （「為什麼它還在」那句話住在 gloss）。
+    variant = str(got.get("variant", "") or "")
+    skip = _VARIANT_DRAWN_ELSEWHERE + (("rescued",) if qualifier else ())
+    if variant and variant not in skip:
+        out.append(' <span style="color:%s">%s</span>'
+                   % (TOKENS["text_hint"], _escape(variant)))
     own = str(got.get("own", "") or "")
     if own:
         # 使用者自己取的名字**不縮小也不上下標**：它是他打的字，不是軟體

@@ -973,6 +973,13 @@ class FeatureSpec:
     own: str = ""             #: 使用者填的 output_prefix
     variant: str = ""         #: "" | nm | nm2 | typical | outlier | outlier_box
                               #:    | missing | raw | rescued
+    #: 撞名救援時**加在前面的那一段**（F117 C2）。
+    #:
+    #: `qualified()` 把 `ref` 拼進 `name`（`ref_clip_frac`），而 `base` 還是
+    #: `clip_frac` —— 於是畫面上三個被救回來的 `clip_frac` **長得一模一樣**，
+    #: 要把滑鼠停上去讀完一整句才分得出誰是誰。那一段存在這裡，名字才畫得出
+    #: 它自己。
+    qualifier: str = ""
     metric: str = ""          #: 統計量 id（METRIC_GROUPS 的鍵那一層）；無 = ""
     stat: str = ""            #: 只有 cmp_* 用：比的是哪個統計量（stat-free = ""）
     family: str = ""          #: "glv" | "cmp" | "cd" | "region" | "engine" | ""
@@ -981,7 +988,7 @@ class FeatureSpec:
         """撞名救援名的 spec（`engine._rescue_overwritten_features` 那一份）。"""
         from dataclasses import replace
         return replace(self, name=qualified_feature_name(prefix, self.name),
-                       variant="rescued")
+                       variant="rescued", qualifier=str(prefix or ""))
 
     def parts(self) -> Dict[str, Any]:
         """`Step.feature_parts` 形狀的相容 dict（`feature_html` 吃這個）。"""
@@ -993,6 +1000,14 @@ class FeatureSpec:
             out["region_index"] = int(self.region_index)
         if self.own:
             out["own"] = self.own
+        # **畫得出來的名字要唯一**（F117 C2）。少了這兩段，`peak` 與
+        # `peak_missing` 在畫面上都是 `peak`，三個救回來的 `clip_frac` 也是
+        # 三個 `clip_frac` —— 同一張表上兩列一模一樣的名字配不同的數字，那是
+        # 「哪一個才是我要的」這個問題沒有答案。
+        if self.qualifier:
+            out["qualifier"] = self.qualifier
+        if self.variant:
+            out["variant"] = self.variant
         return out
 
 

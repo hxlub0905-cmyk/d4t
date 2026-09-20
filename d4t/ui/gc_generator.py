@@ -134,6 +134,10 @@ class _GenWorker(QThread):
 #: 這個視窗的使用手冊（F117 K1）。
 MANUAL = "USING-SIMGEN.md"
 
+#: 週期那兩格還沒有值的時候寫什麼（F117 G5）。**一個破折號，不是 0** ——
+#: 0 在那一格看起來像一個量出來的答案。
+PERIOD_UNSET = "—"
+
 
 class GcGeneratorWindow(QMainWindow):
     """貼一張 GC → 看鋪出來長怎樣 → 產兩份 lot。"""
@@ -154,11 +158,17 @@ class GcGeneratorWindow(QMainWindow):
         grid.setContentsMargins(12, 12, 12, 12)
         grid.setSpacing(10)
 
+        # **編號要照眼睛走的路**（F117 G5）。以前是 1、2 在左，3 在右，
+        # 4、5 又回左，6 在右 —— 讀一次要橫跨畫面三趟。
+        #
+        # ⚠ 換的是**編號**不是位置：那一塊畫布（「缺陷可能出現在哪」）需要
+        # 高度，它只放得下右欄。所以左欄由上到下是 1～4，右欄是 5、6 ——
+        # 讀完左邊一整條再看右邊，一趟。
         grid.addWidget(self._source_box(), 0, 0)
         grid.addWidget(self._period_box(), 1, 0)
-        grid.addWidget(self._preview_box(), 0, 1, 3, 1)
         grid.addWidget(self._defect_box(), 2, 0)
         grid.addWidget(self._params_box(), 3, 0)
+        grid.addWidget(self._preview_box(), 0, 1, 3, 1)
         grid.addWidget(self._run_box(), 3, 1)
         grid.addWidget(self._manual_link(), 4, 0, 1, 2, Qt.AlignRight)
         grid.setColumnStretch(1, 1)
@@ -228,7 +238,15 @@ class GcGeneratorWindow(QMainWindow):
         self.sp_px = QDoubleSpinBox(box)
         self.sp_py = QDoubleSpinBox(box)
         for sp in (self.sp_px, self.sp_py):
-            sp.setRange(4.0, 100000.0)
+            # **0 ＝ 還沒量**（F117 G5）。以前下限是 4.0，所以還沒貼 Golden
+            # Cell 的時候這一格寫著 `4.00` —— 那是 `setRange` 的下限，不是任何
+            # 人量出來的數字，而它讀起來跟一個真的答案一模一樣。
+            #
+            # ⚠ **0 不是合法的週期**，所以拿它當特殊值沒有歧義（同 F117 B4
+            # 的 `min_label`：那一格的 0 是「全部」，而這裡的 0 是「還沒有」）。
+            # 真正的下限由 `_measure` 與 `_go` 把關。
+            sp.setRange(0.0, 100000.0)
+            sp.setSpecialValueText(PERIOD_UNSET)
             sp.setDecimals(2)
             sp.setSingleStep(0.5)
             sp.valueChanged.connect(self._refresh_preview)
@@ -251,7 +269,7 @@ class GcGeneratorWindow(QMainWindow):
         **畫在一個週期上就等於畫在每一個重複上**（使用者：「反正都是回推」），
         所以塗的是 GC 那張小圖，而下面的預覽即時顯示它鋪開之後的樣子。
         """
-        box = QGroupBox("3 · Where defects can appear", self)
+        box = QGroupBox("5 · Where defects can appear", self)
         lay = QVBoxLayout(box)
 
         tools = QHBoxLayout()
@@ -318,7 +336,7 @@ class GcGeneratorWindow(QMainWindow):
         視窗最像「模擬器」的地方：使用者調的不是抽象參數，是**他等一下會
         拿到的那張圖**。
         """
-        box = QGroupBox("4 · What a defect looks like", self)
+        box = QGroupBox("3 · What a defect looks like", self)
         lay = QVBoxLayout(box)
         form = QFormLayout()
 
@@ -431,7 +449,7 @@ class GcGeneratorWindow(QMainWindow):
             96, Qt.SmoothTransformation))
 
     def _params_box(self) -> QWidget:
-        box = QGroupBox("5 · How many", self)
+        box = QGroupBox("4 · How many", self)
         form = QFormLayout(box)
         self.sp_images = QSpinBox(box); self.sp_images.setRange(1, 5000)
         self.sp_images.setValue(50)
@@ -607,6 +625,9 @@ class GcGeneratorWindow(QMainWindow):
             return
         be = self._be()
         px, py = float(self.sp_px.value()), float(self.sp_py.value())
+        if px <= 0 or py <= 0:
+            self._sync()
+            return                       # 還沒量出週期 —— 沒有東西可以鋪
         big = be.tile(self._gc, PREVIEW, PREVIEW, px, py)
         shown = to_uint8(big)
         # **使用者塗的那一塊也照同一個週期鋪開** —— 那正是「回推」：他在一個
@@ -714,8 +735,12 @@ class GcGeneratorWindow(QMainWindow):
     def _sync(self) -> None:
         """按鈕的狀態只從**明確的狀態**推導（不問 widget，見 `PITFALLS.md`）。"""
         busy = self._worker is not None
+        # ⚠ **週期是 0（還沒量）就不能跑**（F117 G5）。0 現在是「還沒有」的
+        # 意思，而 `tile(..., 0, 0)` 會除以零 —— 以前下限是 4.0，所以那一格
+        # 永遠有一個「值」，這道關也就從來沒有人需要。
         ready = (self._gc is not None and bool(self.ed_out.text().strip())
-                 and self.paint.painted_pixels() > 0)
+                 and self.paint.painted_pixels() > 0
+                 and self.sp_px.value() > 0 and self.sp_py.value() > 0)
         self.btn_go.setEnabled(ready and not busy)
         self.btn_stop.setEnabled(busy)
         for b in (self.btn_paste, self.btn_open, self.btn_recipe,

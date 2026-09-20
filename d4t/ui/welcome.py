@@ -108,6 +108,24 @@ _SEG_LINES = (
     ("adc", "Score → bin → write back to KLARF"),
 )
 
+#: 三段（引擎）與卡片庫七群（使用者）的關係 —— **第一次見面唯一會問的那句**
+#: （F117 G2）。⚠ 群數不寫死：`step.GROUPS` 加一群的那天，這句話會變成一句
+#: 安靜的假話（`_axes_note` 去數）。
+AXES_NOTE = ("Those three are what the engine does. The card library on the "
+             "left is sorted a different way - by what you are looking for "
+             "(%d groups, from Input to Output). Same cards, two ways in.")
+
+def axes_note() -> str:
+    """那句話 —— **群數是數出來的**（同 `_intro_text` 的規矩）。
+
+    寫死一個 7 的話，`step.GROUPS` 加一群的那天它會變成一句安靜的假話：
+    畫面上寫七群、卡片庫裡是八群，而沒有任何測試會紅。
+    """
+    from d4t.core.pipeline.step import GROUPS
+
+    return strings.tr(AXES_NOTE) % len(GROUPS)
+
+
 #: 判定那一段的五個字（F117 D4）。**順序是使用者遇到它們的順序**，不是
 #: 字母序 —— 這張表要讀起來像一句話：分數 → 問題 → 類別 → 編號 → 結果。
 #:
@@ -446,6 +464,17 @@ class WelcomeDialog(QDialog):
 
         self.segments = _SegmentStrip(self)
         root.addWidget(self.segments)
+
+        # **兩種分段是刻意並存的，而第一次見面沒有人講過**（F117 G2）。
+        # 上面那三段是**引擎在做什麼**（影像 → 數字 → 判定），而卡片庫分成
+        # 七群是**使用者要找什麼**（我現在要載入、要挑區域、還是要量）。
+        # 走查記的是「兩邊的段數對不上」—— 對不上是對的，它們回答的是兩個
+        # 不同的問題；缺的只是一句話。
+        self.axes = QLabel(axes_note(), self)
+        self.axes.setWordWrap(True)
+        self.axes.setStyleSheet("color:%s; font-size:%s;"
+                                % (TOKENS["text_hint"], TOKENS["font_small"]))
+        root.addWidget(self.axes)
 
         # **五個字怎麼串起來**（F117 D4）。它們在同一個畫面上同時出現，而在
         # 這一段之前沒有任何地方講過它們的關係 —— 而那正是第一次見面的人會
