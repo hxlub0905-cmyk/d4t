@@ -481,6 +481,15 @@ class ParamSpec:
     #: 佔畫面。
     choice_help: Optional[Dict[str, str]] = None
     unit: str = ""
+    #: **值等於 `min` 的時候，格子裡寫這個字而不是那個數字**（F117 B4）。
+    #:
+    #: `At most this many defects` 那一格的 `0` 是「全部」，而畫面上它就是一個
+    #: `0` —— 一個把上限設成零的框讀起來像「一顆都不寫」。這句話本來只寫在
+    #: help 裡（`LIMIT_ZERO_HELP`），而**要點開 tooltip 才懂的預設值等於沒講**。
+    #:
+    #: ⚠ 它綁的是 `min` 不是字面的零（Qt 的 `specialValueText` 就是這樣定義
+    #: 的）。要用在別的地方之前先確認那一格的 `min` 真的是那個特殊值。
+    min_label: str = ""
     label: str = ""
     #: 文字參數的合法格式（正規表達式）。填了就在 ``validate_params`` 擋下來，
     #: 而不是讓壞值跑到演算法裡（鐵則 4）。用在「這個字會變成特徵名的一部分」
@@ -1724,6 +1733,7 @@ class Step(ABC):
                     "choices": p.choices, "icons": p.icons,
                     "choice_help": p.choice_help,
                     "choice_labels": p.choice_labels, "unit": p.unit,
+                    "min_label": p.min_label,
                     "label": p.label or p.name,
                     "pattern": p.pattern,
                     # ``("method", ("percentile",))`` → JSON-safe 的**一串

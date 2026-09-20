@@ -223,7 +223,9 @@ class _ParamRow(QFrame):
         label_txt = str(spec.get("label") or "").strip()
         section_txt = re.sub(r"^\d+\s*·\s*", "",
                              str(spec.get("section") or "").strip())
-        self._label_is_echo = bool(label_txt and label_txt == section_txt)
+        # **勾選框自己就寫著那句話**（F117 B4）—— 名字欄再寫一次就是同一個字
+        # 出現兩次，跟上面那條「小標題的回音」是同一件事。
+        self._label_is_echo = bool(label_txt and label_txt == section_txt)             or str(spec.get("type") or "") == "bool"
         if self._label_is_echo:
             self.name_label.hide()
         else:

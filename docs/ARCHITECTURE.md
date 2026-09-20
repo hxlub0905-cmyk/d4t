@@ -454,6 +454,10 @@ d4t/
     ├── geometry.py           #   子視窗記得上次多大、在哪（F117 I16）。還原完
     │                         #     一定過一次 `keep_on_screen`；⚠ 它是第四個會寫
     │                         #     磁碟的東西，所以有覆寫點 `geometry.SETTINGS`
+    ├── manual.py             #   `docs/USING-*.md` 在 app 裡打得開（F117 K1）。
+    │                         #     **自己畫 Markdown** —— ⚠ 不准把檔案交給作業
+    │                         #     系統開，受限的機器上那一步會安靜地失敗。
+    │                         #     哪張卡配哪一份寫在卡片上（`Step.manual`）
     ├── numbers.py            #   一個特徵值印成字 —— **全 UI 只有這一支**（F52）
     ├── wording.py            #   node id／step key／參數名 → **畫面上的那個字**
     │                         #     —— 全 UI 只有這一支（F118；地位同 numbers.py）

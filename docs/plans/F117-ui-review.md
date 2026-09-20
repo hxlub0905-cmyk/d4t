@@ -13,7 +13,8 @@
 **Results 面板**（I15 凍住第一欄、G6 記住視窗大小）、
 **E1／E2／E4／D4**（判錯的格子自己說、色階、直方圖上的樹切點、五個字的對照表）、
 **A4／C1／I8／B3**（讀得到：畫布分得到高度、數值看得到、段標不比內容小、卡片說明兩行）、
-**G3／G4／K3／K1**（範本庫上寫給人看的字、說明不被捲軸壓住、剩餘時間、手冊在 app 裡打得開）。
+**G3／G4／K3／K1**（範本庫上寫給人看的字、說明不被捲軸壓住、剩餘時間、手冊在 app 裡打得開）、
+**B1／B4／J4／I7**（畫布與卡片上那一群：灰掉的按鈕、`Write charts` 的三格、刪卡之後的補線、每張卡的 img/s）。
 
 ⚠ **E6 與 I3 沒重現出來**，原樣留著（走查是在 Linux／Noto Sans CJK 上做的，這兩條可能是環境）。
 中文化（H5）這一輪**不碰**（使用者決定：那一條要先有 2–3 位目標使用者試用）。
@@ -73,10 +74,10 @@
 |---|---|---|---|
 | A5 ✅ | **做完** —— 面板拿得到畫布的收合狀態（`set_tree_collapsed`），樹收著時改講「double-click the Decision card on the canvas to show the tree, then click a diamond」。原本記的：判定區卡片寫 `tree hidden — double-click to show`，判定面板卻寫「click a diamond on the canvas」—— 樹收著時看不到菱形| 面板那句在樹收起時改成「雙擊判定區展開」 | ✅ `tree_scene.py:328` |
 | A6 | 深色模式：深色卡片配深色底、連線細灰，對比比淺色低 | 畫布納入 `test_ui_contrast` | ✅ 截圖（主觀程度中） |
-| B1 | GLV 最上面「What to measure」三顆在沒接 Region 時都灰掉，第一眼是一排不能按的東西；停用與未選的差別不大 | 未啟用時收成一行提示；停用的樣式再明顯一點 | ✅ 截圖 |
+| B1 ✅ | **做完** —— 沒接線的時候**那一排不畫**，只留標題與那句 `Wire a Region card into “Region” first.`。⚠ **不是 `title=""`**：標題留著，因為它講的是「接好線之後這裡會有一個選擇」—— 整段收掉的話，使用者不會知道自己少了什麼。順帶把舊的那條規則變成結構上的保證：灰掉的東西 Qt 只擋得住滑鼠，鍵盤與直接呼叫擋不到，而**不存在的東西沒有這個問題**。原本記的：三顆在沒接 Region 時都灰掉，第一眼是一排不能按的東西 | 未啟用時收成一行提示；停用的樣式再明顯一點 | ✅ 截圖 ｜ 守門：`tests/test_ui_glv_intent.py`（含反向：接好線那三顆要回來）|
 | B2 ✅ | **做完** —— `multi_choice` 也收 `choice_labels`，格子上寫 `Gap (gray levels)` / `Spread (%)` / `Tilt across`，**值還是鍵**（跟著 box 的屬性走，不跟著 `box.text()` 走 —— 讀字的那一版會把白話名字存進 recipe）。原本記的：均勻度 GLV 的「How even are the boxes」直接用 feature 名當選項（`range`、`range_pct`、`cv_pct`、`slope_x`）| 顯示白話 label，key 不變 | ✅ 截圖 |
 | B3 ✅ | **做完** —— 卡片說明改成**兩行**（`_HintLabel(max_lines=2)`），放不下的還是有省略號、全文照舊在 tooltip。⚠ 自己折行：Qt 的 `elidedText` 只認一行，而 `wordWrap=True` 的 QLabel **不會省略** —— 它會一直長高，把底下的參數推出畫面。⚠ 切在字之間，不切在字中間。原本記的：卡片說明一行截斷，沒有展開方式| 兩行＋more | ✅ |
-| B4 | `Write charts` 卡：`At most this many defects 0`（0＝無上限？）、第五格勾選框叫 `chart`、`Enabled` 當 label | 0 顯示 `All`；`Your own chart`；具體動詞 | ✅ |
+| B4 ✅ | **做完，而三件事是三種不同的錯**。(1) `0` 是一個**沒有名字的特殊值** → 新增 `ParamSpec.min_label`（Qt 的 `specialValueText`），三張卡上寫著 `LIMIT_ZERO_HELP` 的那一格**都**補上，不只被點到的那張。(2) 第五格 `chart` 是 **recipe 的鍵漏到畫面上** → 接上早就寫好的 `CHART_LABELS`；⚠ **存進 recipe 的值一字未動**（不然要付一道遷移，檔名 `-chart.svg` 也要跟著改）。(3) `Enabled` 是 `param_form` 寫死給所有 bool 的**通用詞** → 字搬到勾選框上（十一個 bool 的 label 讀起來都正好是一句「勾了會發生什麼」），名字欄由 `_label_is_echo` 收起來 | 0 顯示 `All`；`Your own chart`；具體動詞 | ✅ ｜ 守門：`tests/test_ui_card_fields.py`（12 條，含兩條反向）|
 | C2 | Features 同名多列：`clip_frac` 三列、`peak` 兩列。說明文字有寫「kept under this name because a later card wrote over it」，但要讀完那句才懂 | 名字後面直接帶來源卡（`clip_frac · Normalize(ref)`） | ✅（屬既有設計的呈現問題）|
 | D1 ✅ | **做完 —— 而且句子本身也不是對的。** `Esc` 走的是 `pipeline.clear_selection()`，那一支只放掉**畫布**那一份選取，而預覽停在哪裡看的是 `win.selected_node`（`_run_preview` 的 `upto`）—— 按了 Esc 框不見了，預覽照樣停在同一張卡上。修了兩件事：①`studio_layout.clear_selection()` 兩份一起放並重跑預覽；②最後那幾個字做成**連結**（同 `decide_path` 的先例 U11），Esc 照樣有效、寫在 tooltip 上。原本記的：「preview stops at "norm" — press Esc to run the decision too」：Esc 是「取消選取」，句子是對的，但很難被想到| 旁邊放一顆 `Run to the end` | ✅ |
 | D2 ✅ | 均勻度 verdict `measured · bin 0` 是紅色 chip，讀起來像「壞」 | **原因查出來了，而原本的推測不成立**：`VerdictChip` 是**二元 pass/fail**（bin 1 = good、其餘 = bad），那是 U13 刻意的設計 —— `is_real_style` 會把紅綠對調，而且對調時 chip 自己的字跟著翻面（`real`／`nuisance`），還有第三個通道（框線樣式）給色覺缺陷者。改成 `leaf_color` 會把那整套拆掉。**真正的問題是語意**：均勻度那份 recipe 裡 `bin 0` 是「量到了、沒有異常」＝好消息。⚠ **需要使用者決定**：「哪一個 bin 是好消息」該由誰說 —— recipe？還是照 `is_real_style` 那樣由判定段宣告？ | ✅ `feature_text.py:356`（`tone = "good" if is_real_style else "bad"`）|  **已關（[F119](../history/plans/F119-which-bin-is-good-news.md) 五步）**：葉子自己標 `outcome`，膠囊的顏色／字／框線三條都吃它。⚠ **實測是三份出貨 recipe 全反**，不只均勻度那一條
@@ -101,14 +102,14 @@
 | I2 | 兩個強調色（藍、橘棕） | 收成一個 | ✅（主觀）|
 | I5 | ✅ **做完**（含 F6 的數字那一半）—— 但病灶比記的更深：`core/export/html.py` 的 `number()` 用的是 `%.4g`，**正是 F52 算過之後否決掉的那一個**。除了 `1.638e+04`，它還讓 `99.995` 在報表上變成 `100`（**沒有人回報過，但那就是 F52 第 1 條的危害**）| 規則搬進 `d4t/core/numbers.py`（Qt-free），畫面與報表共用；NaN 的收尾各自保留（報表空白、畫面 `NaN`）。**core 不 import ui**，所以是往下放不是往上借 | ✅ 測試逐值比對兩邊，另加一條「core 不准 import ui」|
 | I6 | 畫布、Features、Results 之間可以互相指：滑過 Features 一列亮起來源卡、點 Results 欄名跳到那張卡（`reveal_cards` 已有，可沿用） | 延伸既有機制 | 建議 |
-| I7 | 每張卡都印 `20 ok · 2051 img/s` | 只在失敗或特別慢時顯示 | 主觀 |
+| I7 ✅ | **做完** —— 卡片上那一行只留給**失敗**（永遠講）與**瓶頸**（`loud_nodes`）。⚠ 門檻是一句話：**它一張比其他所有卡加起來還久**（`SLOW_SHARE = 0.5`）。第一版寫三分之一，而它在兩張卡的批次上破功：兩張一樣快的各佔 50%，於是其中一張被指成瓶頸 —— 而那兩張一模一樣。⚠ **不是把數字丟掉**：每一張卡的速率照樣量得到，它搬進 tooltip（`Last run: …`）—— 丟掉一個量得到的數字，跟把它印七遍一樣糟 | 只在失敗或特別慢時顯示 | 主觀 ｜ 守門：`tests/test_ui_quiet_canvas.py`（13 條，含「反向：數字不准弄丟」）|
 | I8 ✅ | **做完** —— `paramSection` 從 `font_tiny`（10px）改成 `font_body`（13px）。它底下的欄位名就是 13px —— 一個**比內容小**的標題讀起來像註腳，眼睛會從它上面滑過去。它仍然是招牌（較淡的顏色＋底線），只是不再比自己的內容小。原本記的：參數區段標題（`1 · Where to measure`）比欄位名小| 調字級 | ✅ |
 | I11 ✅ | 刪卡後狀態列只寫 `Removed "dn"`，沒有復原提示 | `已移除 Denoise · 復原（Ctrl+Z）` | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 1 步）**
 | I12 | 對話框主按鈕樣式不一（範本庫 `Load` 藍、Chart settings `OK` 白） | 統一 | ✅ |
 | I13 ✅ | **做完** —— `->` 全部改成 `→`（8 處；`→` 在 WGL4 裡，Segoe UI 蓋得到，而 repo 本來就有 25 處在用它）。`tests/test_ui_symbols.py` 擋回頭，配一條反向測試（把走查看到的那句話餵回去，確認判準會咬它）。原本記的：符號混用：`—`、` - `、`->`、`→`（歡迎頁 `Score -> bin -> write back`）| 統一 | ✅ |
 | I15 ✅ | **做完** —— 新的 `ui/frozen_column.py`：疊第二個 view 上去（Qt 官方那個 frozen-column 的做法），**共用 model 與 selection model**（各自一份的話，點左邊選到的列跟右邊亮起來的不是同一列）。⚠ 主表那一欄照樣留著不藏 —— 藏起來的話它的寬度就不再參與版面，右邊的內容會滑到凍結欄底下。⚠ 接法是包住 `resizeEvent`，不是叫呼叫端記得呼叫 `sync()`。原本記的：Results 表格橫向捲動時 defect 欄會跑掉（表頭本來就固定）| 凍結第一欄 | ✅ |
 | I16 ✅ | **做完** —— 新的 `ui/geometry.py`（`remember`／`restore`），三個視窗都接上。⚠ 還原完一定過一次 `keep_on_screen`（拔掉第二個螢幕之後，存下來的位置會落在沒有螢幕的地方 —— 那是一個按了沒反應的按鈕）。⚠ 最小化／全螢幕時**不存**。⚠ 它是「第四個會寫磁碟的東西」，所以先做出覆寫點 `geometry.SETTINGS`（CLAUDE.md §4）。原本記的：Results、Chart settings、範本庫不記得視窗大小位置（`d4t/ui` 內沒有 `saveGeometry`）| QSettings 記住並經過 `keep_on_screen` | ✅ |
-| J4 | 刪掉中間的卡，上下游斷開 | 型別對得上時提供一鍵補線 | 建議 |
+| J4 ✅ | **做完 —— 而斷開本身是對的**（F10-5：殘留的線會接到一張使用者從來沒接過的新卡）。真正的問題是接回來要重拉一次。⚠ **是提議，不是自動補線**（鐵則 10：畫布上每一條線都是使用者拉的）—— 刪完狀態列掛一顆 `Reconnect`，按下去才成真，而且整批算**一步復原**。⚠ 哪一條是「穿過去」的那一條：一條就是它，好幾條的時候只認**複數那一格**（`image_keys`，CLAUDE.md 的單複數規矩）；兩個都問不出來（`subtract` 的 `a`／`b`）就**不提議** —— 猜錯一條線會安靜地算出一批看起來很正常的數字。⚠ 按下去走的是**跟手拉線同一條路**（`canvas_edges.connect`），不是 `model.add_edge` 的捷徑。順帶：那顆鈕讓 `studio.py` 長了 12 行，而它那一格是 `HARD_CAPS` —— 整支 `_on_remove_requested` 因此搬進 `canvas_edges.py`（那件事從頭到尾都是線的事），`studio.py` 上只剩兩行門面 | 型別對得上時提供一鍵補線 | 建議 ｜ 守門：`tests/test_ui_bridge_after_delete.py`（13 條）|
 | J6 ✅ | warning 太長 | 先講結論 | ✅ ｜ **併進 [F118](../history/plans/F118-user-facing-wording.md)**（同 J1 的病根）|  **已關（F118 第 4 步）**
 | K2 | Recipe 差異比較（兩份或存檔前後） | 逐卡逐參數 diff | 建議 |
 | K4 | 介面字級可調 | 90／100／115% | 建議 |

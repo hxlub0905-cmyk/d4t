@@ -23,7 +23,8 @@ from d4t.core.pipeline import (
 from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       TreeLeaf, TreeStep, _tree_from_json,
                                       _tree_to_json, feature_referrers,
-                                      region_edge_values, rules_to_tree)
+                                      is_region_edge, region_edge_values,
+                                      rules_to_tree)
 from d4t.core.steps._util import centre_name, others_name
 from d4t.core.steps.glv_stats import EACH_BOX, POOLED
 
@@ -468,6 +469,70 @@ class RecipeModel:
             # `studio._on_remove_requested` 非得自己再清一次不可。
             self._hydrate_regions(emptied=gone)
             self._changed()
+
+    def bridge_plan(self, node_id: str) -> List[Tuple[str, str, str, str]]:
+        """拿掉這張卡之後，**哪幾條線補得回來**（F117 J4）。
+
+        走查記的是「刪掉中間的卡，上下游斷開」。那是對的行為 ——
+        :meth:`remove` 連同碰到它的每一條線一起拿掉，不然殘留的線會接到一張
+        使用者從來沒接過的新卡（F10-5 那個 bug）。問題不在刪，在**接回來要重
+        拉一次**，而使用者剛剛做的只是「把中間這張換掉」。
+
+        ⚠ **這裡只算，不接。** 鐵則 10：畫布上每一條線都是使用者拉的 ——
+        所以這一支回的是一份**提議**，由使用者按下那顆鈕才成真。自動補線會讓
+        畫布上出現一條沒有人畫過的線，而那正是那條鐵則在擋的事。
+
+        回 ``[(src, src_out, dst, dst_in), …]``，**順序與呼叫時的邊順序一致**。
+        判準刻意保守：
+
+        * **只看影像線**。區域線是「誰定義了這個區域」直接連到用它的那張卡，
+          不經過中間那張 —— 中間那張要是區域的來源，那個區域本身就沒有了，
+          沒有東西可以補。
+        * **哪一條是「穿過去」的那一條要問得出來**。上游只有一條就是它；好幾條
+          的時候只認**複數那一格**（``image_keys``）—— CLAUDE.md 的單複數規矩：
+          ``*_keys`` 是「這張卡處理的東西」，``*_key`` 是「順便參考的另一條流」
+          （`normalize` 的 ``range_from`` 就是後者）。兩個都問不出來就**不提議**：
+          替使用者猜錯一條線，會安靜地算出一批看起來很正常的數字。
+        """
+        node_id = str(node_id)
+        node = self.nodes.get(node_id)
+        if node is None:
+            return []
+
+        def image_edges(pick):
+            return [e for e in self.edges
+                    if pick(e) and not is_region_edge(e, self.nodes)]
+
+        up = self._through_edge(node, image_edges(lambda e: e.dst == node_id))
+        if up is None:
+            return []
+        out: List[Tuple[str, str, str, str]] = []
+        for down in image_edges(lambda e: e.src == node_id):
+            if down.dst == up.src:
+                continue                    # 補回去會變成自迴圈
+            if self.has_line(up.src, down.dst, up.src_out, down.dst_in):
+                continue                    # 那條線本來就在
+            out.append((up.src, up.src_out, down.dst, down.dst_in))
+        return out
+
+    def _through_edge(self, node: RecipeNode,
+                      ups: Sequence[Edge]) -> Optional[Edge]:
+        """進來的這幾條線裡，**哪一條是穿過這張卡的那一條**（F117 J4）。
+
+        一條就是它。好幾條的時候只認落在**複數那一格**（``image_keys``）上的
+        —— 那一格是「這張卡處理的東西」，而單數的 ``image_key`` 是「順便參考
+        的另一條流」。問不出來回 ``None``（**不猜**）。
+        """
+        rows = list(ups)
+        if len(rows) == 1:
+            return rows[0]
+        if not rows:
+            return None
+        step = get_step(node.step)
+        plural = {p.name for p in getattr(step, "params", [])
+                  if p.type == "image_keys"} if step else set()
+        through = [e for e in rows if e.dst_in in plural]
+        return through[0] if len(through) == 1 else None
 
     def move(self, node_id: str, delta: int) -> None:
         if node_id not in self.node_order or delta == 0:

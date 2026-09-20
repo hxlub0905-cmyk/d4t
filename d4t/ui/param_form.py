@@ -256,7 +256,16 @@ class ParamForm(QWidget):
 
         ``options`` 是 ``(id, 顯示字, 一句話, 圖示名)``；``current_id`` 對不上
         任何 id（例 ``"custom"``）就一顆都不勾 —— **不強制改**，自訂是一個合法
-        的狀態。``enabled=False``（roi 還沒接線）時整排灰掉，note 講原因。
+        的狀態。
+
+        ``enabled=False``（roi 還沒接線）**整排不畫**，只留標題與 note
+        （F117 B1）。以前是三顆灰膠囊 —— 而一張卡最上面擺一排按不下去的東西，
+        第一眼讀到的是「這張卡壞了」。note 那一句本來就說得出該做什麼
+        （`Wire a Region card into “Region” first.`），所以那三顆灰的是**純
+        噪音**：它們佔著最顯眼的位置，卻只能重複一次「現在不行」。
+
+        ⚠ **不是 `title=""`。** 標題留著，因為它講的是「接好線之後這裡會有
+        一個選擇」—— 整段收掉的話，使用者不會知道自己少了什麼。
 
         **長相跟設定區的膠囊一模一樣**（F68 第三輪，使用者：「最上方的
         What do I want to measure 也是」）。它問的是同一種問題（幾個答案挑
@@ -278,14 +287,13 @@ class ParamForm(QWidget):
         self._intent_btns = {}
         self._intent_title.setText(title)
         colour = theme.group_hex("measure")
-        if title:
+        if title and enabled:
             for iid, label, help_line, icon in options:
                 chip = _ChoiceChip(str(iid), str(icon), colour,
                                    str(iid) == str(current_id),
                                    self._intent_row, tip=str(help_line),
                                    label=str(label))
                 chip.momentary = True          # 見 `_ChipBase.momentary`
-                chip.setEnabled(bool(enabled))
                 # **不是 toggle**：這一排是 preset，按下去等於「照這個意思
                 # 把線接好」，而**再按一次不該把它取消**（取消要回到哪個狀態？
                 # 沒有答案）。所以只接「按了」，勾不勾由 `current_id` 決定。
@@ -302,8 +310,16 @@ class ParamForm(QWidget):
         return bool(getattr(self, "_intent_shown", False))
 
     def intent_buttons(self) -> Dict[str, "_ChoiceChip"]:
-        """測試 API：id → 那一顆膠囊。"""
+        """測試 API：id → 那一顆膠囊。**沒接線的時候是空的**（F117 B1）。"""
         return dict(self._intent_btns)
+
+    def intent_title(self) -> str:
+        """那一排的標題。膠囊收起來的時候它還在 —— 見 :meth:`set_intent_row`。"""
+        return self._intent_title.text()
+
+    def intent_note(self) -> str:
+        """那一排底下那一句（沒接線的時候，整排就只剩它）。"""
+        return self._intent_note.text()
 
     def source_button(self) -> QPushButton:
         """那顆鈕本身（訊息裡引到的名字要跟它一字不差 —— 有測試在擋）。"""
@@ -937,6 +953,12 @@ class ParamForm(QWidget):
             w = QSpinBox()
             w.setRange(int(lo) if lo is not None else -10 ** 9,
                        int(hi) if hi is not None else 10 ** 9)
+            # **最小值有名字的時候寫名字**（F117 B4）：`At most this many
+            # defects` 的 `0` 是「全部」，而一個寫著 `0` 的上限框讀起來像
+            # 「一顆都不寫」。宣告在卡片上（`ParamSpec.min_label`）。
+            min_label = str(spec.get("min_label") or "")
+            if min_label:
+                w.setSpecialValueText(strings.tr(min_label))
             if unit:
                 w.setSuffix(" " + unit)
             w.setValue(_safe_int(value))
@@ -957,7 +979,17 @@ class ParamForm(QWidget):
             return w
 
         if ptype == "bool":
-            w = QCheckBox("Enabled")
+            # **字寫在勾選框上，不是一個叫 "Enabled" 的通用詞**（F117 B4）。
+            # 那一列本來長這樣：`Also write a table, one row per box │ ☐
+            # Enabled` —— 左邊已經是一句具體的話，右邊那個字什麼都沒加。
+            # 名字那一欄由 `_ParamRow` 收起來（十一個 bool 的 label 讀起來
+            # 都正好是一句「勾了會發生什麼」）。
+            #
+            # ⚠ **不過翻譯層** —— 而理由不是「參數名不准翻」。勾選框在這裡
+            # 接手的正是 `_ParamRow.name_label` 的工作，而那一欄從來沒有翻過。
+            # 只翻這一個的話，同一個 label 在 bool 那一列是譯文、在別的每一列
+            # 是原文。要翻就整批翻，而那是 H5（中文化）的決定，不是這一輪的。
+            w = QCheckBox(str(spec.get("label") or name))
             w.setChecked(bool(value))
             w.toggled.connect(lambda v, n=name: self._emit(n, bool(v)))
             return w

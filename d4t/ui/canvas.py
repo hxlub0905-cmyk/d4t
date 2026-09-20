@@ -61,6 +61,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import region_words
+from . import strings
 from . import theme
 from .theme import TOKENS
 from .widgets import CARD_MIME, IconButton, draw_group_icon, small_button
@@ -500,6 +501,44 @@ def run_status_from(results) -> Dict[str, Tuple[int, int, float]]:
     return {k: (int(v[0]), int(v[1]), float(v[2])) for k, v in out.items()}
 
 
+#: 一張卡要吃掉整批多少比例的時間，才值得在畫布上被指出來（F117 I7）。
+#:
+#: 半數的意思是一句話：**它一張比其他所有卡加起來還久。**
+#:
+#: ⚠ **平均分配的時候指誰都是誤導。** 七張卡各佔七分之一的那一批沒有瓶頸，
+#: 而硬挑一個最慢的標出來，會讓使用者去調一張其實不重要的卡。
+#:
+#: ⚠ 第一版寫三分之一，而它在**兩張卡**的批次上破功：兩張一樣快的卡各佔
+#: 50%，於是其中一張被指成瓶頸 —— 而那兩張一模一樣。一個跟卡片張數有關的
+#: 門檻要嘛跟著張數算，要嘛就用一句跟張數無關的話；這裡選後者。
+SLOW_SHARE = 0.5
+
+
+def loud_nodes(stats) -> set:
+    """畫布上**哪幾張卡**要寫那一行（F117 I7）。
+
+    走查記的是「每張卡都印 `20 ok · 2051 img/s`」。那一行在七張卡上重複七次
+    的時候，它不再是資訊 —— 使用者真正要從它得到的只有兩件事：
+
+    * **這裡出事了**（有失敗）—— 永遠要講；
+    * **拖慢整批的是這一張**（瓶頸）—— 只有真的有瓶頸的時候才講。
+
+    其餘每一張卡的速率**照樣量得到**，只是它住進 tooltip（滑過去就有）。
+    這條線畫在「一眼看過去」與「想知道細節」之間，不是把數字丟掉。
+    """
+    rows = dict(stats or {})
+    loud = {nid for nid, st in rows.items()
+            if st and int(st[1]) > 0}          # 失敗的永遠講
+    timed = {nid: float(st[2]) for nid, st in rows.items()
+             if st and float(st[2]) > 0.0}
+    total = sum(timed.values())
+    if len(timed) >= 2 and total > 0.0:
+        slowest = max(timed, key=lambda k: timed[k])
+        if timed[slowest] / total > SLOW_SHARE:
+            loud.add(slowest)
+    return loud
+
+
 def run_text(status) -> str:
     """卡片右上角那一小句：``24 ok · 71 img/s`` 或 ``3 failed``。沒跑過是空字串。
 
@@ -543,11 +582,24 @@ class _NodeItem(QGraphicsItem):
         #: 現在這張卡是不是正被使用者的手拖著（F79）。只有這種時候位置才吸到
         #: 格線上 —— 理由見 :meth:`_snapped`。
         self._dragging = False
+        self.sync_run_tip()
+
+    def sync_run_tip(self) -> None:
+        """滑鼠停上去看到的那一段：身分 ＋ 問題 ＋ **上一批跑得怎樣**。
+
+        速率搬進來是 F117 I7 的另一半：卡片上那一行現在只留給失敗與
+        瓶頸，而**每一張卡的數字照樣量得到** —— 這裡就是它去的地方。
+        丟掉一個量得到的數字跟把它印七遍一樣糟，只是錯的方向不同。
+        """
+        info = self.info
         tip = "%s — %s" % (self.node_id, info.get("label", ""))
         if info.get("problem"):
             # 標記說「有問題」，滑鼠停上去說「是什麼問題」。標記本身放不下一句話，
             # 而「有一個紅點但不知道為什麼」比沒有標記更讓人焦慮。
             tip += "\n\n⚠ %s" % info["problem"]
+        run = run_text(self.canvas.run_status_of(self.node_id))
+        if run:
+            tip += "\n\n%s" % (strings.tr("Last run: %s") % run)
         self.setToolTip(tip)
 
     # -- 幾何 ---------------------------------------------------------------
@@ -997,7 +1049,9 @@ class _NodeItem(QGraphicsItem):
         # 就是這一格。縮到 terse 時不畫（那時候連副標都收掉了）。
         # 它畫在**副標那一行**的右邊，不搶標題的寬度：標題是身分（F99 P1-3 才
         # 讓 Region 卡帶上區域名），56% 縮放下被它擠成 `ROI · o…` 等於白做。
-        run = "" if terse else run_text(self.canvas.run_status_of(self.node_id))
+        # **只有失敗與瓶頸才寫在卡上**（F117 I7）—— 其餘的住 tooltip。
+        run = ("" if terse or not self.canvas.is_loud(self.node_id)
+               else run_text(self.canvas.run_status_of(self.node_id)))
         run_w = 0.0
         if run:
             p.save()
@@ -2326,11 +2380,17 @@ class PipelineCanvas(QGraphicsView):
         """``{node_id: (ok, failed, total_ms)}``（`run_status_from` 產的）。
         傳空的就是清掉。位置與選取都不動，只重畫。"""
         self._run_status = dict(status or {})
+        self._loud = loud_nodes(self._run_status)
         for item in self._items.values():
+            item.sync_run_tip()
             item.update()
 
     def run_status_of(self, node_id: str):
         return (getattr(self, "_run_status", None) or {}).get(str(node_id))
+
+    def is_loud(self, node_id: str) -> bool:
+        """這張卡的那一行要不要寫在畫布上（F117 I7）—— 見 :func:`loud_nodes`。"""
+        return str(node_id) in (getattr(self, "_loud", None) or set())
 
     def selected_ids(self) -> List[str]:
         """現在選著的每一張卡（框選可以是好幾張；`selected()` 只回第一張）。"""

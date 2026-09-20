@@ -100,7 +100,7 @@ from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline import sampling
 from d4t.core.pipeline.step import SCALE_DEFECT, SCALE_LOT
 from d4t.core.pipeline.recipe import (
-    describe_migration, is_region_edge, version_skew,
+    describe_migration, version_skew,
 )
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
@@ -2082,29 +2082,8 @@ class StudioWindow(QMainWindow):
 
     # ---- 畫布連線（F7-6；F7-18 起帶著影像流）-------------------------------
     def _on_remove_requested(self, node_id: str) -> None:
-        node_id = str(node_id)
-        # 刪掉一張卡 = 把它餵出去的每一條線都剪掉（F10-5）。下游那幾格要跟著
-        # 空出來，否則它們指著一條再也沒有人產出的流 —— 跟按 × 剪掉是同一件事，
-        # 所以走同一條路（`_unpoint_stream`），不要在這裡另寫一份。
-        with self.model.compound("remove-card"):
-            for e in [e for e in self.model.edges if e.src == node_id]:
-                # **區域線跳過**（F42 B2）：它現在也住在 `model.edges` 裡，而
-                # 它那一格是**水合**出來的 —— 在線還在的時候先把它清掉，
-                # 「參數 ＝ 線說的」那條不變量就當場破了（而它是常開的斷言）。
-                # `model.remove` 拿掉線之後水合會把它空出來，這裡不必動它。
-                if is_region_edge(e, self.model.nodes):
-                    continue
-                canvas_edges.unpoint_stream(self, e.dst, e.src_out, e.dst_in)
-            # 區域線**不必**在這裡處理了（F42 B2）：它現在是一條真的 Edge，
-            # 而 `RecipeModel.remove` 刪卡時本來就會把它兩端的線一起拿掉 ——
-            # 拿掉之後水合就把下游那幾格空出來。以前它是從參數推導的，
-            # 所以「把那一格空掉」非得在這裡自己做一次不可。
-            name = wording.card(self.model, node_id)   # 先取名，移除之後查不到
-            self.model.remove(node_id)
-        if self.selected_node == node_id:
-            self.selected_node = None
-            self.param_form.set_step(None, {}, [])
-        self._status("Removed “%s”" % name)
+        """刪掉一張卡（內容在 `ui/canvas_edges.py` —— 它整件事都是線的事）。"""
+        canvas_edges.remove_card(self, node_id)
 
     def select_node(self, node_id: str) -> bool:
         """選取一個節點：右邊換成它的參數表單，預覽跑到它為止。"""

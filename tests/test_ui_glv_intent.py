@@ -211,10 +211,18 @@ def test_pressing_the_one_already_picked_does_not_unpick_it(qapp):
         "畫面要停在真實狀態上，不是停在使用者按下去的那一顆"
 
 
-def test_a_greyed_out_preset_does_nothing(qapp):
-    """roi 那條線還沒接的時候整排灰掉 —— 而灰掉的東西按了不可以生效。
+def test_an_unwired_card_shows_no_presets_at_all(qapp):
+    """roi 那條線還沒接的時候**那一排不畫**（F117 B1）。
 
-    Qt 只擋得住滑鼠事件；直接呼叫的路（鍵盤、測試）擋不到。
+    以前是三顆灰膠囊，而一張卡最上面擺一排按不下去的東西，第一眼讀到的是
+    「這張卡壞了」。note 那一句本來就說得出該做什麼，所以那三顆灰的是純噪音
+    —— 它們佔著最顯眼的位置，只能重複一次「現在不行」。
+
+    ⚠ **標題留著**：它講的是「接好線之後這裡會有一個選擇」。整段收掉的話，
+    使用者不會知道自己少了什麼。
+
+    順帶把上一版那條規則變成結構上的保證：灰掉的東西 Qt 只擋得住滑鼠，直接
+    呼叫的路（鍵盤、測試）擋不到 —— **不存在的東西沒有這個問題。**
     """
     from d4t.ui.widgets import ParamForm
 
@@ -223,8 +231,22 @@ def test_a_greyed_out_preset_does_nothing(qapp):
     form.intent_chosen.connect(seen.append)
     form.set_intent_row("What to measure", GLV_INTENTS, "defect_box",
                         note="wire a region in first", enabled=False)
-    form.intent_buttons()["oddest_box"].click()
+    assert form.intent_buttons() == {}
+    assert form.intent_title() == "What to measure"
+    assert form.intent_note() == "wire a region in first"
     assert seen == []
+
+
+def test_wiring_it_up_brings_the_presets_back(qapp):
+    """⚠ 反向：接好線之後那三顆要回來（不然「收起來」就變成「弄丟了」）。"""
+    from d4t.ui.widgets import ParamForm
+
+    form = ParamForm()
+    form.set_intent_row("What to measure", GLV_INTENTS, "defect_box",
+                        note="wire a region in first", enabled=False)
+    form.set_intent_row("What to measure", GLV_INTENTS, "defect_box")
+    assert set(form.intent_buttons()) == {i[0] for i in GLV_INTENTS}
+    assert form.intent_buttons()["defect_box"].is_checked()
 
 
 def test_rebuilding_the_row_leaves_no_ghosts(qapp):

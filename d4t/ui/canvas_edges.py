@@ -31,9 +31,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, List, Optional, Sequence
 
 from d4t.core.pipeline import ParamError, get_step
+from d4t.core.pipeline.recipe import is_region_edge
 
 from . import card_menu
 from . import edit_plan
+from . import wording
 
 if TYPE_CHECKING:                      # 只給型別看：這一支不 import studio
     from .studio import StudioWindow
@@ -199,6 +201,70 @@ def on_edge_added(win: "StudioWindow", src: str, dst: str, stream: str = "",
     src, dst, stream = str(src), str(dst), str(stream or "")
     with win.model.compound("connect"):
         connect(win, src, dst, stream, str(dst_in or ""))
+
+def remove_card(win: "StudioWindow", node_id: str) -> None:
+    """刪掉一張卡（F117 J4 把它從 `studio.py` 搬過來）。
+
+    **為什麼住在這裡**：這件事從頭到尾都是線的事 —— 剪掉它餵出去的每一條、
+    把下游那幾格空出來、算一份補線的提議。`studio.py` 留給接線（CLAUDE.md §4），
+    而它那一格是 `HARD_CAPS`：要往它加東西，先從它手上搬走等量的東西。
+    """
+    node_id = str(node_id)
+    # 刪掉一張卡 = 把它餵出去的每一條線都剪掉（F10-5）。下游那幾格要跟著
+    # 空出來，否則它們指著一條再也沒有人產出的流 —— 跟按 × 剪掉是同一件事，
+    # 所以走同一條路（`_unpoint_stream`），不要在這裡另寫一份。
+    with win.model.compound("remove-card"):
+        for e in [e for e in win.model.edges if e.src == node_id]:
+            # **區域線跳過**（F42 B2）：它現在也住在 `model.edges` 裡，而
+            # 它那一格是**水合**出來的 —— 在線還在的時候先把它清掉，
+            # 「參數 ＝ 線說的」那條不變量就當場破了（而它是常開的斷言）。
+            # `model.remove` 拿掉線之後水合會把它空出來，這裡不必動它。
+            if is_region_edge(e, win.model.nodes):
+                continue
+            unpoint_stream(win, e.dst, e.src_out, e.dst_in)
+        # 區域線**不必**在這裡處理了（F42 B2）：它現在是一條真的 Edge，
+        # 而 `RecipeModel.remove` 刪卡時本來就會把它兩端的線一起拿掉 ——
+        # 拿掉之後水合就把下游那幾格空出來。以前它是從參數推導的，
+        # 所以「把那一格空掉」非得在這裡自己做一次不可。
+        name = wording.card(win.model, node_id)   # 先取名，移除之後查不到
+        # **補線的提議要在刪之前算**（F117 J4）—— 刪完之後那幾條線已經
+        # 不在 model 裡了，算不出「本來接到哪」。
+        plan = win.model.bridge_plan(node_id)
+        win.model.remove(node_id)
+    if win.selected_node == node_id:
+        win.selected_node = None
+        win.param_form.set_step(None, {}, [])
+    if plan:
+        # ⚠ **提議，不是自動接**（鐵則 10：畫布上每一條線都是使用者拉
+        # 的）。按下去才成真，而按下去的是使用者。
+        win._status_next_step(
+            "Removed “%s” — %d line%s went with it." % (
+                name, len(plan), "" if len(plan) == 1 else "s"),
+            "Reconnect", lambda: bridge(win, plan),
+            tip="Wire what fed “%s” straight into what it fed." % name)
+    else:
+        win._status("Removed “%s”" % name)
+
+
+def bridge(win: "StudioWindow", plan) -> int:
+    """把 :meth:`RecipeModel.bridge_plan` 算出來的那幾條線接起來（F117 J4）。
+
+    **走跟使用者拉線同一條路**（:func:`connect`）—— 不是 `model.add_edge`。
+    接一條線在 model 上是好幾個動作（加線、把下游那一格指到這條流、擠掉搶同
+    一個輸入的舊線），而那些規矩住在 `edit_plan` 裡。從這裡另開一條捷徑，等於
+    讓「一鍵補線」接出來的線跟手拉的線**不一樣** —— 而畫布上看起來會一模一樣。
+
+    整批算**一步復原**：使用者按的是一顆鈕，Ctrl+Z 就該退回按之前。
+    """
+    rows = list(plan or [])
+    if not rows:
+        return 0
+    with win.model.compound("bridge"):
+        for src, src_out, dst, dst_in in rows:
+            connect(win, str(src), str(dst), str(src_out or ""),
+                    str(dst_in or ""))
+    return len(rows)
+
 
 def connect(win: "StudioWindow", src: str, dst: str, stream: str,
              dst_in: str = "") -> None:

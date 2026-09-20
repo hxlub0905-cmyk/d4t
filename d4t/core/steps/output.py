@@ -659,7 +659,7 @@ class OutputReportStep(_OutputStep):
         # 一模一樣。遷移**照舊值搬**，所以既有的 recipe 行為不變。
         ParamSpec(
             name="limit", type="int", default=0, min=0, max=1000000,
-            label="At most this many pictures",
+            label="At most this many pictures", min_label="All of them",
             show_when=("contents", (CONTENT_PICTURES,)),
             help=("%s Set a number to keep only the worst that many (highest "
                   "score first) - the report still lists every defect, only "
@@ -1347,6 +1347,7 @@ class OutputCharStep(_OutputStep):
         ParamSpec(
             name="limit", type="int", default=200, min=0, max=100000,
             label="At most this many rows with pictures",
+            min_label="All of them",
             help=("This report puts a picture on every row, which is what "
                   "makes it readable at a glance and also what stops it "
                   "scaling. Above this many defects the extra rows are still "
@@ -1633,6 +1634,10 @@ class OutputUniformityStep(_OutputStep):
             default=",".join(export_unif.DEFAULT_CHARTS),
             choices=list(export_unif.CHARTS),
             label="Which charts",
+            # **格子上寫 `CHART_LABELS`，不是那個鍵**（F117 B4）。第五格以前
+            # 寫著 `chart` —— 那是 `CHART_CUSTOM` 的值（檔名 `-chart.svg` 用
+            # 的那個字），而使用者在那排勾選框上讀到的是一個不知道是什麼的字。
+            choice_labels=dict(export_unif.CHART_LABELS),
             choice_help={
                 export_unif.CHART_BOX:
                     "One box per region, one point per measurement box - how "
@@ -1712,7 +1717,7 @@ class OutputUniformityStep(_OutputStep):
         ),
         ParamSpec(
             name="limit", type="int", default=20, min=0, max=100000,
-            label="At most this many defects",
+            label="At most this many defects", min_label="All of them",
             help=("These charts are per image, so a lot of 400 defects would "
                   "write 400 sets of them. The highest scoring this many are "
                   "drawn. %s Set it to 0 for every defect - which is what you "

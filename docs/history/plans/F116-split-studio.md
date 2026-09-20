@@ -307,7 +307,7 @@ Gallery）。`studio.py` 用 `# noqa: F401` 把那三個名字轉出去 —— �
       （不是 ImportError）。第 1 步兩支：`profile_panel`、`_overlay_region_names`
 - [ ] **單獨當參數傳出去的 `self`** 機械式取代抓不到：`UniformityWindow(self)`、
       `ProfilePanel(self)`、`RegionCheckWindow(self)` 的 parent 要是**視窗**
-      （controller 是 QObject，不是 QWidget）。搬完 grep 一次 `self(?!\s*\.)`
+      （controller 是 QObject，不是 QWidget）。搬完 grep 一次「`self` 後面沒有點」那個 regex
 - [ ] 搬完 grep 一次每一個 `self.w.<名字>`，確認它真的還在 `StudioWindow` 上
       —— 跨 controller 的狀態（第 1 步是 `_compare_on`）要走門面（§3-2）
 - [ ] ⚠ **組出來的名字沒有任何掃描找得到**：`getattr(self, "_on_open_%s" % key)`
