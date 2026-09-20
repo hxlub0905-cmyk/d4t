@@ -107,6 +107,32 @@ _SEG_LINES = (
     ("adc", "Score → bin → write back to KLARF"),
 )
 
+#: 判定那一段的五個字（F117 D4）。**順序是使用者遇到它們的順序**，不是
+#: 字母序 —— 這張表要讀起來像一句話：分數 → 問題 → 類別 → 編號 → 結果。
+#:
+#: 為什麼需要它
+#: ------------
+#: 走查記的是「Decision / Verdict / bin / class / score 多種叫法」。掃過整個
+#: 畫面之後**沒有亂用的同義詞**（`grade`／`bucket`／`category` 一個都沒有）
+#: —— 五個字各自都用得很一致。缺的是**沒有任何地方告訴使用者它們怎麼串起來**，
+#: 而它們在同一個畫面上同時出現。
+#:
+#: ⚠ **每一句都講「它在畫面上是哪一個東西」**，不是給一個定義。一個不寫 code
+#: 的製程工程師要的是「我看到的那一格叫什麼」，而不是一段名詞解釋。
+GLOSSARY = (
+    ("score", "One number per defect, worked out from what the cards "
+              "measured. You write the expression."),
+    ("decision", "The tree on the canvas. Each step asks the score (or any "
+                 "other number) a question."),
+    ("class", "Where a defect ends up on that tree - you name it yourself "
+              "(“a spot stands out”)."),
+    ("bin", "The number that class writes into the KLARF. One class, one "
+            "bin."),
+    ("verdict", "What one defect got: its class name and its bin, on the "
+                "chip beside the preview."),
+)
+
+
 def ways_in() -> int:
     """「開啟 KLARF」以外還有幾條路進得來（F117 G1）。
 
@@ -374,6 +400,19 @@ class WelcomeDialog(QDialog):
 
         self.segments = _SegmentStrip(self)
         root.addWidget(self.segments)
+
+        # **五個字怎麼串起來**（F117 D4）。它們在同一個畫面上同時出現，而在
+        # 這一段之前沒有任何地方講過它們的關係 —— 而那正是第一次見面的人會
+        # 卡住的地方。放在三段之後：先知道這個工具在做什麼，再學它的詞。
+        self.glossary = QLabel(
+            "  ·  ".join("<b>%s</b> %s" % (name, line)
+                         for name, line in GLOSSARY), self)
+        self.glossary.setWordWrap(True)
+        self.glossary.setTextFormat(Qt.RichText)
+        self.glossary.setStyleSheet("color:%s; font-size:%s;"
+                                    % (TOKENS["text_secondary"],
+                                       TOKENS["font_small"]))
+        root.addWidget(self.glossary)
 
         root.addWidget(self._separator())
 

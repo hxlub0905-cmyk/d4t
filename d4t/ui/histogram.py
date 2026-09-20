@@ -55,6 +55,10 @@ class HistogramWidget(QWidget):
 
     threshold_changed = Signal(float)
     threshold_committed = Signal(float)
+
+    #: 橫軸切幾格（＝畫 ``X_TICKS + 1`` 個刻度）。F117 E4：以前只有兩端，
+    #: 而「門檻該設哪」是一個位置的問題 —— 兩個端點答不出「這一堆落在哪」。
+    X_TICKS = 4
     #: 點一根長條：``(lo, hi)`` 是那根長條的分數區間（Studio 用來篩 Gallery）。
     bar_clicked = Signal(float, float)
 
@@ -77,6 +81,8 @@ class HistogramWidget(QWidget):
         #: 每根長條的 ``[(顏色, 顆數), …]``（見 `set_segments`）；None = 單色。
         self._segments: Optional[List[List[Any]]] = None
         self._threshold: Optional[float] = None
+        #: 判定樹在這個數字上切過的那幾刀（F117 E4）。見 `set_cuts`。
+        self._cuts: List[Any] = []
         self._bin_text = ""
         self._dragging = False
         self._hover_bin = -1
@@ -123,6 +129,25 @@ class HistogramWidget(QWidget):
         if self._threshold is not None:
             self._threshold = self._clamp(self._threshold)
         self.update()
+
+    def set_cuts(self, cuts: Optional[Sequence[Sequence[Any]]]) -> None:
+        """判定樹**在這個數字上切過的那幾刀**（F117 E4）。
+
+        ``[(值, "glv_max > 42"), …]``；``None`` / 空 = 一刀都不畫。
+
+        為什麼值得畫：這張圖回答的是「這個特徵分不分得開、門檻該設哪」，
+        而判定樹上**已經有一個答案**了 —— 看不到它的話，使用者是在一張沒有
+        參考線的圖上重新猜一次。
+
+        ⚠ **跟 `set_threshold` 是兩件事**：門檻是二元那條**拖得動**的線，
+        這幾刀是樹上的，唯讀（要改要去樹上改）。所以它們長得不一樣：門檻是
+        粗虛線，這幾刀是細的點線。
+        """
+        self._cuts = [(float(v), str(t or "")) for v, t in (cuts or [])]
+        self.update()
+
+    def cuts(self) -> List[Any]:
+        return list(self._cuts)
 
     def set_marker(self, value: Optional[float], label: str = "") -> None:
         """畫一條**不能拖**的標記線（F18：「這一顆落在哪裡」）。
@@ -303,10 +328,45 @@ class HistogramWidget(QWidget):
         p.drawText(QRectF(r.left() - self._M_LEFT + 2, r.bottom() - 7,
                           self._M_LEFT - 6, 14),
                    Qt.AlignRight | Qt.AlignVCenter, "0")
-        p.drawText(QRectF(r.left(), r.bottom() + 2, r.width() / 2, 14),
-                   Qt.AlignLeft, "%.3g" % lo)
-        p.drawText(QRectF(r.center().x(), r.bottom() + 2, r.width() / 2, 14),
-                   Qt.AlignRight, "%.3g" % hi)
+        # ⚠ **只有兩端的刻度讀不出中間**（F117 E4）：使用者要問的是
+        # 「門檻該設哪」，而那是一個**位置**的問題 —— 兩個端點答不出「這一堆
+        # 大概落在哪」。五格（四個內點）是量過的折衷：再多就開始互相擠。
+        for i in range(self.X_TICKS + 1):
+            frac = i / float(self.X_TICKS)
+            value = lo + (hi - lo) * frac
+            x = r.left() + r.width() * frac
+            p.setPen(QColor(TOKENS["border_default"]))
+            p.drawLine(QPointF(x, r.bottom()), QPointF(x, r.bottom() + 3))
+            p.setPen(QColor(TOKENS["text_hint"]))
+            # 兩端靠邊、中間置中 —— 不然第一個與最後一個會被畫出格子外。
+            box = QRectF(x - 30, r.bottom() + 2, 60, 14)
+            align = (Qt.AlignLeft if i == 0 else
+                     Qt.AlignRight if i == self.X_TICKS else Qt.AlignHCenter)
+            if i == 0:
+                box = QRectF(r.left(), r.bottom() + 2, 60, 14)
+            elif i == self.X_TICKS:
+                box = QRectF(r.right() - 60, r.bottom() + 2, 60, 14)
+            p.drawText(box, align | Qt.AlignVCenter, "%.3g" % value)
+
+        # 判定樹切過的那幾刀（F117 E4）—— **畫在門檻線之前**：能拖的那條
+        # 要在最上面（同下面標記線那一段的理由）。
+        for value, text in self._cuts:
+            if not (lo <= value <= hi):
+                continue          # 切在圖外：畫在邊上會讓人以為就切在那裡
+            cx = self._x_at(value)
+            pen = QPen(QColor(TOKENS["text_hint"]), 1)
+            pen.setStyle(Qt.DotLine)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawLine(QPointF(cx, r.top()), QPointF(cx, r.bottom()))
+            if text:
+                fm = p.fontMetrics()
+                tw = fm.horizontalAdvance(text) + 4
+                tx = min(max(cx + 3, r.left()),
+                         max(r.left(), r.right() - tw))
+                p.setPen(QColor(TOKENS["text_hint"]))
+                p.drawText(QRectF(tx, r.bottom() + 15, tw, 14),
+                           Qt.AlignLeft | Qt.AlignVCenter, text)
 
         # 門檻線
         if self._threshold is not None:

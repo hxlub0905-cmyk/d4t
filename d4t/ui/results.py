@@ -350,6 +350,9 @@ class ResultsWindow(QMainWindow):
         finally:
             self.feature_combo.blockSignals(False)
 
+    #: 現在這一份判定（`set_verdict` 餵）—— `_refresh_cuts` 讀它。
+    _decide: Any = None
+
     def shown_feature(self) -> str:
         data = self.feature_combo.currentData()
         return str(data if data is not None else self.SCORE)
@@ -366,9 +369,23 @@ class ResultsWindow(QMainWindow):
     def spread_hint_text(self) -> str:
         return self.spread_hint.text()
 
+    def _refresh_cuts(self) -> None:
+        """把判定樹在**現在看的那個數字**上切過的幾刀畫上去（F117 E4）。
+
+        看「Score」的時候不畫：那一格有自己的門檻線（拖得動的那一條），
+        兩種線混在一起會讓人以為樹上的那幾刀也拖得動。
+        """
+        from d4t.core.pipeline.decide_tree import cuts_on
+
+        name = self.shown_feature()
+        self.histogram.set_cuts(
+            [] if name == self.SCORE
+            else cuts_on(getattr(self, "_decide", None), name))
+
     def _on_feature_pick(self, _index: int) -> None:
         # 使用者自己動過這一格 —— 從現在起不要再幫他選（見 `set_features`）。
         self._picked_by_user = True
+        self._refresh_cuts()          # 換數字 → 換一組刀（F117 E4）
         self.shown_feature_changed.emit(self.shown_feature())
 
     # ---- 對外 -------------------------------------------------------------
@@ -382,6 +399,10 @@ class ResultsWindow(QMainWindow):
         """
         self.verdict.set_rows(verdict_rows(decide, list(results or []),
                                            ground_truth))
+        # **樹上切在這個數字的哪裡**（F117 E4）—— 分布圖問的正是「門檻該設
+        # 哪」，而樹上已經有一個答案了。換數字時也要重算（`_on_feature_pick`）。
+        self._decide = decide
+        self._refresh_cuts()
 
     def selected_class(self) -> str:
         return self.verdict.selected()

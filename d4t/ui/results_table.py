@@ -358,6 +358,46 @@ class ResultsTableModel(QAbstractTableModel):
     #: 的眼裡是空的。
     TRUTH_WORDS = {True: "real", False: "nuisance"}
 
+    #: 判定說「這是真缺陷」的 bin。**跟正確率那一行用的是同一條規矩**
+    #: （`export/report._confusion` 的預設：``bin != 0``）—— 兩邊各訂一套的
+    #: 那天，表上紅著的列數會跟上面寫的 `missed 4` 對不起來，而沒有人知道
+    #: 哪一個是對的。
+    @staticmethod
+    def _called_real(row: Dict[str, Any]) -> Optional[bool]:
+        b = row.get("bin")
+        if b is None or not row.get("ok", True):
+            return None            # 沒跑出判定：不能說它判錯
+        try:
+            return int(b) != 0
+        except (TypeError, ValueError):
+            return None
+
+    def wrong_count(self) -> int:
+        """**現在列出來的**這些裡面，判定跟答案對不上的有幾顆（F117 E1）。
+
+        ⚠ 數的是看得到的那幾列（`self._rows`，已經套過篩選）—— 表頭上的數字
+        跟底下紅著的格子要對得起來，不然它會變成第二個「要去別的地方查」的
+        數字。
+        """
+        return sum(1 for i in range(len(self._rows)) if self.disagrees(i))
+
+    def disagrees(self, row: int) -> bool:
+        """第 ``row`` 列的**判定跟答案對不上**嗎（F117 E1）。
+
+        走查記的是：上面寫著 `missed 4`，而表上有 `truth` 欄卻沒有把那四列
+        標出來 —— 使用者要自己逐列比。而「逐列比」正是這張表存在的理由該
+        替他做掉的事。
+
+        沒標答案、或這一顆根本沒跑出判定 → False（**不是判錯，是沒得比**）。
+        """
+        if not (0 <= int(row) < len(self._rows)):
+            return False
+        flag = self.truth_of(int(row))
+        if flag is None:
+            return False
+        called = self._called_real(self._rows[int(row)])
+        return called is not None and bool(called) != bool(flag)
+
     def set_truth(self, truth: Optional[Dict[str, Any]]) -> None:
         """換一份答案卷（標完之後宿主餵回來）—— 只重畫那一欄，不重排。"""
         self._truth = None if truth is None else dict(truth)
@@ -464,7 +504,11 @@ class ResultsTableModel(QAbstractTableModel):
                 return ""
             # 同理：``?truth`` 是哨兵，表頭上寫的是使用者的話（X2）。
             if name == TRUTH_COLUMN:
-                return "truth"
+                # **判錯幾顆寫在表頭上**（F117 E1）：上面那句 `missed 4` 以前
+                # 在另一個地方，而使用者要自己逐列比才找得到是哪四顆。
+                # 數字在這裡，紅色的格子就在同一欄底下。
+                n = self.wrong_count()
+                return "truth (%d wrong)" % n if n else "truth"
             # 有身分的欄顯示統計量短標籤（區域在上層表頭）；沒有的照舊
             # 顯示欄名 —— 不猜。
             return _stat_label(bound) if bound is not None else name
@@ -504,8 +548,18 @@ class ResultsTableModel(QAbstractTableModel):
             return None
         if column == TRUTH_COLUMN:
             flag = self.truth_of(index.row())
+            wrong = self.disagrees(index.row())
             if role == Qt.DisplayRole:
-                return self.TRUTH_WORDS.get(flag, "")
+                # ⚠ **字也要講**（U13）：紅色對色覺缺陷者不可分辨，而這一欄
+                # 正是「這一顆判對了沒」唯一的答案。顏色是第二個通道。
+                return ("%s · called %s"
+                        % (self.TRUTH_WORDS[flag],
+                           self.TRUTH_WORDS[not flag]) if wrong
+                        else self.TRUTH_WORDS.get(flag, ""))
+            if role == Qt.BackgroundRole and wrong:
+                return QColor(TOKENS["chip_bad_bg"])
+            if role == Qt.ForegroundRole and wrong:
+                return QColor(TOKENS["danger_text"])
             if role == Qt.EditRole:
                 # 排序把「標過的」聚在一起，而未標的照 `sort` 那條規矩排最後。
                 return None if flag is None else int(bool(flag))
@@ -518,7 +572,12 @@ class ResultsTableModel(QAbstractTableModel):
                         if flag is not None else
                         "Not labelled. Select rows and press R (real) or N "
                         "(nuisance) - the accuracy line only counts what you "
-                        "have labelled.")
+                        "have labelled.") if not wrong else (
+                    "The decision put this defect in bin %s, which counts as "
+                    "“called %s” - but you marked it %s. This is one of the "
+                    "defects the accuracy line above is counting."
+                    % (self._rows[index.row()].get("bin"),
+                       self.TRUTH_WORDS[not flag], self.TRUTH_WORDS[flag]))
             if role == Qt.TextAlignmentRole:
                 return int(Qt.AlignLeft | Qt.AlignVCenter)
             return None

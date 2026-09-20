@@ -38,7 +38,7 @@
 |---|---|---|---|
 | A4 | Tune 模式畫布只剩約 300 px 高，7 張卡就縮到 50%，副標與埠名讀不到；而沒選卡時下方參數區只有一行 `(Pick a card…)` 卻占一半以上。**Build 模式下同一份 recipe 在 61% 是讀得到的**，所以問題在 Tune 的空間分配 | 沒選卡時收起參數區；或讓 Tune 的畫布最小高度大一點 | ✅ 兩種模式截圖比對 |
 | C1 | Features 面板的**數值被長說明擠到可視範圍外**：值在最右欄，面板預設寬度要水平捲 ~270 px 才看得到，第一眼只看到名字與說明 | 值放在名字旁邊（第二欄），說明放第三欄或 tooltip | ✅ 捲到最右截圖確認值存在 |
-| E1 | 有 ground truth 時上方寫 `missed 4`，但**縮圖沒有任何標記**、表格有 `truth` 欄卻沒有把「判定≠答案」的列標出來，要自己逐列比 | 判錯的格子／列加紅框；篩選加「只看判錯的」 | ✅ `gallery._paint_tile` 只看 ok/bin；`results_table` 的 truth 只有文字 |
+| E1 ✅ | **做完** —— 判錯的那一格自己說出來：`real · called nuisance`（⚠ **字也要講**，U13：紅色對色覺缺陷者不可分辨），底色是第二個通道，表頭寫 `truth (2 wrong)`。⚠ 判準**跟正確率那一行同一條**（`bin != 0` 算判定為真缺陷）—— 各訂一套的那天，紅著的列數會跟上面的數字對不起來。⚠ 跑失敗／沒標答案的那幾顆**不算判錯**（沒得比）。原本記的：有 ground truth 時上方寫 `missed 4`，但**縮圖沒有任何標記**、表格有 `truth` 欄卻沒有把「判定≠答案」的列標出來，要自己逐列比| 判錯的格子／列加紅框；篩選加「只看判錯的」 | ✅ `gallery._paint_tile` 只看 ok/bin；`results_table` 的 truth 只有文字 |
 | F1 | ✅ **做完** —— 而且**三個輸出檔都有**這個坑：CSV、xlsx 的「明細」頁、以及 HTML 報表（它自己寫 `defect/ok/score/bin` 再接特徵欄）| 新增 `detail_feature_keys()`（= `feature_keys` 扣掉 `BASE_COLUMNS`），三個寫檔的地方都用它。⚠ **`feature_keys` 本身沒有動** —— Features 面板與特徵統計要的是「這批跑出了哪些數字」，`score` 是其中之一；扣掉是**明細表**的事。原本的建議是改 `feature_keys()`，那會讓畫面上少一列 | ✅ 三條測試：CSV 表頭不重複、HTML 表頭不重複、`feature_keys` 沒變 |
 | G3 | Recipe 範本庫：清單顯示 recipe id（`ebi_die_to_die`）與 `route: ebi_patch`；右邊整塊說明；`score = (no score expression)` 會讓人以為沒有判定（判定其實在樹上） | 顯示名稱＋一句摘要；`route` 換成資料類型白話；score 那行在有判定樹時改寫或拿掉 | ✅ 截圖 |
 | G4 | Template 對話框工具列下方那排說明字被截、還壓著一條捲軸 | 說明改 tooltip 或換行 | ✅ 截圖 |
@@ -64,10 +64,10 @@
 | D1 ✅ | **做完 —— 而且句子本身也不是對的。** `Esc` 走的是 `pipeline.clear_selection()`，那一支只放掉**畫布**那一份選取，而預覽停在哪裡看的是 `win.selected_node`（`_run_preview` 的 `upto`）—— 按了 Esc 框不見了，預覽照樣停在同一張卡上。修了兩件事：①`studio_layout.clear_selection()` 兩份一起放並重跑預覽；②最後那幾個字做成**連結**（同 `decide_path` 的先例 U11），Esc 照樣有效、寫在 tooltip 上。原本記的：「preview stops at "norm" — press Esc to run the decision too」：Esc 是「取消選取」，句子是對的，但很難被想到| 旁邊放一顆 `Run to the end` | ✅ |
 | D2 ✅ | 均勻度 verdict `measured · bin 0` 是紅色 chip，讀起來像「壞」 | **原因查出來了，而原本的推測不成立**：`VerdictChip` 是**二元 pass/fail**（bin 1 = good、其餘 = bad），那是 U13 刻意的設計 —— `is_real_style` 會把紅綠對調，而且對調時 chip 自己的字跟著翻面（`real`／`nuisance`），還有第三個通道（框線樣式）給色覺缺陷者。改成 `leaf_color` 會把那整套拆掉。**真正的問題是語意**：均勻度那份 recipe 裡 `bin 0` 是「量到了、沒有異常」＝好消息。⚠ **需要使用者決定**：「哪一個 bin 是好消息」該由誰說 —— recipe？還是照 `is_real_style` 那樣由判定段宣告？ | ✅ `feature_text.py:356`（`tone = "good" if is_real_style else "bad"`）|  **已關（[F119](../history/plans/F119-which-bin-is-good-news.md) 五步）**：葉子自己標 `outcome`，膠囊的顏色／字／框線三條都吃它。⚠ **實測是三份出貨 recipe 全反**，不只均勻度那一條
 | ~~D3~~ | ~~`score 0.27895` 小數位多~~ | **撤回** —— 它**已經**走 `numbers.py`，而那 5 位是 F52 算過的：`%.4g` 會把 `99.995` 印成 `100`，於是同一顆在 Results 是 100、點進去是 99.995。縮短它等於把 F52 修掉的 bug 放回來。（移到下面的撤回表）| ✅ `core/numbers.py` 的模組說明 |
-| D4 | Decision / Verdict / bin / class / score 多種叫法 | 一張詞彙表 | ✅ |
-| E2 | 縮圖第一行是類別名（R5 的刻意設計），但 M 尺寸下被截成 `a spot stands …`；色條沒有圖例 | 截斷時用 tooltip；Results 放 bin 色圖例 | ✅ |
+| D4 ✅ | **做完，而且原本的推測要修正** —— 掃過整個畫面：**沒有亂用的同義詞**（`grade`／`bucket`／`judgement` 一個都沒有），五個字各自都很一致。缺的是**沒有任何地方說它們怎麼串起來**。所以加的不是一次重新命名，是歡迎頁上**一張看得到的表**（順序是使用者遇到它們的順序：score → decision → class → bin → verdict），配一條「不准長出第六種叫法」的掃描。原本記的：Decision / Verdict / bin / class / score 多種叫法| 一張詞彙表 | ✅ |
+| E2 ✅ | **複查：圖例已經有了** —— 判定列（`VerdictBand`）就在同一個視窗最上面、而且不在 splitter 裡（拖不掉），一列一個類別帶著顏色。I1 之後兩邊顏色真的一樣了，而 `tests/test_ui_tile_legend.py` 盯著它不漂（bin 0 那一格的顏色是呼叫端給的，少傳一個參數圖例就開始說謊）。縮圖名字的截斷**維持原樣**：省略＋停上去讀全（F99 P0-4）＋三段尺寸，寬度不是免費的。原本記的：縮圖第一行是類別名（R5 的刻意設計），但 M 尺寸下被截成 `a spot stands …`；色條沒有圖例| 截斷時用 tooltip；Results 放 bin 色圖例 | ✅ |
 | E3 | 縮圖沒有標出 defect 位置 | 疊量測標記或中心十字 | ✅ |
-| E4 | Results 分布圖只有 min/max 刻度、沒有圖例、沒畫判定門檻 | 補刻度與圖例；判定樹用到這個數字時畫出那一刀 | ✅ 截圖 |
+| E4 ✅ | **做完** —— ①x 軸從兩端兩個刻度變成五格；②**判定樹切在這個數字的哪裡**畫出來了（`decide_tree.cuts_on`，細點線＋條件文字）。⚠ 看「Score」時不畫那幾刀：那一格有自己**拖得動**的門檻線，兩種線混在一起會讓人以為樹上那幾刀也拖得動。⚠ 複合條件**不猜位置**（猜一條畫上去比不畫糟得多）。圖例見 E2。原本記的：Results 分布圖只有 min/max 刻度、沒有圖例、沒畫判定門檻| 補刻度與圖例；判定樹用到這個數字時畫出那一刀 | ✅ 截圖 |
 | E6 | Results 頂端一條很寬的灰色空條 | 沒在跑時收起 | ✅ |
 | E7 ✅ | **做完** —— `12% real` → `4/12 real`（畫面與判定面板兩處）。百分比沒有分母就要人心算：`12% 的什麼`？這一類可能只有 8 顆，標過答案的可能只有 3 顆。原本記的：`12% real` 要想一下才懂| `4 real (missed)` | ✅ |
 | F3 | CSV／報表預設不帶 KLARF 座標與原始欄位（機制 `carry_klarf_columns` 已有，是 recipe 沒開） | 出貨的 recipe 預設打開 | ✅ |

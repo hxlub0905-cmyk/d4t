@@ -44,6 +44,7 @@ __all__ = [
     "flow_counts", "leaf_stats", "decision_info", "path_text",
     "answer", "walk", "features_used",
     "LEAF_PALETTE", "leaf_color", "verdict_rows", "NUISANCE_HEX",
+    "cuts_on",
     "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY",
 ]
 
@@ -91,6 +92,52 @@ def parse_simple_condition(when: str):
     if not m:
         return None
     return (m.group(1), m.group(2), float(m.group(3)))
+
+
+def cuts_on(decide: Any, feature: str) -> List[Tuple[float, str]]:
+    """判定樹**在 ``feature`` 這個數字上切過的那幾刀**（F117 E4）。
+
+    ``[(值, "glv_max > 42"), …]``，照樹上由上往下的順序、去掉重複的值。
+
+    為什麼值得答得出來：Results 的分布圖問的是「這個特徵分不分得開、門檻該
+    設哪」，而樹上**已經有一個答案**了 —— 看不到它的話，使用者是在一張沒有
+    參考線的圖上重新猜一次。
+
+    ⚠ **只認得單純的比較**（`parse_simple_condition`）：複合條件拆不出一個
+    位置，而猜一個位置畫上去比不畫糟得多 —— 那條線會被當成真的。
+    """
+    want = str(feature or "").strip()
+    out: List[Tuple[float, str]] = []
+    if not want or decide is None:
+        return out
+    seen = set()
+    for when in _tree_conditions(decide):
+        got = parse_simple_condition(when)
+        if got is None or got[0] != want:
+            continue
+        value = float(got[2])
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append((value, format_condition(got[0], got[1], value)))
+    return out
+
+
+def _tree_conditions(decide: Any) -> List[str]:
+    """樹（或規則清單）上的每一個問句，**由上往下**。"""
+    out: List[str] = []
+
+    def walk(node: Any) -> None:
+        if node is None or isinstance(node, TreeLeaf):
+            return
+        out.append(str(getattr(node, "when", "") or ""))
+        walk(getattr(node, "yes", None))
+        walk(getattr(node, "no", None))
+
+    walk(display_tree(decide))
+    for rule in (getattr(decide, "rules", None) or []):
+        out.append(str(getattr(rule, "when", "") or ""))
+    return out
 
 
 def format_condition(name: str, op: str, value: float) -> str:

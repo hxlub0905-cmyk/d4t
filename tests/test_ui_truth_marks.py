@@ -155,7 +155,10 @@ def test_a_marked_row_says_so_on_screen(qapp):
                                   "3": {"is_real": False}})
     texts = [win.table.cell_text(r, TRUTH_COLUMN)
              for r in range(win.table.row_count())]
-    assert texts == ["", "real", "", "nuisance"], texts
+    # ⚠ 第 4 列是 bin 1（判定說「真缺陷」）而答案是 nuisance —— **那一格
+    # 現在自己說出對不上**（F117 E1）。以前它只寫 `nuisance`，而「判定跟
+    # 答案對不上」要使用者自己逐列比才看得出來。
+    assert texts == ["", "real", "", "nuisance · called real"], texts
     # ⚠ **而且那一欄要真的看得到**：它在收合層裡（`visible_columns`）——
     # 落在「All measurements」摺疊區的話，使用者標完什麼都不會發生。
     assert TRUTH_COLUMN in win.table.visible_column_names()

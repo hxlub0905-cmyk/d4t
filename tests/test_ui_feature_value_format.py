@@ -131,7 +131,10 @@ def test_they_delegate_rather_than_agree_by_luck(qapp, name):
 #: 不然它就是一張只會變長的紙。
 #: （U7，2026-09-08：`widgets.py` 拆開之後直方圖搬進 `ui/histogram.py`，
 #: 這一列跟著它走 —— 表上的名字是**那段程式碼現在住哪**，不是它以前住哪。）
-_AXIS_LABEL_ALLOWLIST = {"histogram": 2}    # 直方圖 x 軸的 lo / hi
+#: （F117 E4，2026-09-20：2 → **1**。x 軸從「兩端各印一次」改成一個跑五格的
+#: 迴圈 —— 同一個 `"%.3g"` 現在只寫一次。數字**掉下去也要跟著改**，
+#: 那正是這張表配著反向測試的意思。）
+_AXIS_LABEL_ALLOWLIST = {"histogram": 1}    # 直方圖 x 軸的刻度
 
 
 def _precision_picks(mod: str) -> int:
