@@ -20,7 +20,7 @@
       "params": {
         "out": "single",
         "nm_per_px": 0.0,
-        "carry": ""
+        "carry": "XREL,YREL"
       },
       "enabled": true
     },

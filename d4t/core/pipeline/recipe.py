@@ -1133,6 +1133,36 @@ def _decide_issues(recipe: "Recipe", decide: "DecideSpec") -> List["Issue"]:
     return out
 
 
+def _doubled_names(step_cls, params: Dict[str, Any]) -> List[str]:
+    """這張卡會寫出哪些**同一個字連著出現兩次**的欄名（F117 F5）。
+
+    `cells_cells_area_px` —— 一次是使用者填的 `output_prefix`，一次是這張卡
+    自己給那個區域的名字。兩個都合法、兩個都是他打的，而疊起來的那個字誰都
+    沒有打算要。
+
+    ⚠ **只看相鄰的重複。** `epi_center_epi` 那種（同一個字隔開出現兩次）是
+    另一回事：區域 `epi` 的 center 那半，跟一個叫 `epi` 的 output_prefix ——
+    讀起來繞口，但它講的是兩件不同的事。這一支問的是「有沒有一個字白寫了」。
+
+    ⚠ **只在使用者填了 `output_prefix` 的時候查。** 那一格是他唯一改得動的
+    東西 —— 沒填的話這條 warning 給不出任何他做得到的動作，而一條沒有後果的
+    提醒會把真的那一條一起教成雜訊（推廣鐵則）。
+    """
+    own = str(params.get("output_prefix", "") or "").strip()
+    if not own:
+        return []
+    out: List[str] = []
+    try:
+        names = list(step_cls.resolve_features(params))
+    except Exception:  # 卡片自己的程式；lint 不准比它守的東西更會壞
+        return []
+    for name in names:
+        parts = str(name).split("_")
+        if any(a == b for a, b in zip(parts, parts[1:])):
+            out.append(str(name))
+    return out
+
+
 def _outcome_issues(decide: "DecideSpec") -> List["Issue"]:
     """「哪一類是好消息」標錯或標不一致（F119）。
 
@@ -3954,6 +3984,27 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 code="half-configured", level="warning", node_id=nid,
                 title=f"{step_cls.label} will run, but check this",
                 detail=str(msg)))
+
+        # **同一個字連著出現兩次**（F117 F5）。出貨的均勻度 recipe 寫出來的
+        # 欄名是 `cells_cells_area_px` —— 一次是 `output_prefix`，一次是這張
+        # 卡自己給那個區域的名字。
+        #
+        # ⚠ **不改組名字的規則**（「遇到同名不疊」）。那條規則改一個字，全
+        # repo 的特徵名就換一批：分數表達式要遷移、黃金值要重錄，而換來的是
+        # 一個**看不見的**行為（下一個人讀 `full_prefix` 不會知道有這回事）。
+        # 一條講得出後果的 warning 便宜得多，而且它擋得住**每一張卡**，不只
+        # 被走查點到的那一張。
+        for name in _doubled_names(step_cls, clean_params[nid]):
+            issues.append(Issue(
+                code="doubled-prefix", level="warning", node_id=nid,
+                param="output_prefix", names=(name,),
+                title="This card repeats a word in its column names",
+                advice=("Clear the name you put in front of the results, or "
+                        "use a different one - this card already puts the "
+                        "region's name there."),
+                detail=("node '%s': the column %r repeats a word; clear "
+                        "'output_prefix' or pick a different one"
+                        % (nid, name))))
 
     # ---- 區域線的來源埠要填（F42 B1）----
     # 方案 B 之後區域線跟影像線住在同一個 ``edges`` 裡，而它們**兩個埠的分工

@@ -18,7 +18,9 @@
   "nodes": {
     "load": {
       "step": "load_patch",
-      "params": {},
+      "params": {
+        "carry": "XREL,YREL"
+      },
       "enabled": true
     },
     "norm_ref": {

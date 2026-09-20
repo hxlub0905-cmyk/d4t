@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import sys
@@ -364,17 +363,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         print(f"→ JSON：{args.out}")
     if args.csv:
-        feat_keys: List[str] = sorted({k for r in payload for k in r.get("features", {})})
-        with open(args.csv, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.writer(f)
-            w.writerow(["defect_id", "ok", "error", "score", "bin"] + feat_keys)
-            for r in payload:
-                feats = r.get("features", {})
-                w.writerow(
-                    [r["defect_id"], r["ok"], r.get("error") or "", r.get("score"), r.get("bin")]
-                    + [feats.get(k) for k in feat_keys]
-                )
-        print(f"→ CSV：{args.csv}")
+        # ⚠ **這裡以前有一份手抄的 CSV writer**（F117 F3 查到）。F117 F1 修
+        # 「表頭裡 `score` 出現兩次」的時候數到三個寫檔的地方（`write_csv`、
+        # xlsx 的明細頁、HTML 報表）—— 而這是**第四份**，它沒有被數到，所以
+        # `d4t run --csv` 寫出來的表頭到今天還是重複的。
+        #
+        # 那正是 CLAUDE.md §0 那句話：**抄第二份出來的那份一定會漂。**
+        # 走同一支之後這裡順便拿到另外三份早就有的東西：`ok` 是 1/0（不是
+        # Python 的 `True`）、非有限的數字寫成空格（NaN 進 CSV 是個陷阱）。
+        from d4t.core.export import write_csv
+
+        print(f"→ CSV：{write_csv(payload, args.csv)}")
 
     # ---- Output 段：跨顆那一層（F16）------------------------------------
     # **這裡才叫，試跑那條路不叫**（使用者定調：「試跑不寫，只有整批才寫」）。

@@ -68,8 +68,11 @@ def recipe_for(folder, glv=None, **over):
             "load": RecipeNode("load", "load_single", {"out": "single"}),
             "roi": RecipeNode("roi", "roi_reference", {
                 "method": "stripes in the image", "source": "single",
-                "roi_out": "cells", "place": "crossing", "pick": "none",
-                "output_prefix": "cells"}),
+                # ⚠ **不填 `output_prefix`**（F117 F5）。這份 fixture 本來
+                # 跟出貨的 recipe 一樣填了 `"cells"`，而 ROI 卡的 base 名裡
+                # 已經有區域名了 —— 疊起來是 `cells_cells_area_px`。
+                # 新的 `doubled-prefix` lint 當場咬住這一份。
+                "roi_out": "cells", "place": "crossing", "pick": "none"}),
             "glv": RecipeNode("glv", "glv_stats", gp),
             "out": RecipeNode("out", "output_uniformity", params),
         },

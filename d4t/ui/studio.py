@@ -3291,6 +3291,14 @@ class StudioWindow(QMainWindow):
             self._status("Loaded recipe “%s”, but it has no '%s' route — "
                          "preview and trial runs will fail."
                          % (self.model.recipe_id, ds_kind))
+        # **換 recipe 也要重填 `carry`**（F117 F3 查到的洞）。以前只有「換一份
+        # 資料」與「改那一格」會填 —— 於是「先開 lot、再開一份有勾 `carry` 的
+        # recipe」那條路上，那幾欄從來沒有被填過，而症狀是**每一顆都失敗**，
+        # 訊息說「這份 lot 沒有那個欄位，它有的是：(nothing)」。
+        #
+        # ⚠ 那句話看起來像 KLARF 的問題，而它其實是「沒有人去填」。出貨的
+        # recipe 打開座標的那一刻，`test_ui_template_library` 當場抓到。
+        self.attach_ctl._carry_main_columns()
         self.refresh_preview(sync=sync, force=False)
         return True
 

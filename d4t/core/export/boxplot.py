@@ -74,6 +74,21 @@ def box_stats(values: Sequence[Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+#: **圖標題放哪、多粗**（F117 F8）—— 四張圖共用一份。
+#:
+#: 走查記的是「Box plot 標題靠左、其他置中」。兩種都好看，而**同一頁上兩種
+#: 就是不對**：眼睛會以為那是兩類東西。選靠左的理由有兩個 ——
+#:
+#: * 盒鬚圖的副標就在標題正下方、而且是靠左的；標題置中會把那一對拆開。
+#: * 那一頁是**一疊圖**，上面還有標題與一張表，全部靠左 —— 置中的圖標題在
+#:   那一疊裡是唯一一個不對齊的東西。
+#:
+#: ⚠ 這兩個常數住在 `boxplot.py` 是因為 `uniformity_charts` import 它（反過來
+#: 是循環，見那一邊 `_fill` 的說明）。
+TITLE_X = 20
+TITLE_WEIGHT = "600"
+
+
 def _nice_ticks(lo: float, hi: float, want: int = 5) -> List[float]:
     """好讀的刻度（1 / 2 / 5 × 10ⁿ）。"""
     if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
@@ -194,11 +209,12 @@ def build_boxplot_svg(series: Sequence[Dict[str, Any]], title: str = "",
                     '<rect width="%d" height="%d" fill="#fff"/>'
                     % (width, height)]
     if title:
-        o.append('<text x="%d" y="18" font-size="13" font-weight="600" '
-                 'fill="%s">%s</text>' % (pad_l - 46, _TEXT, _esc(title)))
+        o.append('<text x="%d" y="18" font-size="13" font-weight="%s" '
+                 'fill="%s">%s</text>'
+                 % (TITLE_X, TITLE_WEIGHT, _TEXT, _esc(title)))
     if subtitle:
         o.append('<text x="%d" y="%d" font-size="11" fill="%s">%s</text>'
-                 % (pad_l - 46, 32 if title else 16, _MUTED, _esc(subtitle)))
+                 % (TITLE_X, 32 if title else 16, _MUTED, _esc(subtitle)))
     if not live:
         o.append('<text x="%d" y="%d" font-size="12" fill="%s">no numbers to '
                  'plot</text>' % (pad_l, pad_t + plot_h / 2, _MUTED))
@@ -332,8 +348,21 @@ def build_boxplot_page(charts: Sequence[Dict[str, Any]], title: str,
          "h1{font-size:18px;margin:0 0 4px}",
          ".sub{color:#666;font-size:12px;margin:0 0 18px}",
          ".note{color:#666;font-size:12px;margin:0 0 20px;max-width:60em}",
-         "figure{margin:0 0 26px}",
+         "figure{margin:0}",
+         # **寬的頁面排兩欄**（F117 F7）。走查記的是「四張圖單欄，寬頁右半
+         # 空白」—— 那四張圖問的是同一張影像的四個面向，而使用者是拿它們
+         # **互相對照**的：一張在螢幕上、一張要捲下去，等於沒有並排。
+         #
+         # ⚠ **用 `auto-fit` 而不是寫死兩欄**：窄的頁面（筆電、投影、印出來
+         # 的 A4）自己收回一欄，不必判斷誰在看。一張圖的那一頁也照樣是一欄
+         # —— 它本來就只有一欄可排。
+         #
+         # 560px 是那幾張 SVG（640 寬）縮到還讀得出刻度的寬度；再窄就寧可
+         # 排一欄，因為**讀不到刻度的兩張圖不如一張讀得到的**。
+         ".sheet{display:grid;gap:26px;"
+         "grid-template-columns:repeat(auto-fit,minmax(560px,1fr))}",
          "svg.boxplot{display:block;max-width:100%;height:auto}",
+         "figure svg{display:block;max-width:100%;height:auto}",
          # 呼叫端補的樣式（F86：均勻度那一頁的摘要表）。版型仍然只有一份 ——
          # 兩頁會並排在同一個報表資料夾裡。
          str(extra_css or ""),
@@ -350,6 +379,7 @@ def build_boxplot_page(charts: Sequence[Dict[str, Any]], title: str,
     if not charts:
         o.append("<p class='note'>Nothing to plot: none of the numbers you "
                  "picked came out of this run.</p>")
+    o.append("<div class='sheet'>")
     for ch in charts or []:
         # 已經畫好的就直接放（F85：均勻度那四種圖不是盒鬚圖，但**版型只有
         # 一份** —— 兩頁會並排在同一個報表資料夾裡，字級不一樣的那天沒有人
@@ -358,5 +388,6 @@ def build_boxplot_page(charts: Sequence[Dict[str, Any]], title: str,
         o.append("<figure>%s</figure>" % (ready or build_boxplot_svg(
             ch.get("series") or [], title=str(ch.get("title", "")),
             subtitle=str(ch.get("subtitle", "")))))
+    o.append("</div>")
     o.append("</body></html>")
     return "\n".join(o)

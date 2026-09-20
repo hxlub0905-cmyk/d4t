@@ -53,12 +53,13 @@ import numpy as np
 # 抄一份：刻度算法漂掉的那天，同一份報表上兩張圖的軸會對不起來。
 # （第三個消費者出現的時候，該做的是把它們搬進 `export/svg.py`，不是再抄一份。）
 from .boxplot import (  # 見上
-    _esc, _fmt, _nice_ticks, build_boxplot_svg,
+    TITLE_WEIGHT, TITLE_X, _esc, _fmt, _nice_ticks, build_boxplot_svg,
 )
 
 __all__ = [
     "resolve_style", "SEQ_RAMP", "seq_hex",
     "CHARTS", "CHART_LABELS", "REGION_COLOURS", "AXES", "UNIF_COLUMNS",
+    "summary_columns",
     "chart_series", "build_chart_svg", "build_charts_page",
     "summary_rows", "build_index_page",
 ]
@@ -466,6 +467,23 @@ def _is_dark(hex_colour: str) -> bool:
     return (0.299 * r + 0.587 * g + 0.114 * b) < 140.0
 
 
+def _pos_labels(values: Sequence[float]) -> List[str]:
+    """熱圖那兩條軸上的刻度字（F117 F8）—— **像素位置要取整**。
+
+    走查記的是 `27.50`。那個 .5 是真的（框中心落在半個像素上），但它**不是
+    資訊**：沒有人會去看一個框的中心是 24 還是 24.5，他看的是「左邊那一區比
+    右邊暗」。多出來的兩位數字把一排刻度撐寬，而撐寬的代價是刻度變少。
+
+    ⚠ **取整之後兩個刻度撞在一起就不取整。** 框只有幾個像素寬的時候（模板
+    很小、或影像被縮過），整數分不開相鄰兩欄 —— 那時候印兩個一樣的數字比印
+    `24.50` 糟得多，因為它看起來像畫錯了。
+    """
+    rounded = ["%d" % int(round(float(v))) for v in values]
+    if len(set(rounded)) == len(set(float(v) for v in values)):
+        return rounded
+    return [_fmt(float(v)) for v in values]
+
+
 def _slot_labels(o: List[str], centers: Sequence[float], origin: float,
                  step: float, at: float, style: Dict[str, Any],
                  horizontal: bool = True) -> None:
@@ -481,19 +499,21 @@ def _slot_labels(o: List[str], centers: Sequence[float], origin: float,
     key = "xticks" if horizontal else "yticks"
     want = max(2, min(int(style.get(key, 5) or 5), n))
     size = min(size, 11.0)
+    picked = [int(round(k * (n - 1) / max(1, want - 1))) for k in range(want)]
+    label = _pos_labels([centers[i] for i in picked])
     for k in range(want):
-        i = int(round(k * (n - 1) / max(1, want - 1)))
+        i = picked[k]
         pos = origin + step * (i + 0.5)
         if horizontal:
             o.append("<text x='%.1f' y='%.1f' font-size='%g' font-weight='%s' "
                      "fill='%s' text-anchor='middle'>%s</text>"
                      % (pos, at + size + 4, size, weight, ink,
-                        _esc(_fmt(centers[i]))))
+                        _esc(label[k])))
         else:
             o.append("<text x='%.1f' y='%.1f' font-size='%g' font-weight='%s' "
                      "fill='%s' text-anchor='end'>%s</text>"
                      % (at - 6, pos + size * 0.35, size, weight, ink,
-                        _esc(_fmt(centers[i]))))
+                        _esc(label[k])))
 
 
 def heat_hex(t: float) -> str:
@@ -657,9 +677,11 @@ def _head(width: int, height: int, title: str) -> List[str]:
          "viewBox='0 0 %d %d'>" % (width, height, width, height),
          "<rect width='%d' height='%d' fill='#fff'/>" % (width, height)]
     if title:
-        o.append("<text x='%d' y='20' font-size='13' fill='%s' "
-                 "text-anchor='middle'>%s</text>"
-                 % (width // 2, _TEXT, _esc(title)))
+        # **靠左，跟盒鬚圖同一套**（F117 F8）—— 同一頁上兩種對齊就是不對。
+        # 那兩個常數住在 `boxplot.py`（見它們的說明）。
+        o.append("<text x='%d' y='20' font-size='13' font-weight='%s' "
+                 "fill='%s'>%s</text>"
+                 % (TITLE_X, TITLE_WEIGHT, _TEXT, _esc(title)))
     return o
 
 
@@ -726,6 +748,29 @@ def _svg_histogram(series: Dict[str, Any], style: Dict[str, Any],
     return "".join(o)
 
 
+def _line_legend(o: List[str], rows: Sequence[Tuple[str, str, str]],
+                 x: float, y: float) -> None:
+    """**三種線各是什麼**（F117 F8）—— ``[(顏色, dasharray, 名字)]``。
+
+    走查記的是「Position profile 虛線／點線無圖例」。那張圖上有三種線：實線
+    是 profile（**讀平不平的就是它**）、粗虛線是趨勢、細點線是那一群的平均。
+    以前只有趨勢線有一句話（斜率），另外兩條要讀原始碼才知道 —— 而這張圖是
+    寄給別人看的。
+
+    ⚠ **畫一小段真的線，不是一個色塊**。`_legend` 那種方塊分不出虛實 ——
+    而這裡要分的正好就是虛實。
+    """
+    cur = float(x)
+    for colour, dash, name in rows:
+        o.append("<line x1='%.1f' y1='%.1f' x2='%.1f' y2='%.1f' stroke='%s' "
+                 "stroke-width='1.6'%s/>"
+                 % (cur, y - 3, cur + 16, y - 3, colour,
+                    " stroke-dasharray='%s'" % dash if dash else ""))
+        o.append("<text x='%.1f' y='%.1f' font-size='10' fill='%s'>%s</text>"
+                 % (cur + 20, y, _MUTED, _esc(name)))
+        cur += 20 + len(name) * 5.4 + 14
+
+
 def _legend(o: List[str], groups: Sequence[Dict[str, Any]],
             x: float, y: float) -> None:
     """一群一個色塊 ＋ 名字 ＋ **n**（框數）。
@@ -774,7 +819,9 @@ def _svg_profile(series: Dict[str, Any], style: Dict[str, Any],
 
     pad_l, pad_r = 62, 16
     pad_t = 30 if style.get("title") else 12
-    pad_b = 56
+    # 56 → 70：底下現在是**兩行**（圖例一行、斜率一行）。少了這 14 px，
+    # 斜率那一句會被畫到 viewBox 外面 —— SVG 不會報錯，它只是不見了。
+    pad_b = 70
     pw = max(80, width - pad_l - pad_r)
     ph = max(80, height - pad_t - pad_b)
     o = _head(width, height, str(style.get("title") or ""))
@@ -836,8 +883,21 @@ def _svg_profile(series: Dict[str, Any], style: Dict[str, Any],
     _xlabels(o, _nice_ticks(plo, phi, int(style.get("xticks") or 5)),
              sx, pad_t + ph + 11, style)
     draw_refs(o, style, lo, hi, pad_l, pad_t, pw, ph)
+    # **三種線各是什麼**（F117 F8）。斜率那一句留著 —— 它是一個數字，而圖例
+    # 講的是「哪一條是哪一條」，兩件不同的事。
+    # ⚠ **好幾群的時候圖例用中性色。** 一群的時候拿那一群的顏色是對的（圖上
+    # 就那一個顏色），好幾群的時候那個色塊會變成一句假話 —— 它看起來像在說
+    # 「這個顏色＝profile」，而每一群各有各的顏色。圖例講的是**線的樣子**，
+    # 誰是誰由那一行斜率上的名字講。
+    one = groups[0]["colour"] if len(groups) == 1 else _MUTED
+    _line_legend(o, [
+        (_mark_colour(style, "line", one) if len(groups) == 1 else _MUTED,
+         "", "profile"),
+        (_TREND, "6 4", "trend"),
+        (one, "2 3", "group average"),
+    ], pad_l, pad_t + ph + 32)
     o.append("<text x='%.1f' y='%.1f' font-size='10' fill='%s'>slope %s</text>"
-             % (pad_l, pad_t + ph + 32, _TREND, _esc("; ".join(notes))))
+             % (pad_l, pad_t + ph + 46, _TREND, _esc("; ".join(notes))))
     _axis_names(o, style, width, height, pad_l, pad_t, pw, ph,
                 "box centre %s (px)" % axis.upper(),
                 str(series.get("metric") or "value"))
@@ -1223,16 +1283,36 @@ def _num(value: Any) -> str:
     return _MISSING if value is None else _fmt(float(value))
 
 
+def summary_columns(rows: Sequence[Dict[str, Any]]
+                    ) -> Tuple[Tuple[str, str, str], ...]:
+    """這張表要印哪幾欄（F117 F8）—— **一格數字都沒有的欄不印**。
+
+    走查記的是「摘要表 `range` 為 `-`」。那兩欄之所以空著，是因為 GLV 卡的
+    「How even are the boxes」沒有勾 range —— 也就是**使用者已經回答過了**。
+    印一欄他答過「不要」的問題，等於把那個答案當成一個沒填的空格。
+
+    ⚠ **有一格有值就整欄留著。** 那時候的 `-` 是真的資訊：別的區域量得到，
+    這一個量不到。兩種 `-` 長得一樣，而意思差很遠 —— 分得開它們的唯一辦法
+    就是「整欄都沒有」才拿掉。
+    """
+    keep = []
+    for col in UNIF_COLUMNS:
+        if any(r.get("cells", {}).get(col[0]) is not None for r in rows):
+            keep.append(col)
+    return tuple(keep)
+
+
 def build_summary_html(rows: Sequence[Dict[str, Any]]) -> str:
     """:func:`summary_rows` → 一小塊 HTML（沒有列就回空字串）。"""
     if not rows:
         return ""
+    columns = summary_columns(rows)
     head = "".join("<th>%s<span>%s</span></th>" % (_esc(h), _esc(u))
-                   for _k, h, u in UNIF_COLUMNS)
+                   for _k, h, u in columns)
     body = []
     for r in rows:
         cells = "".join("<td>%s</td>" % _esc(_num(r["cells"].get(k)))
-                        for k, _h, _u in UNIF_COLUMNS)
+                        for k, _h, _u in columns)
         body.append("<tr><th class='r'>%s</th><td class='m'>%s</td>%s"
                     "<td class='m'>%d</td></tr>"
                     % (_esc(r["name"]), _esc(r["metric"]), cells,
@@ -1280,8 +1360,11 @@ def build_index_page(entries: Sequence[Dict[str, Any]], title: str,
         o.append("<p class='sub'>%s</p>" % _esc(subtitle))
     if not entries:
         o.append("<p class='sub'>Nothing was drawn.</p>")
+    # **整份都沒量到的欄不印**（F117 F8）—— 同 `build_summary_html`，而這裡
+    # 問的是「整批」：一顆都沒有那一欄的話，索引頁上那一欄整條都是 `-`。
+    columns = summary_columns([r for e in entries for r in (e.get("rows") or [])])
     head = "".join("<th>%s<span>%s</span></th>" % (_esc(h), _esc(u))
-                   for _k, h, u in UNIF_COLUMNS)
+                   for _k, h, u in columns)
     o.append("<table class='unif'><thead><tr><th>defect</th><th>region</th>"
              "%s<th>boxes</th></tr></thead><tbody>" % head)
     for e in entries:
@@ -1292,11 +1375,11 @@ def build_index_page(entries: Sequence[Dict[str, Any]], title: str,
         if not rows:
             o.append("<tr><th class='r'>%s</th><td class='m'>%s</td>%s</tr>"
                      % (link, _MISSING,
-                        "<td>%s</td>" % _MISSING * (len(UNIF_COLUMNS) + 1)))
+                        "<td>%s</td>" % _MISSING * (len(columns) + 1)))
             continue
         for i, r in enumerate(rows):
             cells = "".join("<td>%s</td>" % _esc(_num(r["cells"].get(k)))
-                            for k, _h, _u in UNIF_COLUMNS)
+                            for k, _h, _u in columns)
             first = ("<th class='r' rowspan='%d'>%s</th>" % (span, link)
                      if i == 0 else "")
             o.append("<tr>%s<td class='m'>%s</td>%s<td>%d</td></tr>"

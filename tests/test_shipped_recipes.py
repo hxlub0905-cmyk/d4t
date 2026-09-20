@@ -32,7 +32,10 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
-from d4t.core.ingest.dataset import load_dataset              # noqa: E402
+from d4t.core.ingest.dataset import (                        # noqa: E402
+    fill_fields, load_dataset,
+)
+from d4t.core.steps.load import columns_for_main             # noqa: E402
 from d4t.core.pipeline import Recipe, run_batch, validate    # noqa: E402
 from d4t.core.pipeline.batch import run_batch_steps          # noqa: E402
 
@@ -124,12 +127,30 @@ _PLACES = (("roi_on_pattern", "on_pattern", "crossing"),
            ("roi_between_rows", "between_rows", "between_horizontal"))
 
 
+def _carry(ds, recipe):
+    """把 Load 卡的 `carry` 點名的欄位填進每一顆 —— **兩個入口都做這件事**。
+
+    ⚠ **`run_batch` 自己不做。** CLI（`__main__._carry_main_columns`）與
+    Studio（`attach_sources._carry_main_columns`）各自在跑之前填，而直接叫
+    `run_batch` 的人（這支測試、`tools/bench.py`）得自己來 —— 少了這一步，
+    一份設了 `carry` 的 recipe 每一顆都會失敗，而訊息是「這份 KLARF 沒有那
+    個欄位，它有的是：(nothing)」。
+
+    F117 F3 把出貨的兩份 recipe 的座標打開時就是這樣紅的 —— 看起來像 recipe
+    壞了，其實是**這支測試走的不是產品走的那條路**。
+    """
+    want = columns_for_main(getattr(recipe, "nodes", None) or {})
+    if want:
+        fill_fields(ds, want)
+    return ds
+
+
 def _rsem_lot(tmp_path, n=12, seed=11):
     from make_sample_rsem import generate
 
     made = generate(str(tmp_path / "rsem"), n=n, seed=seed)
     gt = json.loads(Path(made["ground_truth"]).read_text(encoding="utf-8"))
-    return load_dataset(made["klarf"]), gt
+    return _carry(load_dataset(made["klarf"]), Recipe.load(RSEM)), gt
 
 
 def _rsem(folder):
@@ -350,7 +371,7 @@ def _ebi_lot(tmp_path, n=24, seed=7):
 
     made = generate(str(tmp_path / "ebi"), n=n, seed=seed)
     gt = json.loads(Path(made["ground_truth"]).read_text(encoding="utf-8"))
-    return load_dataset(made["klarf"]), gt
+    return _carry(load_dataset(made["klarf"]), Recipe.load(EBI)), gt
 
 
 def _ebi(folder):

@@ -35,8 +35,7 @@
         "pick": "none",
         "drop_edge": true,
         "edge_margin": 4.0,
-        "max_boxes": 8192,
-        "output_prefix": "cells"
+        "max_boxes": 8192
       },
       "enabled": true
     },
