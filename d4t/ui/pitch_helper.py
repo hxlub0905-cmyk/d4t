@@ -753,7 +753,14 @@ class _PitchWorker(QThread):
 #: 一格常常只有 40–80 px，原尺寸在螢幕上小到看不出糊不糊 —— 而「看得出糊不糊」
 #: 正是它存在的唯一理由。150 是「放大得夠看出邊緣」與「右欄還排得下一致性
 #: 那一格」之間量出來的那個值。
-CELL_BOX = 150
+#: ⚠ **150 → 175**（第十輪）。把證據搬到答案底下之後，面板短了，底下多出
+#: 122 px 的留白 —— 而這張圖是**唯一一個「多幾個像素就是多一點證據」**的東西
+#: （使用者要從它判斷邊緣是清楚還是糊的）。
+#: ⚠ **165 是量出來的，不是挑的。** 右欄那一條 Bar 要 118 ＋ 46 的數字欄 =
+#: 164，而 Qt 在空間不夠時**就是會重疊，不會報錯**（這個面板第一版踩過）。
+#: 實測：175 的時候圖片右緣 x=984、右欄從 x=987 開始 —— **只剩 3 px**，
+#: 換一個字型或 DPI 就疊了。165 留 13 px。
+CELL_BOX = 165
 
 
 class PitchHelperWindow(QMainWindow):
@@ -1001,6 +1008,34 @@ class PitchHelperWindow(QMainWindow):
         self.grid_answer.setColumnStretch(1, 1)
         self.grid_answer.setColumnStretch(3, 1)
         lay.addLayout(self.grid_answer)
+
+        # ---- pixel size：**緊貼著它換算出來的那一行** ----------------------
+        # ⚠ 它本來有自己的 `Units` 區段，排在整個面板的最下面 —— 而它產生的
+        # `0.150 µm` 在最上面。量出來是 **552 px**：一個輸入跟它的效果能隔多遠
+        # 就隔多遠，而那個區段標題還跟「疊起來那一格」一樣大聲。
+        # 現在它是 µm 那一行底下一個安靜的小框，沒有標題。
+        unit = QHBoxLayout()
+        unit.addStretch(1)
+        self.spin_nm = QDoubleSpinBox(box)
+        self.spin_nm.setRange(0.0, 1e6)
+        self.spin_nm.setDecimals(3)
+        self.spin_nm.setSingleStep(0.1)
+        self.spin_nm.setSuffix(" nm/px")
+        self.spin_nm.setSpecialValueText("pixel size not known")
+        self.spin_nm.setKeyboardTracking(False)   # 打字中途不重算
+        self.spin_nm.setToolTip(
+            "How many nanometres one pixel is, from the tool's settings. Fill "
+            "it in and the pitch also comes out in micrometres.")
+        # ⚠ **不要跟 Copy 一樣重。** 它是答案的一個附註（「這是用什麼換算的」），
+        # 不是一個動作；滿框的輸入盒擺在信心長條跟 Copy 中間會把答案那一塊
+        # 切成兩半。
+        self.spin_nm.setObjectName("pitchPixelSize")
+        self.spin_nm.setMaximumWidth(146)
+        self.spin_nm.setAlignment(Qt.AlignCenter)
+        self.spin_nm.valueChanged.connect(lambda _v: self._fill_answer())
+        unit.addWidget(self.spin_nm)
+        unit.addStretch(1)
+        lay.addLayout(unit)
         # **把答案帶得走** —— 而且它要**貼著那個答案**。
         # 第一版這顆鈕住在下面的 Units 那一段，於是使用者問「copy 是 copy 誰？」
         # ——  一顆按鈕的意思是它旁邊那個東西，不是它自己的字。
@@ -1013,6 +1048,18 @@ class PitchHelperWindow(QMainWindow):
         row_copy.addWidget(self.btn_copy)
         row_copy.addStretch(1)
         lay.addLayout(row_copy)
+
+        # ---- 憑什麼相信它：疊出來的 Golden Cell -----------------------------
+        # ⚠ **它要緊貼著答案，因為它們回答的是同一個問題。**
+        # 本來上面是「60 × 44 px，信心 92/93」，而這一塊在 **377 px 之下**，
+        # 中間隔著兩個設定區 —— 使用者要判斷「這個數字對不對」得上看、下看、
+        # 再上看。信心長條跟這張疊出來的圖是一組證據，不是兩件事。
+        #
+        # ⚠ 標題走 `_section`（跟其他段同一種長相），卡片本身**不帶標題**。
+        # 第一版是 `QGroupBox` 自己的標題樣式，於是同一個畫面上有兩種分段長相
+        # —— 而「排版很怪」多半就是這種不一致累積出來的。
+        lay.addWidget(self._section(box, "Stacked cell — sharp means it is right"))
+        lay.addWidget(self._proof_box(box))
 
         # ---- 哪個方向 -----------------------------------------------------
         lay.addWidget(self._section(box, "Which way it repeats"))
@@ -1056,31 +1103,6 @@ class PitchHelperWindow(QMainWindow):
         self._try_buttons: List[QPushButton] = []
         self.row_try.addStretch(1)
         lay.addLayout(self.row_try)
-
-        # ---- 憑什麼相信它：疊出來的 Golden Cell -----------------------------
-        # ⚠ 標題走 `_section`（跟其他三段同一種長相），卡片本身**不帶標題**。
-        # 第一版是 `QGroupBox` 自己的標題樣式，於是同一個畫面上有兩種分段長相
-        # —— 而「排版很怪」多半就是這種不一致累積出來的。
-        lay.addWidget(self._section(box, "Stacked cell — sharp means it is right"))
-        lay.addWidget(self._proof_box(box))
-
-        # ---- 單位 ---------------------------------------------------------
-        lay.addWidget(self._section(box, "Units"))
-        unit = QHBoxLayout()
-        self.spin_nm = QDoubleSpinBox(box)
-        self.spin_nm.setRange(0.0, 1e6)
-        self.spin_nm.setDecimals(3)
-        self.spin_nm.setSingleStep(0.1)
-        self.spin_nm.setSuffix(" nm/px")
-        self.spin_nm.setSpecialValueText("pixel size not known")
-        self.spin_nm.setKeyboardTracking(False)   # 同上：打字中途不重算
-        self.spin_nm.setToolTip(
-            "How many nanometres one pixel is, from the tool's settings. Fill "
-            "it in and the pitch also comes out in nanometres.")
-        self.spin_nm.valueChanged.connect(lambda _v: self._fill_answer())
-        unit.addWidget(self.spin_nm)
-        unit.addStretch(1)
-        lay.addLayout(unit)
 
         # ---- 細節：**預設收起來** -------------------------------------------
         # 使用者要得到「每個方法的分數」，但同一輪也說了「不要看一堆文字」。
@@ -1495,7 +1517,16 @@ class PitchHelperWindow(QMainWindow):
         self.lab_try.setVisible(bool(cands))
         for px, py in cands:
             b = QPushButton(candidate_label(px, py, flags), self.lab_try.parentWidget())
-            b.setProperty("variant", "secondary")
+            # ⚠ **候選是備案，不是動作。** 這裡本來是 `secondary`（藍框），
+            # 而右欄那時有 8 顆可見按鈕**全部同一個 variant** —— 藍色在這個
+            # app 是 accent（「這是動作」），全部 accent 等於沒有 accent。
+            # 而這四顆是畫面上最不重要的東西（「萬一取錯了」），卻是最吵的
+            # 一叢。`ghost` 讓它們退回背景，點得到但不搶戲。
+            # ⚠ `ghost` 是次要文字色 —— 實拍出來那四顆跟旁邊的 "Or try" 一樣
+            # 灰，看起來像**死掉的文字**，而它們是點得下去的。保留 accent 的
+            # **字色**（那一句才是「可以點」），只拿掉框。
+            b.setProperty("variant", "ghost")
+            b.setProperty("clickableText", "true")
             # 一排四顆要塞進 380 px：留白收掉，字才不會被切成 "L20 × 44"。
             b.setStyleSheet("padding-left:6px;padding-right:6px;")
             b.setToolTip(

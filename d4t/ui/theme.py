@@ -881,6 +881,23 @@ QPushButton[variant="ghost"] {
     background: transparent; color: $text_secondary; border: $hairline solid transparent;
 }
 QPushButton[variant="ghost"]:hover { background: $hover_warm; color: $text_primary; }
+/* A ghost button that is still an action: no box, but the accent text colour
+   says it can be clicked (F120). Plain ghost is $text_secondary, which next to
+   a grey caption reads as dead text - and these are the "try this instead"
+   candidates, which are the one thing on the panel a lost user should click. */
+QPushButton[variant="ghost"][clickableText="true"] {
+    color: $accent_active; font-weight: 600;
+}
+QPushButton[variant="ghost"][clickableText="true"]:hover {
+    background: $accent_bg; color: $accent_active;
+}
+/* The pixel size is a footnote on the answer, not an action: flat, quiet, and
+   it stops looking like a peer of the Copy button sitting under it. */
+QDoubleSpinBox#pitchPixelSize {
+    background: transparent; border: $hairline solid $border_default;
+    color: $text_secondary;
+}
+QDoubleSpinBox#pitchPixelSize:focus { background: $bg_input; color: $text_primary; }
 QPushButton[variant="danger"] {
     background: $danger_bg; color: $danger_text; border: $hairline solid $danger_border;
     font-weight: 600;

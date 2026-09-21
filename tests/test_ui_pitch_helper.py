@@ -966,10 +966,20 @@ def test_the_copy_button_sits_with_the_thing_it_copies(win, ph, app):
     win.resize(1180, 780)
     win.show()
     app.processEvents()
-    answer_y = win.lab_big.mapTo(win, win.lab_big.rect().topLeft()).y()
-    copy_y = win.btn_copy.mapTo(win, win.btn_copy.rect().topLeft()).y()
-    units_y = win.spin_nm.mapTo(win, win.spin_nm.rect().topLeft()).y()
-    assert answer_y < copy_y < units_y, (answer_y, copy_y, units_y)
+    # ⚠ 這一條本來寫的是 `answer < copy < units`，而 `units` 是「最底下那個
+    # 區段」的代名詞。第十輪把 pixel size 搬到答案裡面之後那個代名詞就不成立了
+    # —— **但這一條要守的事沒有變**：Copy 要待在答案那一塊裡，不是被推到某個
+    # 區段後面。所以改問「它在第一條區段標題之前嗎」，那才是「同一塊」的意思。
+    from PySide6.QtWidgets import QLabel
+
+    def top(w):
+        return w.mapTo(win, w.rect().topLeft()).y()
+
+    first_section = min(
+        top(lab) for lab in win.findChildren(QLabel)
+        if lab.objectName() == "paramSection" and not lab.isHidden())
+    assert top(win.lab_big) < top(win.btn_copy) < first_section, (
+        top(win.lab_big), top(win.btn_copy), first_section)
 
 
 def test_the_copy_button_says_what_it_will_copy(win, ph):
@@ -1296,3 +1306,81 @@ def test_a_glyph_button_leaves_room_for_its_glyph(app, ph):
         assert 'QPushButton#primary[hasGlyph="true"]' in qss
     finally:
         win.close()
+
+
+# --------------------------------------------------------------------------- #
+# 13. 版面：注意力的分配（F120 第十輪）
+# --------------------------------------------------------------------------- #
+def test_only_the_real_actions_get_a_box(win, ph):
+    """⚠ **藍色在這個 app 是 accent =「這是動作」；全部 accent 等於沒有。**
+
+    第十輪之前右欄有 8 顆可見按鈕，**全部 `variant="secondary"`**（藍框、同
+    權重），而其中四顆是 `Or try` 的候選 —— 畫面上最不重要的東西（「萬一取錯
+    了」的備案），卻是最吵的一叢。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    right = win.btn_copy.parentWidget()
+    boxed = [b for b in right.findChildren(QPushButton)
+             if not b.isHidden() and b.property("variant") == "secondary"]
+    assert len(boxed) <= 4, ("有框的鈕太多了", [b.text() for b in boxed])
+    assert win._try_buttons, "這張圖應該有候選"
+    for b in win._try_buttons:
+        assert b.property("variant") == "ghost", b.text()
+        # ⚠ 但**不准變成死掉的文字** —— 純 ghost 是次要色，實拍跟旁邊的
+        # "Or try" 一樣灰，而它們是點得下去的。
+        assert b.property("clickableText") == "true", b.text()
+
+
+def test_the_evidence_sits_with_the_answer(win, ph):
+    """⚠ **信心長條跟那張疊出來的圖回答的是同一個問題。**
+
+    第十輪之前它們相隔 377 px，中間隔著兩個設定區 —— 使用者要判斷「這個數字
+    對不對」得上看、下看、再上看。
+    """
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.resize(1180, 780)
+    win.show()
+    gap = (win.bar_agree.mapTo(win, win.bar_agree.rect().center()).y()
+           - win.lab_big.mapTo(win, win.lab_big.rect().center()).y())
+    assert 0 < gap < 300, ("答案跟證據離太遠", gap)
+
+
+def test_the_pixel_size_sits_with_what_it_converts(win, ph):
+    """⚠ 它本來有自己的 `Units` 區段排在最下面，而它產生的 µm 在最上面 ——
+    量出來是 552 px。一個輸入跟它的效果能隔多遠就隔多遠。"""
+    from PySide6.QtWidgets import QLabel
+
+    def top(w):
+        return w.mapTo(win, w.rect().topLeft()).y()
+
+    win.resize(1180, 780)
+    win.show()
+    assert abs(top(win.spin_nm) - top(win.lab_um)) < 80, "要貼著 µm 那一行"
+    titles = [lab.text() for lab in win.findChildren(QLabel)
+              if lab.objectName() == "paramSection" and not lab.isHidden()]
+    assert "Units" not in titles, ("一個輸入框不值一條區段標題", titles)
+
+
+def test_the_stacked_picture_does_not_overlap_the_column_beside_it(win, ph):
+    """⚠ **Qt 空間不夠時就是會重疊，不會報錯** —— 這個面板第一版踩過。
+
+    `CELL_BOX` 175 的時候實測只剩 3 px 的間隙（圖片右緣 984、右欄 987），
+    換一個字型或 DPI 就疊了。這一條把那個間隙釘住。
+    """
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.resize(1180, 780)
+    win.show()
+    pic = win.cell_view
+    right_edge = pic.mapTo(win, pic.rect().topRight()).x()
+    for w in (win.bar_agree, win.lab_stack, win.chk_median, win.chk_edges):
+        x = w.mapTo(win, w.rect().topLeft()).x()
+        assert x - right_edge >= 8, (w.objectName() or type(w).__name__,
+                                     x, right_edge)
