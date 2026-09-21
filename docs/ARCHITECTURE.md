@@ -405,7 +405,7 @@ d4t/
     │                         #     `python -m d4t simgen`；只做介面，邏輯在
     │                         #     `tools/make_lot_from_gc.py`
     ├── pitch_helper.py       #   **Pitch helper**（F120）：丟一張圖進去，回答它的
-    │                         #     cell period（px，填了 nm/px 就多一欄 nm）。
+    │                         #     cell period（px，填了 nm/px 就多一行 µm）。
     │                         #     `python -m d4t pitch`。⚠ **一行自己的演算法
     │                         #     都沒有**：量週期是 `algo/template.measure_period`
     │                         #     （三票制）、疊 Golden Cell 是

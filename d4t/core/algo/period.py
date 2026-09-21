@@ -7,6 +7,13 @@
 #     with a real phase search (sub-sampled scan over [0, px) x [0, py),
 #     ranked by the stacked cell's raw Laplacian variance).  The old
 #     three-argument call still returns (0, 0) — `image` is opt-in.
+#   - `confidence_at` is new in d4t (F120).  It is not a new algorithm:
+#     it is the tail of `_analyze_axis` (projection -> high-pass -> detrend
+#     -> normalized autocorrelation -> value at the lag) evaluated at a lag
+#     the caller names instead of at the lag the search found, so a period
+#     the user typed can be scored on the *same* 0..100 scale as a measured
+#     one.  Sharing the private helpers is the point: a second copy of this
+#     arithmetic would drift and the two numbers would stop being comparable.
 #   - No other algorithmic changes.
 """Period estimation core.
 
@@ -309,6 +316,55 @@ def estimate_period(image: np.ndarray,
         candidates=candidates,
         warnings=warnings,
     )
+
+
+def confidence_at(image: np.ndarray, lag: float, axis: str = "x") -> float:
+    """How well ``image`` actually repeats every ``lag`` pixels, 0..100.
+
+    This is the number :func:`estimate_period` reports as ``confidence_x`` /
+    ``confidence_y``, only evaluated at a lag **you** name rather than at the
+    one the search picked.  Same projection, same high-pass, same normalized
+    autocorrelation, so the two are on the same scale and can be compared:
+    if you type a period and get 40 where the measured one scored 92, the
+    image really does repeat better at the measured one.
+
+    ``axis`` is ``"x"`` (repeats across) or ``"y"`` (repeats down).
+    Returns ``0.0`` for a lag that cannot be scored at all (too small, longer
+    than the image, or a projection with no modulation in it).
+
+    Sub-pixel lags are interpolated linearly between the two whole lags they
+    sit between - the autocorrelation is only defined on whole-pixel lags,
+    and F105 made periods like ``79.5`` reachable.
+    """
+    try:
+        gray = _to_gray(image)
+    except Exception:
+        return 0.0
+    if gray.ndim != 2 or gray.size == 0:
+        return 0.0
+    lag = float(lag or 0.0)
+    if lag < 2.0:
+        return 0.0
+
+    prof = gray.mean(axis=0) if str(axis).lower() != "y" else gray.mean(axis=1)
+    n = prof.size
+    if n < 8 or lag > n / 2.0:
+        return 0.0
+    if float(prof.std()) < _MODULATION_STD_FLOOR:
+        return 0.0
+
+    detrended = _highpass(prof, max(3, n // 4))
+    detrended = detrended - detrended.mean()
+    if not np.any(detrended):
+        return 0.0
+
+    ac = _autocorr(detrended)
+    lo_i = int(np.floor(lag))
+    if lo_i < 1 or lo_i + 1 >= ac.size:
+        return 0.0
+    frac = lag - lo_i
+    val = float(ac[lo_i]) * (1.0 - frac) + float(ac[lo_i + 1]) * frac
+    return round(float(np.clip(val, 0.0, 1.0)) * 100.0, 1)
 
 
 def _build_candidates(px: Optional[int], py: Optional[int],

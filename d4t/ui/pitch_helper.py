@@ -79,6 +79,7 @@ from PySide6.QtWidgets import (
     QLabel, QMainWindow, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
+from d4t.core.algo import period as algo_period
 from d4t.core.algo import period2d as algo_period2d
 from d4t.core.algo import template as algo_template
 from d4t.core.log import swallowed
@@ -122,22 +123,26 @@ AXIS_BOTH = "both"
 #: 四選一，順序就是畫面上膠囊的順序。
 AXES = (AXIS_AUTO, AXIS_X, AXIS_Y, AXIS_BOTH)
 AXIS_ICONS = ("target_auto", "axis_x", "axis_y", "place_crossing")
+#: ⚠ **``X + Y`` 改名成 ``Force both``**（使用者 2026-09-21：「Auto 跟 X+Y 差在
+#: 哪裡？」）。差別是真的存在的 —— Auto 會把信心不夠的那一軸丟掉，這一顆不會
+#: —— 但 ``X + Y`` 這個字**只講了它做什麼，沒講它跟 Auto 差在哪**，而畫面上
+#: 一個看不出差別的選項等於一個陷阱。``Force`` 這個字就是那個差別。
 AXIS_LABELS = {
     AXIS_AUTO: "Auto",
     AXIS_X: "X only",
     AXIS_Y: "Y only",
-    AXIS_BOTH: "X + Y",
+    AXIS_BOTH: "Force both",
 }
+#: ⚠ 每一句只留**「什麼時候按它」**。第一版四句話加起來 60 個字掛在四顆膠囊
+#: 底下，而使用者同一輪說了「UI 內字太多」——  說明的長度跟它被讀到的機率成
+#: 反比。
 AXIS_HELP = {
-    AXIS_AUTO: ("Use whichever direction the image really repeats in. An axis "
-                "whose measurement is not confident enough is left out - a "
-                "made-up period is worse than none."),
-    AXIS_X: ("This layout only repeats across, so only cut vertical lines. One "
-             "cell spans the full height. Use it for line/space patterns."),
-    AXIS_Y: ("This layout only repeats down, so only cut horizontal lines. One "
-             "cell spans the full width."),
-    AXIS_BOTH: ("Cut both ways even where the measurement is not confident - "
-                "you are telling it the layout repeats in both directions."),
+    AXIS_AUTO: ("Let the image decide. A direction it is not confident about "
+                "is left out - a made-up period is worse than none."),
+    AXIS_X: "It only repeats across. One cell is the full height.",
+    AXIS_Y: "It only repeats down. One cell is the full width.",
+    AXIS_BOTH: ("Both directions, even where Auto was not confident. That is "
+                "the only difference from Auto."),
 }
 
 #: 一軸要至少這麼多像素才算得上一個週期（同 `build_golden_cell` 的判準）。
@@ -208,18 +213,20 @@ def px_text(value: float, used: bool) -> str:
 
 
 def nm_text(value: float, used: bool, nm_per_px: float) -> str:
-    """px × nm/px → ``"3,180 nm"``；**不知道 nm/px 就回空字串**。
+    """px × nm/px → ``"0.150 µm"``；**不知道 nm/px 就回空字串**。
 
-    ⚠ 回空字串而不是 ``"0 nm"``／``"—"``：呼叫端拿到空字串就整欄不放
-    （見模組說明的「單位」那一段）。一個 `0 nm` 看起來像一個量出來的答案。
+    ⚠ **輸入是 nm/px，輸出是 µm**（使用者 2026-09-21 指定）。那不是不一致：
+    機台設定裡的像素大小就是以 nm 講的，而 pitch 這種尺度在廠內是以 µm 報的。
+    換算住在畫面這一層，core 仍然只有 pixel（`docs/FAB-VALIDATION.md` 假設 #2）。
+
+    ⚠ 回空字串而不是 ``"0 µm"``／``"—"``：呼叫端拿到空字串就整欄不放
+    （見模組說明的「單位」那一段）。一個 `0 µm` 看起來像一個量出來的答案。
     """
     s = float(nm_per_px or 0.0)
     v = float(value or 0.0)
     if s <= 0 or v < MIN_PERIOD_PX or not used:
         return ""
-    nm = v * s
-    return "%s nm" % ("{:,.1f}".format(nm).rstrip("0").rstrip(".")
-                      if nm < 1000 else "{:,.0f}".format(nm))
+    return "%.3f µm" % (v * s / 1000.0)
 
 
 #: 一張圖裡至少要放得下這麼多格，`agreement` 才讀得出「差一點點」。
@@ -401,13 +408,20 @@ def trim_to_inner(shape: Tuple[int, int], px: float, py: float,
 
 Override = Tuple[Optional[float], Optional[float]]
 
-#: 使用者自己打了一個週期時，信心那一欄寫什麼。
+#: 使用者自己打了一個週期、而且**這張圖沒辦法替它打分**時，那一欄寫什麼。
 #:
-#: ⚠ **不准沿用量出來的那個分數。** 信心量的是「把圖平移這個週期之後跟自己有
-#: 多像」，而那是對**量出來的那個數字**做的。使用者把 40 改成 80 之後還掛著
-#: 92/100，等於用一個他沒有問過的問題的答案，去背書他剛打進去的數字。
-#: ⚠ 字要短：那一格旁邊就是橫條，長句子會被切成「you typ…」（量到過）。
-#: 完整的那句話在警告條上（「X: yours 37 vs measured 60」）。
+#: ⚠ **不准沿用量出來的那個分數。** 信心量的是「把圖平移這個週期之後跟自己
+#: 有多像」，而那是對**量出來的那個數字**做的。使用者把 40 改成 80 之後還
+#: 掛著 92/100，等於用一個他沒有問過的問題的答案，去背書他剛打進去的數字。
+#:
+#: ⚠ **但「不能沿用」不等於「沒有分數」**（使用者 2026-09-21：「自定義 period
+#: 右上可否也能算 confidence？」）。同一個問題可以**對他打的那個數字重問一次**
+#: —— 那正是 :func:`d4t.core.algo.period.confidence_at`：一樣的投影、一樣的
+#: 自相關，只是在他指定的 lag 上取值，所以兩個數字同尺度、可以直接比。實測
+#: 量到 60 得 92.4，打 59 得 86.6、打 45 得 0.0 —— 打錯的那一刻長條就變紅，
+#: 這比任何一句警告都快。
+#: 這一格因此只剩**打不出分數**的退路（還沒載圖、lag 大過半張圖）。
+#: 字要短：那一格旁邊就是橫條，長句子會被切成「you typ…」（量到過）。
 CONF_TYPED = "yours"
 
 
@@ -427,7 +441,8 @@ def effective_period(measured: Any, override: Override = (None, None)
 
 
 def pitch_rows(measured: Any, axis: str, nm_per_px: float = 0.0,
-               override: Override = (None, None)
+               override: Override = (None, None),
+               typed_conf: Override = (None, None)
                ) -> List[Tuple[str, str, str, str]]:
     """``[(方向, px, nm, 信心), …]`` —— 畫面上那張表的**唯一**算法。
 
@@ -450,7 +465,8 @@ def pitch_rows(measured: Any, axis: str, nm_per_px: float = 0.0,
             ("Down (Y)", py, use_y, cy, typed_y)):
         got = float(value or 0.0) >= MIN_PERIOD_PX
         if typed:
-            conf_text = CONF_TYPED
+            tc = typed_conf[0 if label.startswith("Across") else 1]
+            conf_text = CONF_TYPED if tc is None else "%.0f / 100" % float(tc)
         elif got:
             conf_text = "%.0f / 100" % conf
         else:
@@ -563,10 +579,14 @@ class Bar(QWidget):
             if self._track:
                 p.setBrush(QColor(TOKENS["border_default"]))
                 p.drawRoundedRect(0, y, self._w, h, h / 2.0, h / 2.0)
-                if self._frac > 0:
-                    p.setBrush(QColor(_TONE_HEX[self._tone]))
-                    p.drawRoundedRect(0, y, max(h, int(self._w * self._frac)), h,
-                                      h / 2.0, h / 2.0)
+                # ⚠ **0 分也要畫**（一顆紅點，寬度 = 高度）。這裡原本是
+                # `if self._frac > 0`，於是 0 分畫出來是一條**空軌道** —— 跟
+                # `set_text_only` 那個「沒有被評分過」長得一模一樣。而 0 分
+                # 是這個視窗最需要講清楚的一格：使用者打了一個週期，圖在那個
+                # 週期上完全不重複（實測打 45 對一張 60 的圖就是 0.0）。
+                p.setBrush(QColor(_TONE_HEX[self._tone]))
+                p.drawRoundedRect(0, y, max(h, int(self._w * self._frac)), h,
+                                  h / 2.0, h / 2.0)
             x0 = (self._w + 8) if self._track else 0
             p.setPen(QColor(TOKENS["text_primary"] if self._track
                             else TOKENS["text_hint"]))
@@ -826,33 +846,55 @@ class PitchHelperWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # ---- 答案（最大的字在最上面）------------------------------------
+        # ---- 答案 ----------------------------------------------------------
+        # **這個視窗只回答一件事**，所以畫面上只有一個東西可以是最大的字。
+        # 這一塊就是那件事：一行 `60 × 44 px`、底下換算成 µm、再底下是兩條
+        # 信心長條。使用者的話：「顯示的 period（結果）要大一點放中間，
+        # 因為是重點」。
+        #
+        # ⚠ 字級走 **QSS 的 objectName**（`pitchAnswer`），不是 `setFont()`
+        # —— theme 的 ``* { font-size }`` 會蓋掉 per-widget 的 QFont，而 Qt
+        # 不會抱怨。F120 連三輪「把答案放大」就是這樣安靜地沒有生效
+        # （量出來一直是 13px，跟旁邊的說明一樣大）。
         self.grid_answer = QGridLayout()
-        self.grid_answer.setHorizontalSpacing(10)
+        self.grid_answer.setHorizontalSpacing(8)
         self.grid_answer.setVerticalSpacing(2)
         self._cells: List[List[QLabel]] = []
         self._bars: List[Bar] = []
         self._tags: List[QLabel] = []
-        for r, axis_name in enumerate(("X", "Y")):
+        self.lab_big = QLabel(PITCH_UNSET, box)
+        self.lab_big.setObjectName("pitchAnswer")
+        self.lab_big.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        self.grid_answer.addWidget(self.lab_big, 0, 0, 1, 4)
+        self.lab_um = QLabel("", box)
+        self.lab_um.setObjectName("pitchAnswerSub")
+        self.lab_um.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        self.grid_answer.addWidget(self.lab_um, 1, 0, 1, 4)
+        for i, axis_name in enumerate(("X", "Y")):
             tag = QLabel(axis_name, box)
-            tag.setObjectName("paramHint")
-            self.grid_answer.addWidget(tag, r, 0)
+            tag.setObjectName("pitchAnswerUnit")
+            tag.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.grid_answer.addWidget(tag, 2, i * 2)
             self._tags.append(tag)
-            px = QLabel(PITCH_UNSET, box)
-            f = px.font()
-            f.setPointSizeF(f.pointSizeF() * 1.9)
-            f.setBold(True)
-            px.setFont(f)
-            self.grid_answer.addWidget(px, r, 1)
-            nm = QLabel("", box)
-            nm.setObjectName("paramHint")
-            self.grid_answer.addWidget(nm, r, 2)
-            bar = Bar(box)
-            self.grid_answer.addWidget(bar, r, 3)
-            self._cells.append([px, nm])
+            bar = Bar(box, width=86)
+            self.grid_answer.addWidget(bar, 2, i * 2 + 1)
             self._bars.append(bar)
-        self.grid_answer.setColumnStretch(2, 1)
+            self._cells.append([QLabel(box), QLabel(box)])   # 舊介面的殘留（測試讀 rows()）
+        self.grid_answer.setColumnStretch(1, 1)
+        self.grid_answer.setColumnStretch(3, 1)
         lay.addLayout(self.grid_answer)
+        # **把答案帶得走** —— 而且它要**貼著那個答案**。
+        # 第一版這顆鈕住在下面的 Units 那一段，於是使用者問「copy 是 copy 誰？」
+        # ——  一顆按鈕的意思是它旁邊那個東西，不是它自己的字。
+        row_copy = QHBoxLayout()
+        row_copy.addStretch(1)
+        self.btn_copy = QPushButton("Copy", box)
+        self.btn_copy.setProperty("variant", "secondary")
+        self.btn_copy.setMaximumWidth(72)
+        self.btn_copy.clicked.connect(self.copy_answer)
+        row_copy.addWidget(self.btn_copy)
+        row_copy.addStretch(1)
+        lay.addLayout(row_copy)
 
         # ---- 哪個方向 -----------------------------------------------------
         lay.addWidget(self._section(box, "Which way it repeats"))
@@ -911,18 +953,13 @@ class PitchHelperWindow(QMainWindow):
         self.spin_nm.setSingleStep(0.1)
         self.spin_nm.setSuffix(" nm/px")
         self.spin_nm.setSpecialValueText("pixel size not known")
+        self.spin_nm.setKeyboardTracking(False)   # 同上：打字中途不重算
         self.spin_nm.setToolTip(
             "How many nanometres one pixel is, from the tool's settings. Fill "
             "it in and the pitch also comes out in nanometres.")
         self.spin_nm.valueChanged.connect(lambda _v: self._fill_answer())
         unit.addWidget(self.spin_nm)
         unit.addStretch(1)
-        # **把答案帶得走。** 不然每一次都要自己重打一遍。
-        self.btn_copy = QPushButton("Copy", box)
-        self.btn_copy.setProperty("variant", "secondary")
-        self.btn_copy.setToolTip("Copy the pitch to the clipboard.")
-        self.btn_copy.clicked.connect(self.copy_answer)
-        unit.addWidget(self.btn_copy)
         lay.addLayout(unit)
 
         # ---- 細節：**預設收起來** -------------------------------------------
@@ -1027,6 +1064,12 @@ class PitchHelperWindow(QMainWindow):
         # 壞掉**的畫面，而它其實只是少了 14 px。
         sp.setMinimumWidth(104)
         sp.setSpecialValueText("measured")
+        # ⚠ **打字的中途不算。** 預設 Qt 每敲一個鍵就發 `valueChanged`，於是
+        # 要打 45 的人會先看到整個視窗用 4 重算一次（使用者 2026-09-21：
+        # 「我要輸入 45，但當我輸入到 4，就會強制 trigger 算 4」）—— 一次
+        # 疊格子是幾百毫秒，中途那一次是純粹的浪費，而且畫面會閃一個錯的答案。
+        # 關掉之後只有 **Enter／離開焦點／按上下鍵** 才算。
+        sp.setKeyboardTracking(False)
         sp.setToolTip(
             "Type the cell size %s if the measured one is not the unit you "
             "want — the grid and the stacked cell redraw so you can see "
@@ -1220,13 +1263,29 @@ class PitchHelperWindow(QMainWindow):
                           100.0 if ov[0] else self._m.conf_x,
                           100.0 if ov[1] else self._m.conf_y)
 
+    def typed_conf(self) -> Override:
+        """使用者打進去的那一組週期，**在這張圖上**拿幾分。
+
+        ⚠ 量的是 `self._work`（裁過、正在看的那一張），不是原圖 —— 畫面上
+        那些格線切的就是它，分數跟它們講的必須是同一件事。
+        每一軸沒打就是 ``None``（沒有分數要算），不是 0。
+
+        便宜得可以每次 refresh 都算：一條投影 ＋ 一次自相關，不是一次疊格子。
+        """
+        ox, oy = self.override()
+        work = self._work
+        if work is None or not np.asarray(work).size:
+            return (None, None)
+        return (algo_period.confidence_at(work, float(ox), "x") if ox else None,
+                algo_period.confidence_at(work, float(oy), "y") if oy else None)
+
     def rows(self) -> List[Tuple[str, str, str, str]]:
         """畫面上那兩列（測試讀這個，不必去挖 QLabel）。"""
         if self._m is None:
             return [(lab, PITCH_UNSET, "", PITCH_UNSET)
                     for lab in ("Across (X)", "Down (Y)")]
         return pitch_rows(self._m, self.axis(), self.nm_per_px(),
-                          self.override())
+                          self.override(), self.typed_conf())
 
     def _refresh(self) -> None:
         """一次把畫面對齊到目前的狀態 —— **只有這一支**（少呼叫一半就是說謊）。"""
@@ -1249,31 +1308,47 @@ class PitchHelperWindow(QMainWindow):
         rows = self.rows()
         ov = self.override()
         flags = self._flags()
+        tc = self.typed_conf()
         confs = (float(getattr(self._m, "conf_x", 0.0) or 0.0) if self._m else 0.0,
                  float(getattr(self._m, "conf_y", 0.0) or 0.0) if self._m else 0.0)
-        for i, (cells, row, bar, tag) in enumerate(
-                zip(self._cells, rows, self._bars, self._tags)):
-            # 還沒有圖的時候兩列都留著（那是「等著填」，不是「用不到」）。
+        used = [i for i in range(2) if (flags[i] if self._m is not None else True)]
+        self.lab_big.setText(
+            " × ".join(rows[i][1] for i in used) + " px" if used and
+            rows[used[0]][1] != PITCH_UNSET else PITCH_UNSET)
+        ums = [rows[i][2] for i in used if rows[i][2]]
+        self.lab_um.setText(" × ".join(ums).replace(" µm ×", " ×") if ums else "")
+        # **按鈕自己講它會複製什麼** —— 「copy 是 copy 誰？」的另一半答案。
+        what = self.answer_text()
+        self.btn_copy.setToolTip(
+            ("Copy “%s” to the clipboard." % what) if what
+            else "Copy the period to the clipboard.")
+        for i, (bar, tag) in enumerate(zip(self._bars, self._tags)):
             show = flags[i] if self._m is not None else True
-            for w in (tag, cells[0], cells[1], bar):
+            for w in (tag, bar):
                 w.setVisible(show)
             if not show:
                 continue
-            cells[0].setText(row[1] + (" px" if row[1] != PITCH_UNSET else ""))
-            cells[1].setText(row[2])
             if self._m is None:
                 bar.set_value(0.0, TONE_WARN, "")
-            elif ov[i]:
-                # 打進去的那一軸**沒有分數可言**（見 `CONF_TYPED` 的說明）。
+            elif ov[i] and tc[i] is None:
+                # 打進去了，但這張圖打不出分數（還沒載圖／lag 大過半張圖）。
                 bar.set_text_only(CONF_TYPED)
             else:
-                c = confs[i]
+                # 打進去的那一軸看的是**它自己的**分數（`confidence_at`），
+                # 不是量出來那個數字的分數 —— 兩個同尺度，可以直接比。
+                c = float(tc[i]) if ov[i] else confs[i]
                 bar.set_value(c / 100.0, conf_tone(c), "%.0f" % c)
 
     def _fill_try(self) -> None:
         """候選那一排 —— **點一下就套用**（見 `candidate_periods` 的說明）。"""
         for b in self._try_buttons:
             self.row_try.removeWidget(b)
+            # ⚠ `removeWidget` **不會讓它從畫面上消失** —— 它只是不再由
+            # layout 擺位，於是它留在父視窗上最後一次被擺的地方，而
+            # `deleteLater` 要等事件迴圈才真的刪。實拍到的樣子是一顆舊的
+            # 「60 × 22」候選鈕**疊在最大的那個答案上**。`setParent(None)`
+            # 才是「現在就不要再畫它」。
+            b.setParent(None)
             b.deleteLater()
         self._try_buttons = []
         flags = self._flags()
@@ -1282,7 +1357,7 @@ class PitchHelperWindow(QMainWindow):
                  if self._m is not None else [])
         self.lab_try.setVisible(bool(cands))
         for px, py in cands:
-            b = QPushButton(candidate_label(px, py, flags), self)
+            b = QPushButton(candidate_label(px, py, flags), self.lab_try.parentWidget())
             b.setProperty("variant", "secondary")
             # 一排四顆要塞進 380 px：留白收掉，字才不會被切成 "L20 × 44"。
             b.setStyleSheet("padding-left:6px;padding-right:6px;")
@@ -1384,15 +1459,18 @@ class PitchHelperWindow(QMainWindow):
         self.bar_agree.set_value(agree, agree_tone(agree), "%.2f" % agree)
         n = int(getattr(gc, "n_cells", 0) or 0)
         tone = agree_tone(agree)
+        # ⚠ **一句話，不是三句。** 第一版是「144 cells. Edge cells left out.
+        # The cells landed on each other — this period is right.」—— 而那個
+        # 結論旁邊就是一條綠色的長條寫著 0.98，字只是在重複顏色已經講完的事。
+        # 使用者 2026-09-21：「UI 內字太多」。長的那一段留在 tooltip 裡。
         if tone == TONE_GOOD:
-            word = "The cells landed on each other — this period is right."
+            word = "landed on each other."
         elif tone == TONE_WARN:
-            word = ("Look at it: if it is blurred or doubled, the period is "
-                    "off. Try ×2.")
+            word = "look blurred? try ×2."
         else:
-            word = "The cells did not agree — this period is wrong."
-        edge = " Edge cells left out." if getattr(gc, "trimmed", False) else ""
-        self.lab_stack.setText("%d cells.%s %s" % (n, edge, word))
+            word = "did not agree — this period is wrong."
+        edge = ", edges left out" if getattr(gc, "trimmed", False) else ""
+        self.lab_stack.setText("%d cells%s — %s" % (n, edge, word))
 
     def _fill_warning(self) -> None:
         """⚠ **只在有事的時候出現。** 第一版有一塊常駐的「What it decided」，

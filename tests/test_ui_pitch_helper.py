@@ -118,18 +118,25 @@ def test_nothing_measured_is_a_dash_not_a_zero(ph):
     assert ph.px_text(0.0, True) == ph.PITCH_UNSET
 
 
-def test_without_a_pixel_size_there_is_no_nanometre_column(ph):
-    """⚠ **不是 `0 nm`** —— 那看起來像一個量出來的答案（`nm_per_px` 在 KLARF
+def test_without_a_pixel_size_there_is_no_real_world_column(ph):
+    """⚠ **不是 `0 µm`** —— 那看起來像一個量出來的答案（`nm_per_px` 在 KLARF
     裡沒有來源，見 docs/FAB-VALIDATION.md 假設 #2）。"""
     assert ph.nm_text(60.0, True, 0.0) == ""
 
 
-def test_with_a_pixel_size_the_nanometres_appear(ph):
-    assert ph.nm_text(60.0, True, 2.5) == "150 nm"
-    assert ph.nm_text(60.0, True, 20.0) == "1,200 nm"
+def test_the_converted_pitch_is_in_micrometres(ph):
+    """⚠ **輸入是 nm/px，輸出是 µm**（使用者 2026-09-21：「pixel size
+    換算後，單位改成 um（px 輸入一樣是 nm）」）。
+
+    兩個單位不同不是不一致，是**兩邊各自的量級**：pixel size 是個位數的
+    nm，而一個 cell 的 pitch 是幾百個 nm —— 寫成 `1,200 nm` 要數逗號，
+    寫成 `1.200 µm` 不用。
+    """
+    assert ph.nm_text(60.0, True, 2.5) == "0.150 µm"
+    assert ph.nm_text(60.0, True, 20.0) == "1.200 µm"
 
 
-def test_an_unused_axis_has_no_nanometres_either(ph):
+def test_an_unused_axis_has_no_converted_pitch_either(ph):
     assert ph.nm_text(44.0, False, 2.5) == ""
 
 
@@ -137,7 +144,7 @@ def test_the_table_says_both_axes_and_their_confidence(ph):
     rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 2.5)
     assert [r[0] for r in rows] == ["Across (X)", "Down (Y)"]
     assert [r[1] for r in rows] == ["60", "44"]
-    assert [r[2] for r in rows] == ["150 nm", "110 nm"]
+    assert [r[2] for r in rows] == ["0.150 µm", "0.110 µm"]
     assert rows[0][3] == "92 / 100"
 
 
@@ -328,8 +335,24 @@ def test_a_typed_period_does_not_borrow_the_measured_confidence(ph):
     """
     rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 0.0, (120.0, None))
     assert rows[0][1] == "120"
-    assert rows[0][3] == ph.CONF_TYPED
+    assert rows[0][3] != "92 / 100", "不准沿用量到的那個分數"
     assert rows[1][3] == "93 / 100", "沒改的那一軸照樣講它量到的信心"
+
+
+def test_a_typed_period_with_no_score_says_so_instead_of_faking_one(ph):
+    """還算不出分數的時候（還沒載圖）寫 ``yours``，**不寫 0**。"""
+    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 0.0, (120.0, None), (None, None))
+    assert rows[0][3] == ph.CONF_TYPED
+
+
+def test_a_typed_period_gets_its_own_score_when_there_is_one(ph):
+    """使用者 2026-09-21：「自定義 period 右上可否也能算 confidence？」
+
+    可以 —— 但那是**對他打的那個數字重問一次**的分數（`confidence_at`），
+    不是量出來那個數字的分數。
+    """
+    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 0.0, (120.0, None), (41.0, None))
+    assert rows[0][3] == "41 / 100"
 
 
 def test_a_typed_period_is_believed_even_where_the_measurement_was_not(ph):
@@ -338,9 +361,9 @@ def test_a_typed_period_is_believed_even_where_the_measurement_was_not(ph):
     assert rows[0][1] == "60", "信心 11 但他自己打的，就該用"
 
 
-def test_a_typed_period_converts_to_nanometres_too(ph):
+def test_a_typed_period_is_converted_too(ph):
     rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 2.5, (120.0, None))
-    assert rows[0][2] == "300 nm"
+    assert rows[0][2] == "0.300 µm"
 
 
 def test_typing_a_period_redraws_the_grid_at_once(win, ph):
@@ -720,7 +743,7 @@ def test_copy_puts_a_usable_line_on_the_clipboard(win, ph, app):
     _ready(win)
     win.spin_nm.setValue(2.5)
     text = win.answer_text()
-    assert "X 60 px" in text and "150 nm" in text, text
+    assert "X 60 px" in text and "0.150 µm" in text, text
     win.copy_answer()
     from PySide6.QtGui import QGuiApplication
     assert QGuiApplication.clipboard().text() == text
@@ -842,7 +865,7 @@ def test_the_screen_says_the_edge_was_left_out(win, ph):
     img = _edgy()
     win.set_image(img, "edgy.tif")
     win._on_done(*_run(win, img), "")
-    assert "Edge cells left out" in win.lab_stack.text(), win.lab_stack.text()
+    assert "edges left out" in win.lab_stack.text(), win.lab_stack.text()
 
 
 def test_the_edge_tick_is_on_by_default(win, ph):
@@ -884,3 +907,107 @@ def test_the_grid_draws_only_the_cells_that_were_stacked(win, ph):
     win._on_done(*_run(win, img), "")
     assert win.view.overlay_count() == win._gc.n_cells
     assert win.view.overlay_count() > drawn, "不去邊界的時候格子要變多"
+
+
+# --------------------------------------------------------------------------- #
+# 10. 版面：**那個答案要真的變大**（F120 第七輪）
+# --------------------------------------------------------------------------- #
+def test_the_answer_is_actually_bigger_than_ordinary_text(app, ph):
+    """⚠ **這一條守的是一個「改了六輪都沒有生效」的改動。**
+
+    這個視窗只回答一件事，所以那個數字必須是畫面上最大的字。前六輪都是
+    `setPointSizeF(pointSizeF() * f)` —— 而這個 app 的 QSS 用**像素**設字級，
+    於是 `pointSizeF()` 回 **-1**、乘出來是負的，Qt **安靜地忽略**。量出來
+    答案一直是 13 px，跟旁邊的說明一模一樣，而使用者每一輪都回報「Period
+    答案要清楚一點」。
+
+    **一個沒有生效的視覺改動，看起來跟沒有被聽見一模一樣** —— 所以這裡量的
+    是渲染出來的字高，不是我們設了什麼。
+    """
+    from d4t.ui import theme
+    theme.apply_theme(app)          # `run()` 開窗之前做的第一件事
+    win = ph.PitchHelperWindow()
+    try:
+        # ⚠ QSS 是在 **polish** 的時候才套到 widget 上的 —— 不 polish 的話
+        # 這裡量到的是 Qt 的預設字，三個都一樣大，而這支測試就永遠是綠的。
+        for w in (win.caption, win.lab_big, win.lab_um):
+            w.ensurePolished()
+        body = win.caption.fontMetrics().height()
+        big = win.lab_big.fontMetrics().height()
+        assert big >= body * 2, ("答案沒有比一般文字大兩倍", big, body)
+        sub = win.lab_um.fontMetrics().height()
+        assert body < sub < big, ("µm 那一行要在兩者之間", sub, body, big)
+    finally:
+        win.close()
+
+
+def test_the_copy_button_sits_with_the_thing_it_copies(win, ph, app):
+    """使用者 2026-09-21：「copy 是 copy 誰？」
+
+    一顆按鈕的意思是**它旁邊那個東西**，不是它自己的字。第一版它住在下面的
+    `Units` 那一段，離那個答案隔了三個區塊。
+    """
+    win.resize(1180, 780)
+    win.show()
+    app.processEvents()
+    answer_y = win.lab_big.mapTo(win, win.lab_big.rect().topLeft()).y()
+    copy_y = win.btn_copy.mapTo(win, win.btn_copy.rect().topLeft()).y()
+    units_y = win.spin_nm.mapTo(win, win.spin_nm.rect().topLeft()).y()
+    assert answer_y < copy_y < units_y, (answer_y, copy_y, units_y)
+
+
+def test_the_copy_button_says_what_it_will_copy(win, ph):
+    """另一半答案：**tooltip 裡有那一行字本人**，不是「複製 pitch」。"""
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    assert win.answer_text() in win.btn_copy.toolTip(), win.btn_copy.toolTip()
+
+
+def test_typing_does_not_recompute_on_every_keystroke(win, ph):
+    """使用者 2026-09-21：「我要輸入 45，但當我輸入到 4，就會強制 trigger 算 4」。
+
+    ⚠ 中途那一次不只是浪費（疊一次格子是幾百毫秒），它還會**在畫面上閃一個
+    錯的答案** —— 而這個視窗的全部內容就是那一個答案。
+    """
+    for sp in (win.spin_px, win.spin_py, win.spin_nm):
+        assert not sp.keyboardTracking(), sp.objectName() or sp.suffix()
+
+
+def test_force_both_says_how_it_differs_from_auto(ph):
+    """使用者 2026-09-21：「Auto 跟 X+Y 差在哪裡？」
+
+    差別是真的存在的（Auto 會丟掉信心不夠的那一軸），但 `X + Y` 這個字
+    **只講了它做什麼，沒講它跟 Auto 差在哪** —— 而一個看不出差別的選項是
+    一個陷阱，不是一個選擇。
+    """
+    assert ph.AXIS_LABELS[ph.AXIS_BOTH] == "Force both"
+    assert "Auto" in ph.AXIS_HELP[ph.AXIS_BOTH]
+
+
+def test_a_zero_score_is_drawn_not_left_blank(ph):
+    """⚠ **0 分跟「沒有被評分過」不准長得一樣。**
+
+    `set_text_only` 刻意不畫軌道，意思是「這個數字沒有被評分過」。真的拿 0
+    分的那一格必須看得出它**被評過、而且掛了** —— 那正是使用者打錯週期的
+    那一刻（實測：一張 60 的圖打 45 得 0.0）。
+    """
+    bar = ph.Bar(None)
+    bar.set_value(0.0, ph.TONE_BAD, "0")
+    assert bar._track is True and bar.tone() == ph.TONE_BAD
+    bar.set_text_only(ph.CONF_TYPED)
+    assert bar._track is False
+
+
+def test_a_typed_period_gets_a_score_on_screen(win, ph):
+    """使用者 2026-09-21：「自定義 period 右上可否也能算 confidence？」"""
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.spin_px.setValue(45.0)
+    assert win.typed_conf()[0] == 0.0, "45 對一張 60 的圖完全不重複"
+    assert win.rows()[0][3] == "0 / 100"
+    assert win._bars[0].tone() == ph.TONE_BAD, "打錯的那一刻長條就要變紅"
+
+    win.spin_px.setValue(120.0)
+    assert win.typed_conf()[0] > 50.0, "兩倍週期是真的有重複，不准打成錯的"

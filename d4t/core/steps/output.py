@@ -1041,9 +1041,13 @@ class OutputReportStep(_OutputStep):
         # **這一次跑的身分**（F117 F2）：HTML 與 xlsx **同源**，所以算一次。
         # 一份報表離開這台電腦之後，這幾行是唯一追得回來的東西。
         ds = getattr(bctx, "dataset", None)
+        _label = getattr(ds, "source_label", None)
         run = export_report.run_info(
             bctx.recipe,
-            source=ds.source_label() if hasattr(ds, "source_label") else "",
+            # ⚠ `hasattr` 對型別檢查器什麼都沒講（`ds` 仍然是 `None | Any`），
+            # 而 `run_info` 的 `source` 要一個 `str`。拿出來再 `callable`
+            # 一次，型別跟實情才是同一件事。
+            source=str(_label()) if callable(_label) else "",
             n_rows=len(rows),
             n_source=len(getattr(ds, "items", None) or []) or None)
         # tick → 寫入器。「哪一勾寫哪一個檔、叫什麼」住在 `planned_files`

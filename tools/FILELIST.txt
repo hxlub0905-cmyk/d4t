@@ -6,7 +6,7 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 50c5296a3ca9137a0b895ef4c68ae091b367830e AGENTS.md
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
-25062efac675ffcc062f0afdb765307de2f3d3aa README.md
+e2ae9ca80e7a46d42e3646bb138901bbaff342b5 README.md
 81c3ded65a19d9dda9e929af6669eabc69be1018 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
@@ -25,7 +25,7 @@ b1a09a48d4ae47dde5c94cafc4304e91e9c8dd60 d4t/core/algo/histmatch.py
 8f5be6050f3ea638bbf31374cd0649045bbbc4f4 d4t/core/algo/mask.py
 3a9c1ca9dbdd84f60766714ffac9445380356bcc d4t/core/algo/normalize.py
 d090bc2eefc1fe45c48d60848280ba323b0ef4a7 d4t/core/algo/pairing.py
-a946c20c02ac548f8b34c08910808135d411b0c3 d4t/core/algo/period.py
+e61df123c42538e618322ab9e26ab525bfb23ea2 d4t/core/algo/period.py
 69d4bd814b171848110b5251b357915d60439407 d4t/core/algo/period2d.py
 acba11d258e8a4fb5250d478a59b2d02fe57fe35 d4t/core/algo/profile.py
 c1049c4ae6c2505db6e37b7edeaf364e1244b026 d4t/core/algo/quality.py
@@ -54,7 +54,7 @@ d3ae152006804b91768a5814428820e57b4ba10e d4t/core/ingest/pair_source.py
 eac311bd1b49860c56d39fb647af9477e2863f45 d4t/core/ingest/rawfile.py
 77be8983b75d6147300d419b60bc02bec2791a52 d4t/core/ingest/tiff_index.py
 cc25328b06de7db578ab68d5d189ffc9ff439d73 d4t/core/log.py
-1aff02dd63912f85f3d810274fa5ad7aa609780f d4t/core/numbers.py
+d1cbfc6b4be93f2b9ba120653b8b50713fe4a39d d4t/core/numbers.py
 5aa3964973fb0befdbdde5f6190aaec346c2d48e d4t/core/pipeline/__init__.py
 873e2863b477095a63d63e214187d0d702bba5ac d4t/core/pipeline/batch.py
 cb366e65f25d5f74590219f9062e58eda880d1b5 d4t/core/pipeline/cache.py
@@ -85,7 +85,7 @@ f1b5b8f722b902b4ba755dcb6c160d7b8e9444d8 d4t/core/steps/cd.py
 6374a586fa926b9283a7bdd1f1b75e75466ee449 d4t/core/steps/load.py
 d3e1fe208e365d72f2fdcf9ccdaf543af9cd85a1 d4t/core/steps/load_sidecar.py
 d8b1021ce4eb76b436ba9dea26d62951febd06ac d4t/core/steps/normalize.py
-454a810d09cf24d4778943ea8a11fcddc1431ad1 d4t/core/steps/output.py
+cb7d21234b355b40af79110c3138e3245fd72c71 d4t/core/steps/output.py
 147847b31f0474f9f7a8bf1971d825c09fd3aefc d4t/core/steps/pair_source.py
 ea1a849d4a952d268d4a32411381e1a83d184b82 d4t/core/steps/quality.py
 256789e28d725b76e991351b333b659078d69419 d4t/core/steps/roi_cross.py
@@ -144,7 +144,7 @@ f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
 7be8a6f82dc5572324c987829bf172622c4a0e63 d4t/ui/param_form.py
-c9c4572583da46909d96230ddd00b02f773bd02c d4t/ui/pitch_helper.py
+d1d8166c07212882e243611c63f5728a05719777 d4t/ui/pitch_helper.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
@@ -162,7 +162,7 @@ dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
 bd8beca73261bb84333e00499ae91ccf651bd917 d4t/ui/studio.py
 ac0f36b1bd8280b6c0c7aa4dfe3598ef4ce698a9 d4t/ui/studio_layout.py
 70e7e925f09f87e1c32031c235ae8998c2070512 d4t/ui/template_dialog.py
-0fffe2a5e2c53bbb082a979f6a72fff7c9c25841 d4t/ui/theme.py
+1bc8d474bf5768d60f1bab5ef24846b362c08a75 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 248b4e3610970b808637724d288f1751f20775bf d4t/ui/tree_panel.py
 2d5368b4f0a8a6b1d7aa76a045ca1787b240b39e d4t/ui/tree_scene.py
@@ -178,7 +178,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 934c5ac7cecab2b250c431fdbd5a273d57c88b0b d4t/ui/wording.py
 133bc87c427642bfce9f4c9c533d589b8e597efe d4t/ui/workbench.py
 82acc13a4004df7770d7ade4ae3e10468ad094ff d4t/ui/workers.py
-63c18f9cbe8e847b82b1c448af99d3244acc9e9b docs/ARCHITECTURE.md
+e10d932abeda25c0f0e8cacdb41a03784afdfbce docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
@@ -193,7 +193,7 @@ c5f2884af2db0aa389b496c4ebec6cb2962e745a docs/PITFALLS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
 4a56b0ed65886c59f4282f7e67cbc1ac0a64c140 docs/plans/F117-ui-review.md
-849a656c8c3b6d25f877bac18eda670ce3b494de docs/plans/F120-pitch-helper.md
+375c9c09af5eb054d6096255186e66d6bb8e6541 docs/plans/F120-pitch-helper.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -312,6 +312,7 @@ e84e37dde39527c6f3ccfc940b8fadf7a6002a32 tests/test_output_fold.py
 f9e3484aac2ecf60f7f7c363bb6b8a8f9d75804c tests/test_pair_source.py
 87937f0f150912febfa2d0e1d0bf88f3dc272269 tests/test_period2d.py
 7d25d849e1e86155b281c027d07cfc2fc5355c05 tests/test_period2d_staggered.py
+fd3755189c2bb03027f841bb0caf4047cb293a99 tests/test_period_confidence_at.py
 ea51bed26e33c5beb9d75815b37a90175d567bd3 tests/test_period_golden.py
 37fe3291f5eb15938ef1e8097b3a955e106be9f4 tests/test_phase_origin.py
 b50c831bcb56f33b701995f750409a06b054aa33 tests/test_pick_defect_box.py
@@ -447,7 +448,7 @@ ee2409f03b5bdad686549ea5d9639d5653151350 tests/test_ui_number_picker.py
 d7fc1d0894914f00950a97cc3314e6c9b870d6fb tests/test_ui_outcome_chips.py
 517c38a66c0973adcc445eaae1b50d4f1748e0cf tests/test_ui_panel_truth.py
 d346560d0285c87606673279e3417ad6109e7c38 tests/test_ui_panels_pr2.py
-86e7e461e06959c48b37bf924a0f27f7cb90282d tests/test_ui_pitch_helper.py
+53d7fc3b8eb2de4a45baa03c4e8805935ba62ca3 tests/test_ui_pitch_helper.py
 6a3f59e4edeb47dc32395c89d7ebf0fc702a8eea tests/test_ui_preview_why.py
 a34f4bc35c3ba61865120a2f96deb5c815dbd95a tests/test_ui_problems_bar.py
 04e532ab8cfc38320756feddf90eb03161597fcb tests/test_ui_quiet_canvas.py

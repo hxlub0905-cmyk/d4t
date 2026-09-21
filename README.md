@@ -103,7 +103,7 @@ python -m d4t gui                                  # 開啟 Studio
 ```bash
 python -m d4t pitch                                # Pitch helper：丟一張圖進去，
                                                    #   算 repeating pattern 的 cell
-                                                   #   period（px；填了 nm/px 多一欄 nm）
+                                                   #   period（px；填了 nm/px 就多一行 µm）
 python -m d4t simgen                               # 從一張 Golden Cell 產一整批擬真資料
 ```
 
