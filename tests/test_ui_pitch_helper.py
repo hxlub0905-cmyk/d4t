@@ -291,3 +291,112 @@ def test_the_crop_dialog_still_defaults_to_the_template_wording(app):
         assert d.buttons.button(QDialogButtonBox.Ok).text() == "Stack from this box"
     finally:
         d.close()
+
+
+# --------------------------------------------------------------------------- #
+# 5. 「如果算錯了怎麼辦」—— 量出來的週期是預設值，不是結論
+#    （使用者 2026-09-21 問的第 1 題後半。`template_dialog` 早就定了這句話，
+#     而 helper 更需要它：這個視窗的唯一輸出就是那個數字。）
+# --------------------------------------------------------------------------- #
+def test_without_an_override_the_measured_period_is_what_is_used(ph):
+    assert ph.effective_period(_M(60.0, 44.0)) == (60.0, 44.0)
+
+
+def test_a_typed_period_wins(ph):
+    assert ph.effective_period(_M(60.0, 44.0), (120.0, None)) == (120.0, 44.0)
+    assert ph.effective_period(_M(60.0, 44.0), (120.0, 88.0)) == (120.0, 88.0)
+
+
+def test_a_typed_period_does_not_borrow_the_measured_confidence(ph):
+    """⚠ **這一條是誠實問題，不是排版問題。**
+
+    信心量的是「把圖平移**量到的那個週期**之後跟自己有多像」。使用者把 60
+    改成 120 之後還掛著 92/100，等於拿一個他沒問過的問題的答案，去背書他剛
+    打進去的數字。
+    """
+    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 0.0, (120.0, None))
+    assert rows[0][1] == "120"
+    assert rows[0][3] == ph.CONF_TYPED
+    assert rows[1][3] == "93 / 100", "沒改的那一軸照樣講它量到的信心"
+
+
+def test_a_typed_period_is_believed_even_where_the_measurement_was_not(ph):
+    """使用者明講的一律相信 —— 否則畫面上會變成「我改了，但它不理我」。"""
+    rows = ph.pitch_rows(_M(px=60.0, conf_x=11.0), ph.AXIS_AUTO, 0.0, (60.0, None))
+    assert rows[0][1] == "60", "信心 11 但他自己打的，就該用"
+
+
+def test_a_typed_period_converts_to_nanometres_too(ph):
+    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 2.5, (120.0, None))
+    assert rows[0][2] == "300 nm"
+
+
+def test_typing_a_period_redraws_the_grid_at_once(win, ph):
+    """同軸向那一條：**不能等相位搜尋回來**（見 `_on_override`）。"""
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "synthetic.tif")
+    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    before = win.view.overlay_count()
+
+    win.spin_px.setValue(120.0)          # 一格變兩倍寬 → 格子數要變少
+    assert win.rows()[0][1] == "120"
+    assert win.view.overlay_count() < before
+
+
+def test_the_double_button_doubles_both_axes(win, ph):
+    """使用者的真實情境：「兩根 MG 才構成他要比的那個單元」。"""
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "synthetic.tif")
+    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_double()
+    assert [r[1] for r in win.rows()] == ["120", "88"]
+
+
+def test_reset_puts_the_measured_period_back(win, ph):
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "synthetic.tif")
+    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_double()
+    win._on_reset()
+    assert [r[1] for r in win.rows()] == ["60", "44"]
+    assert win.override() == (None, None)
+
+
+def test_the_screen_says_when_the_number_is_not_the_measured_one(win, ph):
+    """**改過了一定要看得到。** 少了這一行，換一張圖之後還掛著上一次打的 80，
+    而畫面上沒有任何東西說那個 80 是他自己打的。"""
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "synthetic.tif")
+    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    assert win.lab_typed.text() == "", "沒改過就不該有這一行"
+
+    win.spin_px.setValue(120.0)
+    said = win.lab_typed.text()
+    assert "120" in said and "60" in said, "要同時講你打的與它量的：%r" % said
+
+
+def test_the_table_the_notes_and_the_grid_all_ask_the_same_question(win, ph):
+    """三個地方各算一次 flags 的話，會出現「表格說 Y 沒在用、格線卻切了橫線」
+    —— 這個視窗已經被那種形狀咬過一次（`_on_axis` 的回歸測試）。"""
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "synthetic.tif")
+    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win.chips_axis.set_text(ph.AXIS_Y)
+    win._on_axis(ph.AXIS_Y)
+
+    assert win._flags() == (False, True)
+    assert win.rows()[0][1] == ph.PITCH_NOT_USED
+    # 只切橫線 ⇒ 一格 = 整張寬 × 44 ⇒ 格子數 = 480 // 44 = 10。
+    # **畫出來的格子數要跟表格說的那一軸對得上** —— 兩邊各算各的那天，
+    # 畫面會同時說兩件事。
+    assert win.view.overlay_count() == 480 // 44

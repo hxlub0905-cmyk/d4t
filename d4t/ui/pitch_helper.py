@@ -76,7 +76,8 @@ from .widgets import apply_button_cursors, to_uint8
 __all__ = [
     "PitchHelperWindow", "AXES", "AXIS_AUTO", "AXIS_X", "AXIS_Y", "AXIS_BOTH",
     "axis_flags", "lattice_periods", "px_text", "nm_text", "pitch_rows",
-    "PITCH_UNSET", "run",
+    "effective_period", "Override", "PITCH_UNSET", "PITCH_NOT_USED",
+    "CONF_TYPED", "run",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -190,26 +191,62 @@ def nm_text(value: float, used: bool, nm_per_px: float) -> str:
                       if nm < 1000 else "{:,.0f}".format(nm))
 
 
-def pitch_rows(measured: Any, axis: str, nm_per_px: float = 0.0
+Override = Tuple[Optional[float], Optional[float]]
+
+#: 使用者自己打了一個週期時，信心那一欄寫什麼。
+#:
+#: ⚠ **不准沿用量出來的那個分數。** 信心量的是「把圖平移這個週期之後跟自己有
+#: 多像」，而那是對**量出來的那個數字**做的。使用者把 40 改成 80 之後還掛著
+#: 92/100，等於用一個他沒有問過的問題的答案，去背書他剛打進去的數字。
+CONF_TYPED = "you typed it"
+
+
+def effective_period(measured: Any, override: Override = (None, None)
+                     ) -> Tuple[float, float]:
+    """真正要用的那一組週期：**使用者打的優先，沒打就用量到的**。
+
+    量出來的週期是**預設值不是結論** —— 這句話是 `template_dialog` 定的
+    （使用者原話：有時候他要一個 2× 的大 cell，「例如兩根 MG 才構成他要比的
+    那個單元」）。helper 這邊一字不差地適用，而且更需要：這個視窗的**唯一**
+    輸出就是那個數字，改不動它等於「算錯了只能關掉視窗」。
+    """
+    px = float(getattr(measured, "px", 0.0) or 0.0)
+    py = float(getattr(measured, "py", 0.0) or 0.0)
+    ox, oy = override
+    return (float(ox) if ox else px, float(oy) if oy else py)
+
+
+def pitch_rows(measured: Any, axis: str, nm_per_px: float = 0.0,
+               override: Override = (None, None)
                ) -> List[Tuple[str, str, str, str]]:
     """``[(方向, px, nm, 信心), …]`` —— 畫面上那張表的**唯一**算法。
 
     做成純函式（不碰任何 widget）是為了測得動：軸向 × 有沒有 nm × 量不量得到
-    的排列組合各斷言一次，不必為了讀一行字開一次視窗。
+    × 有沒有被改過的排列組合各斷言一次，不必為了讀一行字開一次視窗。
     """
-    px = float(getattr(measured, "px", 0.0) or 0.0)
-    py = float(getattr(measured, "py", 0.0) or 0.0)
+    px, py = effective_period(measured, override)
     cx = float(getattr(measured, "conf_x", 0.0) or 0.0)
     cy = float(getattr(measured, "conf_y", 0.0) or 0.0)
-    use_x, use_y = axis_flags(axis, px, py, cx, cy)
+    # 打進去的那一軸**跳過信心那一關**（使用者明講的一律相信，同
+    # `build_golden_cell` 的 ``given``）—— 拿一個他沒問過的分數去否決他打的
+    # 數字，畫面上會變成「我改了，但它不理我」。
+    typed_x, typed_y = bool(override[0]), bool(override[1])
+    use_x, use_y = axis_flags(axis, px, py,
+                              100.0 if typed_x else cx,
+                              100.0 if typed_y else cy)
     rows = []
-    for label, value, used, conf in (("Across (X)", px, use_x, cx),
-                                     ("Down (Y)", py, use_y, cy)):
+    for label, value, used, conf, typed in (
+            ("Across (X)", px, use_x, cx, typed_x),
+            ("Down (Y)", py, use_y, cy, typed_y)):
         got = float(value or 0.0) >= MIN_PERIOD_PX
-        rows.append((label,
-                     px_text(value, used),
-                     nm_text(value, used, nm_per_px),
-                     ("%.0f / 100" % conf) if got else PITCH_UNSET))
+        if typed:
+            conf_text = CONF_TYPED
+        elif got:
+            conf_text = "%.0f / 100" % conf
+        else:
+            conf_text = PITCH_UNSET
+        rows.append((label, px_text(value, used),
+                     nm_text(value, used, nm_per_px), conf_text))
     return rows
 
 
@@ -228,11 +265,13 @@ class _PitchWorker(QThread):
     done = Signal(object, object, str)   # (MeasuredPeriod 或 None, origin, 錯誤)
 
     def __init__(self, image: np.ndarray, axis: str,
-                 measured: Optional[Any] = None, parent=None):
+                 measured: Optional[Any] = None,
+                 override: Override = (None, None), parent=None):
         super().__init__(parent)
         self._image = image
         self._axis = str(axis)
         self._measured = measured        # 有就不重量（只找相位）
+        self._override = override        # 使用者自己打的週期（相位照它搜）
         self._stop = False
 
     def stop(self) -> None:
@@ -247,11 +286,17 @@ class _PitchWorker(QThread):
             if self._stop:
                 self.done.emit(None, None, "")
                 return
-            flags = axis_flags(self._axis, m.px, m.py, m.conf_x, m.conf_y)
+            # **相位要照使用者真的在用的那個週期搜。** 拿量到的 40 去搜、卻用
+            # 打進去的 80 畫格線，格線會整排落在半格上 —— 而畫面上看起來就像
+            # 「他打的那個週期是錯的」。
+            ex, ey = effective_period(m, self._override)
+            flags = axis_flags(self._axis, ex, ey,
+                               100.0 if self._override[0] else m.conf_x,
+                               100.0 if self._override[1] else m.conf_y)
             origin: Tuple[float, float] = (0.0, 0.0)
             if flags[0] or flags[1]:
                 self.stage.emit("Finding the phase…")
-                ux, uy = lattice_periods(self._image.shape[:2], m.px, m.py, flags)
+                ux, uy = lattice_periods(self._image.shape[:2], ex, ey, flags)
                 origin = algo_period.choose_origin(
                     self._image.shape, int(round(ux)), int(round(uy)),
                     image=self._image)
@@ -366,6 +411,35 @@ class PitchHelperWindow(QMainWindow):
             self._cells.append(row)
         outer.addLayout(self.table)
 
+        # 量出來的週期是**預設值不是結論**（`template_dialog` 定的那句話 ——
+        # 使用者有時候要一個 2× 的大 cell：「兩根 MG 才構成他要比的那個單元」）。
+        # 這個視窗的唯一輸出就是那個數字，**改不動它等於算錯了只能關掉視窗**。
+        fix = QHBoxLayout()
+        fix.addWidget(QLabel("Use instead", box))
+        self.spin_px = self._period_spin(box, "across")
+        self.spin_py = self._period_spin(box, "down")
+        fix.addWidget(self.spin_px)
+        fix.addWidget(QLabel("×", box))
+        fix.addWidget(self.spin_py)
+        self.btn_double = QPushButton("×2", box)
+        self.btn_double.setProperty("variant", "secondary")
+        self.btn_double.setToolTip(
+            "Double both — for when one cell of yours is two of the repeats "
+            "it measured (two MG lines making the unit you compare).")
+        self.btn_double.clicked.connect(self._on_double)
+        fix.addWidget(self.btn_double)
+        self.btn_reset = QPushButton("Reset", box)
+        self.btn_reset.setProperty("variant", "secondary")
+        self.btn_reset.setToolTip("Go back to the measured period.")
+        self.btn_reset.clicked.connect(self._on_reset)
+        fix.addWidget(self.btn_reset)
+        fix.addStretch(1)
+        outer.addLayout(fix)
+        self.lab_typed = QLabel("", box)
+        self.lab_typed.setObjectName("paramHint")
+        self.lab_typed.setWordWrap(True)
+        outer.addWidget(self.lab_typed)
+
         form = QFormLayout()
         self.spin_nm = QDoubleSpinBox(box)
         self.spin_nm.setRange(0.0, 1e6)
@@ -381,6 +455,25 @@ class PitchHelperWindow(QMainWindow):
         form.addRow("Pixel size", self.spin_nm)
         outer.addLayout(form)
         return box
+
+    def _period_spin(self, box: QWidget, axis: str) -> QDoubleSpinBox:
+        """一格「我自己來」的週期。**0 ＝ 沒打，用量到的那個。**
+
+        ⚠ 小數要收得下（`setDecimals(1)`）：F105 之後週期可以是 79.5，而
+        79.5 對 79 在 4000 px 上差 25 px。只收整數的話，使用者「照著量出來的
+        數字微調」會把那個小數一起吃掉。
+        """
+        sp = QDoubleSpinBox(box)
+        sp.setRange(0.0, 8192.0)
+        sp.setDecimals(1)
+        sp.setSingleStep(1.0)
+        sp.setSpecialValueText("measured")
+        sp.setToolTip(
+            "Type the cell size %s if the measured one is not the unit you "
+            "want — the grid redraws so you can see whether yours is right. "
+            "Leave it at “measured” to use what it found." % axis)
+        sp.valueChanged.connect(lambda _v: self._on_override())
+        return sp
 
     def _notes_box(self) -> QWidget:
         box = QGroupBox("4 · What it decided", self)
@@ -503,11 +596,12 @@ class PitchHelperWindow(QMainWindow):
 
     # -- 量 -----------------------------------------------------------------
     def remeasure(self, reuse: bool = False) -> None:
-        """量一次。``reuse=True`` 只重找相位（軸向改了，週期沒變）。"""
+        """量一次。``reuse=True`` 只重找相位（軸向或週期改了，影像沒變）。"""
         if self._work is None or self._worker is not None:
             return
         self._worker = _PitchWorker(self._work, self.axis(),
-                                    self._m if reuse else None, self)
+                                    self._m if reuse else None,
+                                    self.override(), self)
         self._worker.stage.connect(self._say)
         self._worker.done.connect(self._on_done)
         self._worker.finished.connect(self._on_finished)
@@ -534,8 +628,43 @@ class PitchHelperWindow(QMainWindow):
         self._busy(False)
 
     def _busy(self, on: bool) -> None:
-        for w in (self.btn_open, self.btn_paste, self.btn_crop, self.chips_axis):
+        for w in (self.btn_open, self.btn_paste, self.btn_crop, self.chips_axis,
+                  self.spin_px, self.spin_py, self.btn_double, self.btn_reset):
             w.setEnabled(not on)
+
+    def _on_override(self) -> None:
+        """使用者自己打了一個週期 —— 同 `_on_axis`：**當場重畫，不等相位**。
+
+        相位還是舊的那一個，所以格線可能整排偏半格幾秒鐘 —— 但**週期對不對**
+        （格子有沒有跟著結構走）當場就看得出來，而那才是他打這個數字要問的事。
+        """
+        if self._m is None:
+            self._fill_answer()
+            return
+        self._fill_answer()
+        self._fill_notes()
+        self._draw()
+        self.remeasure(reuse=True)
+
+    def _on_double(self) -> None:
+        """兩格一起 ×2（沒打過就從量到的那個翻倍）。"""
+        if self._m is None:
+            return
+        ex, ey = effective_period(self._m, self.override())
+        self._set_override(min(8192.0, ex * 2.0), min(8192.0, ey * 2.0))
+
+    def _on_reset(self) -> None:
+        self._set_override(0.0, 0.0)
+
+    def _set_override(self, px: float, py: float) -> None:
+        """兩格一起換，**只重畫一次**（各自 `setValue` 會跑兩趟 worker）。"""
+        for sp in (self.spin_px, self.spin_py):
+            sp.blockSignals(True)
+        self.spin_px.setValue(float(px))
+        self.spin_py.setValue(float(py))
+        for sp in (self.spin_px, self.spin_py):
+            sp.blockSignals(False)
+        self._on_override()
 
     def _on_axis(self, _value: str) -> None:
         """軸向改了 —— **週期不重量**（見 `_PitchWorker` 的說明）。
@@ -560,12 +689,54 @@ class PitchHelperWindow(QMainWindow):
     def nm_per_px(self) -> float:
         return float(self.spin_nm.value())
 
+    def override(self) -> Override:
+        """使用者自己打的那一組（``None`` ＝ 那一軸用量到的）。"""
+        px, py = float(self.spin_px.value()), float(self.spin_py.value())
+        return (px if px >= MIN_PERIOD_PX else None,
+                py if py >= MIN_PERIOD_PX else None)
+
+    def _flags(self) -> Tuple[bool, bool]:
+        """哪幾軸算數 —— **表格、notes、格線三個地方問的是同一支**。
+
+        各自算一次的話，畫面上會出現「表格說 Y 沒在用、格線卻切了橫線」
+        —— 這個視窗已經被那種形狀咬過一次（見 `_on_axis`）。
+        """
+        if self._m is None:
+            return (False, False)
+        ov = self.override()
+        ex, ey = effective_period(self._m, ov)
+        return axis_flags(self.axis(), ex, ey,
+                          100.0 if ov[0] else self._m.conf_x,
+                          100.0 if ov[1] else self._m.conf_y)
+
+    def _typed_note(self) -> str:
+        """「現在用的是誰的數字」那一行 —— 沒改過就是空字串。
+
+        ⚠ 改過了一定要**看得到**。少了這一行，使用者換一張圖之後還掛著上一次
+        打的 80，而畫面上沒有任何東西說那個 80 是他自己打的。
+        """
+        ox, oy = self.override()
+        if not ox and not oy:
+            return ""
+        if self._m is None:
+            return "Using the size you typed."
+        bits = []
+        for name, typed, got in (("across", ox, float(self._m.px or 0)),
+                                 ("down", oy, float(self._m.py or 0))):
+            if typed:
+                bits.append("%s: yours %s, it measured %s"
+                            % (name, algo_period2d.fmt_px(typed),
+                               algo_period2d.fmt_px(got) if got >= MIN_PERIOD_PX
+                               else "nothing"))
+        return "Not the measured size — " + "; ".join(bits) + ". “Reset” puts it back."
+
     def rows(self) -> List[Tuple[str, str, str, str]]:
         """畫面上那張表（測試讀這個，不必去挖 QLabel）。"""
         if self._m is None:
             return [(lab, PITCH_UNSET, "", PITCH_UNSET)
                     for lab in ("Across (X)", "Down (Y)")]
-        return pitch_rows(self._m, self.axis(), self.nm_per_px())
+        return pitch_rows(self._m, self.axis(), self.nm_per_px(),
+                          self.override())
 
     def _fill_answer(self) -> None:
         rows = self.rows()
@@ -576,14 +747,14 @@ class PitchHelperWindow(QMainWindow):
         # 「nanometres」而底下空白的話，它看起來像「算不出來」而不是
         # 「你還沒告訴我一個像素是幾奈米」——後者才是實情，而它有解。
         self._heads[2].setText("nanometres" if any(r[2] for r in rows) else "")
+        self.lab_typed.setText(self._typed_note())
 
     def _fill_notes(self) -> None:
         if self._m is None:
             self.notes.setPlainText("")
             return
         lines = list(getattr(self._m, "notes", None) or [])
-        use_x, use_y = axis_flags(self.axis(), self._m.px, self._m.py,
-                                  self._m.conf_x, self._m.conf_y)
+        use_x, use_y = self._flags()
         if not use_x and not use_y:
             lines.append("no repeating period could be measured in this image")
         elif self.axis() in (AXIS_X, AXIS_Y):
@@ -612,14 +783,17 @@ class PitchHelperWindow(QMainWindow):
                 self.caption.setText("Grid hidden — tick “Show the cell grid” "
                                      "to check the period against the image.")
             return
-        flags = axis_flags(self.axis(), self._m.px, self._m.py,
-                           self._m.conf_x, self._m.conf_y)
+        flags = self._flags()
         if not flags[0] and not flags[1]:
             self.view.set_overlay(None)
             self.caption.setText("No period to draw.")
             return
         shape = self._work.shape[:2]
-        ux, uy = lattice_periods(shape, self._m.px, self._m.py, flags)
+        # ⚠ **畫的是「真的在用的那一組」，不是量到的那一組。** 少了這一行，
+        # 使用者打了 120、表格寫 120，而格線還是照 60 畫 —— 他會看到一張
+        # 「我打的數字明明對，格線卻不對」的畫面，然後不相信他自己的答案。
+        ex, ey = effective_period(self._m, self.override())
+        ux, uy = lattice_periods(shape, ex, ey, flags)
         boxes, total = lattice_boxes(shape, ux, uy, self._origin, flags)
         self.view.set_overlay(boxes)
         text = ("Every box is one cell: %s, %d of them"
