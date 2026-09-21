@@ -161,6 +161,9 @@ AXIS_HELP = {
 #: 一軸要至少這麼多像素才算得上一個週期（同 `build_golden_cell` 的判準）。
 MIN_PERIOD_PX = 2.0
 
+#: 格線的顏色（亮芯；襯底在 `image_view._CASING`）。
+GRID_HEX = "#00e5ff"
+
 #: 拿到答案之後**下一步去哪**（只在有答案時出現）。
 #:
 #: ⚠ **名字要是真的那個名字，而我第一版寫錯了。** 我原本寫 "Cell size" ——
@@ -899,6 +902,11 @@ class PitchHelperWindow(QMainWindow):
         lay.setSpacing(4)
         self.view = ImageView(box)
         lay.addWidget(self.view, 1)
+        # ⚠ **格線走兩色線**（深色襯底 ＋ 亮芯）。理由是量出來的，不是美感：
+        # 目前這條 accent 藍在中灰上的 WCAG 對比是 **1.04** —— 等於不存在，
+        # 而一條在某些地方看不見的格線，比沒有格線更糟（使用者會以為那裡沒有
+        # 被切到）。完整的數字在 `ImageView.set_overlay_look`。
+        self.view.set_overlay_look(GRID_HEX, cased=True)
         self.view.measured.connect(self._on_measured)
         row = QHBoxLayout()
         self.chk_grid = QCheckBox("Cut lines", box)
@@ -1026,18 +1034,14 @@ class PitchHelperWindow(QMainWindow):
         self.lab_um.setObjectName("pitchAnswerSub")
         self.lab_um.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
         self.grid_answer.addWidget(self.lab_um, 1, 0, 1, 4)
-        for i, axis_name in enumerate(("X", "Y")):
+        for _i, axis_name in enumerate(("X", "Y")):
             tag = QLabel(axis_name, box)
             tag.setObjectName("pitchAnswerUnit")
             tag.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.grid_answer.addWidget(tag, 2, i * 2)
             self._tags.append(tag)
-            bar = Bar(box, width=86)
-            self.grid_answer.addWidget(bar, 2, i * 2 + 1)
+            bar = Bar(box, width=100)
             self._bars.append(bar)
-            self._cells.append([QLabel(box), QLabel(box)])   # 舊介面的殘留（測試讀 rows()）
-        self.grid_answer.setColumnStretch(1, 1)
-        self.grid_answer.setColumnStretch(3, 1)
+            self._cells.append([QLabel(box), QLabel(box)])   # 舊介面的殘留
         lay.addLayout(self.grid_answer)
 
         # ---- pixel size：**緊貼著它換算出來的那一行** ----------------------
@@ -1208,6 +1212,17 @@ class PitchHelperWindow(QMainWindow):
         lay.addWidget(self.cell_view)
         side = QVBoxLayout()
         side.setSpacing(2)
+        for i, nm in enumerate(("Repeat along X", "Repeat along Y")):
+            # 那個軸向標籤本人就是這一行標題：`_fill_answer` 靠
+            # `self._tags[i]` 的顯示／隱藏決定「這一軸算不算數」（X only 時
+            # Y 整列要消失）。另外做一個的話那個邏輯只管到一半，而沒被加進
+            # 任何 layout 的那一個會浮在 (0,0) —— 實拍就是一個 `x` 飄在最大
+            # 的那個答案旁邊。
+            self._tags[i].setText(nm)
+            self._tags[i].setObjectName("paramHint")
+            self._tags[i].setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            side.addWidget(self._tags[i])
+            side.addWidget(self._bars[i])
         cap = QLabel("Cells agree", box)
         cap.setObjectName("paramHint")
         side.addWidget(cap)

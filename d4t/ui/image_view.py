@@ -143,6 +143,12 @@ def _focus_set(focus: Any) -> frozenset:
         return frozenset()
 
 
+#: 兩色格線的襯底色（見 `ImageView.set_overlay_look`）。**不是純黑**：純黑在
+#: 暗區會跟影像內容混在一起，而這是一個記號不是內容。帶一點藍的深色跟 SEM 的
+#: 中性灰分得開。
+_CASING = "#0d1015"
+
+
 class ImageView(QWidget):
     """ndarray 檢視器：滾輪對游標縮放、拖曳平移、雙擊 fit。
 
@@ -179,6 +185,9 @@ class ImageView(QWidget):
         self._panning = False
         self._pan_start = QPointF()
         self._pan_offset = QPointF()
+        #: 疊框的外觀（F120）：``None`` = 這個 app 一直以來的樣子（accent 細線）。
+        #: 見 :meth:`set_overlay_look`。
+        self._overlay_look = None
         #: 量尺模式（F120）：左鍵拖曳改成量，不是平移。見 `set_measure_mode`。
         self._measure_mode = False
         self._measuring: Optional[QPointF] = None
@@ -525,6 +534,38 @@ class ImageView(QWidget):
         self._measure = (axis, min(a, b), max(a, b))
         self.update()
 
+    def set_overlay_look(self, colour: str = "", cased: bool = False) -> None:
+        """疊框換個顏色、外加一圈深色襯底（F120，**選配**）。
+
+        為什麼需要襯底
+        --------------
+        ⚠ **一張灰階影像上沒有任何單一顏色是到處都看得見的** —— 這是量出來的，
+        不是美感。在一張 SEM 合成圖上（灰階 1/25/50/75/99 百分位 =
+        100/115/156/169/217），各候選對**最糟**那一格的 WCAG 對比是：
+
+            accent 藍 1.04 · stage_measure 1.26 · 綠 1.22
+            magenta 1.16 · cyan 1.09 · yellow 1.07   （圖形的門檻是 3.0）
+
+        也就是說**目前這條 accent 藍的線在中灰上等於不存在**。換一個更好的顏色
+        救不了：亮色輸在亮區、暗色輸在暗區，而一張 SEM 影像兩種都有。
+
+        兩色線（深色襯底 ＋ 亮芯）就沒有這個問題 —— 每一格取兩者較好的那一個：
+
+            黑襯＋黃芯 最糟 3.92 · 黑襯＋青芯 3.85 · 黑襯＋白芯 4.74
+
+        > **一條在某些地方看不見的格線，比沒有格線更糟** —— 使用者會以為那裡
+        > 沒有被切到。
+
+        ⚠ **預設不開**：Studio 的區域框走同一支 `_paint_overlay`，而它們的顏色
+        是有意義的（`region_hex` 一區一色）。這是 pitch helper 自己打開的。
+        """
+        self._overlay_look = (str(colour), bool(cased)) if colour else None
+        self.update()
+
+    def overlay_look(self):
+        """現在的疊框外觀（``(colour, cased)``；沒設就 None）。測試讀這個。"""
+        return self._overlay_look
+
     def set_measure_mode(self, on: bool) -> None:
         """量尺模式：左鍵拖曳**改成量長度**，不再平移（F120）。
 
@@ -673,7 +714,8 @@ class ImageView(QWidget):
         iw, ih = self._pixmap.width(), self._pixmap.height()
         s = self._scale or 1.0
         index_of = {n: i for i, n in enumerate(self._overlay_order)}
-        plain = QColor(TOKENS["accent"])
+        look = self._overlay_look
+        plain = QColor(look[0] if look else TOKENS["accent"])
         p.setBrush(Qt.NoBrush)
         for i, (nx, ny, nw, nh) in enumerate(self._overlay):
             name = self._overlay_labels[i] if i < len(self._overlay_labels) else ""
@@ -687,8 +729,21 @@ class ImageView(QWidget):
             focused = (i == self._overlay_focus)
             # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
             # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
-            pen = QPen(col, 1.9 if focused else 1.0)
+            # 兩色線的芯要比平常的框**粗一點**（1.3 而不是 1.0）：襯底畫在
+            # 它兩側，芯太細的話看到的幾乎全是襯底，亮色只剩一絲 —— 實拍的
+            # 黃色格線就被襯底吃成橄欖綠。
+            width = (1.9 if focused else 1.0)
+            if look is not None and look[1] and not focused:
+                width = 1.3
+            pen = QPen(col, width)
             pen.setCosmetic(True)
+            if look is not None and look[1]:
+                # 先畫一條粗一點的深色線當襯底，亮芯再蓋上去。兩條都 cosmetic，
+                # 所以縮放的時候襯底不會比芯厚得不成比例。
+                casing = QPen(QColor(_CASING), pen.widthF() + 1.6)
+                casing.setCosmetic(True)
+                p.setPen(casing)
+                p.drawRect(r)
             p.setPen(pen)
             p.drawRect(r)
             if focused:

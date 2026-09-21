@@ -1346,7 +1346,11 @@ def test_the_evidence_sits_with_the_answer(win, ph):
     win._on_done(*_run(win, img), "")
     win.resize(1180, 780)
     win.show()
-    gap = (win.bar_agree.mapTo(win, win.bar_agree.rect().center()).y()
+    # ⚠ 量到**那張卡的上緣**，不是量到 `bar_agree`。第十二輪把兩條信心條搬
+    # 進卡裡之後，`Cells agree` 自然往下移了兩列 —— 那不是「證據變遠了」，
+    # 是「卡裡的證據變多了」。量一個會被卡片內容影響的點，守的就不是這件事。
+    card = win.cell_view.parentWidget()
+    gap = (card.mapTo(win, card.rect().topLeft()).y()
            - win.lab_big.mapTo(win, win.lab_big.rect().center()).y())
     assert 0 < gap < 300, ("答案跟證據離太遠", gap)
 
@@ -1430,3 +1434,66 @@ def test_the_panel_can_be_dragged_but_not_squashed(win, ph):
     assert win.split.sizes()[1] >= 380, ("最小寬沒擋住", win.split.sizes())
     win.split.setSizes([300, 880])          # 反過來要一個寬的右欄
     assert win.split.sizes()[1] > 700, ("拉不大", win.split.sizes())
+
+
+# --------------------------------------------------------------------------- #
+# 14. 格線的顏色（F120 第十二輪，使用者：「格線 cutline 顏色有建議的」）
+# --------------------------------------------------------------------------- #
+def _lum(hexs):
+    """WCAG 相對亮度。"""
+    r, g, b = (int(hexs[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
+
+    def f(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+
+def _contrast(a, b):
+    la, lb = _lum(a), _lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def test_no_single_colour_survives_a_greyscale_image(ph):
+    """⚠ **這一條是那個設計決定的證據，不是一個行為。**
+
+    格線為什麼是兩色線（深色襯底 ＋ 亮芯）而不是「挑一個更好的顏色」：在一張
+    SEM 影像的灰階範圍上，**每一個單色都會在某一段消失**。亮色輸在亮區、
+    暗色輸在暗區，而一張 SEM 影像兩種都有。
+
+    這一條釘住的是那個事實 —— 有人哪天想「把它改成一個漂亮的顏色就好」的時候，
+    這裡會告訴他為什麼不行。
+    """
+    from d4t.ui.theme import TOKENS
+
+    greys = ["#%02x%02x%02x" % (v, v, v) for v in (100, 115, 156, 169, 217)]
+    for one in (TOKENS["accent"], TOKENS["success"], "#00e5ff", "#ffe000"):
+        worst = min(_contrast(one, g) for g in greys)
+        assert worst < 3.0, (one, worst, "單色居然到處都看得見？那就不必襯底了")
+
+
+def test_the_two_tone_line_is_visible_everywhere(ph):
+    """而兩色線就到處都在 —— 每一格取襯底與亮芯較好的那一個。
+
+    3.0 是圖形元素的 WCAG 門檻。**一條在某些地方看不見的格線，比沒有格線更糟**
+    （使用者會以為那裡沒有被切到）。
+    """
+    from d4t.ui.image_view import _CASING
+
+    greys = ["#%02x%02x%02x" % (v, v, v) for v in (100, 115, 156, 169, 217)]
+    worst = min(max(_contrast(_CASING, g), _contrast(ph.GRID_HEX, g))
+                for g in greys)
+    assert worst >= 3.0, (worst, ph.GRID_HEX, _CASING)
+
+
+def test_the_helper_turns_the_two_tone_line_on_and_studio_does_not(win, ph):
+    """⚠ **預設不開。** Studio 的區域框走同一支 `_paint_overlay`，而它們的顏色
+    是有意義的（`region_hex` 一區一色）—— 統一換成青色會把那個意思洗掉。"""
+    from d4t.ui.image_view import ImageView
+
+    assert win.view.overlay_look() == (ph.GRID_HEX, True)
+    plain = ImageView()
+    try:
+        assert plain.overlay_look() is None, "沒人要求就不要換樣子"
+    finally:
+        plain.deleteLater()
