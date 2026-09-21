@@ -387,7 +387,18 @@ def trim_to_inner(shape: Tuple[int, int], px: float, py: float,
     貼邊的那些。不在用的軸不切（那一軸一格就是整張影像，切了就什麼都不剩）。
     """
     h, w = int(shape[0]), int(shape[1])
-    ox, oy = float(origin[0] or 0.0), float(origin[1] or 0.0)
+    # ⚠ **沒在用的那一軸，原點是 0。** 這一行跟 `lattice_boxes` 裡的
+    # ``oy = float(origin[1]) if periodic[1] else 0.0`` 是**同一個規則**，而這裡
+    # 本來沒有 —— 於是 X only 模式整個壞掉：相位搜尋在一個「一格就是
+    # 整張高」的軸上也會回一個 `oy`（實測 129），這裡拿它當上邊界，
+    # 而格子是從 y=0 開始、700 高—— **一格都塞不進去**。畫面上看到的是
+    # 格線消失、「0 cells」、一條紅的 `Cells agree 0.00` 跟一句
+    # 「this period is wrong」—— 而那個週期是對的（信心 92）。
+    #
+    # 這是這一輪**第四次**踩到同一種形狀（`_on_axis`、`_draw` 的週期、
+    # 畫的格子跟疊的格子、這裡）：**同一件事在畫面上有兩個算法**。
+    ox = float(origin[0] or 0.0) if flags[0] else 0.0
+    oy = float(origin[1] or 0.0) if flags[1] else 0.0
     x0, y0, x1, y1 = int(ox), int(oy), w, h
     if flags[0] and float(px or 0) >= MIN_PERIOD_PX:
         nx = int((w - int(ox)) // float(px))
@@ -665,6 +676,19 @@ class _PitchWorker(QThread):
         except Exception as e:           # 講出來，不要吞掉（鐵則 7 的 UI 版）
             self.done.emit(None, None, "Could not measure this image: %s" % e)
         else:
+            if self._stop:
+                # ⚠ **被停掉的那一份不准出去。** 上面那道 `_stop` 只擋在量週期
+                # 之後、疊圖之前；`build_golden_cell` 吃的 `progress=self._tick`
+                # 也回 `not self._stop`，所以停在疊圖中途的時候它會回一份
+                # **只疊了一半、n_cells = 0** 的 GoldenCell —— 而那一份走到畫面
+                # 上長得就是「Cells agree 空白、0 cells」，也就是「這個週期不
+                # 成立」。實際踩法：4096² 疊十幾秒，中途改一個設定就換掉了。
+                #
+                # 這是 repo 既有的那條規矩（鐵則 11「被停掉的部分結果拒寫並講
+                # 出來」）在這個視窗的版本。`_on_done` 收到 `m is None` 會直接
+                # 忽略，畫面因此停在上一個**完整**的答案上。
+                self.done.emit(None, None, "")
+                return
             self.done.emit(m, gc, "")
 
     def _without_edges(self, gc: Any, ux: float, uy: float,
@@ -684,10 +708,21 @@ class _PitchWorker(QThread):
         x0, y0, x1, y1 = box
         inner = self._image[y0:y1, x0:x1]
         ix, iy = int(round(ux)), int(round(uy))
-        gc.cell = algo_golden.stack_cells(inner, ix, iy, method=self._method)
-        gc.agreement = algo_golden.stack_agreement(inner, ix, iy)
-        gc.ghosting, gc.lap_var, _e = algo_golden.ghosting_score(gc.cell)
-        gc.n_cells = len(algo_golden.tile_coords(inner.shape, ix, iy))
+        before = gc                         # 剪完不划算的話要回得去（見下面）
+        cell = algo_golden.stack_cells(inner, ix, iy, method=self._method)
+        agree = algo_golden.stack_agreement(inner, ix, iy)
+        n = len(algo_golden.tile_coords(inner.shape, ix, iy))
+        if n < MIN_CELLS_AFTER_TRIM:
+            # ⚠ **剪完什麼都不剩的話，要回到沒剪的那一份，不是報一個 0。**
+            # `trim_to_inner` 已經擋掉格數太少的情形，但它算的是「沿著哪一軸
+            # 剪幾格」，答不出「剪完那一塊裝不裝得下一個 cell」。而 0 格疊出來
+            # 的 `agreement` 是 0.00，畫面上長得跟「這個週期是錯的」一模一樣
+            # —— **一個算不出來的答案不准假裝成一個否定的答案**（同卡片那條
+            # 「算不出來的那一格不寫」）。
+            return before
+        gc.cell, gc.agreement = cell, agree
+        gc.ghosting, gc.lap_var, _e = algo_golden.ghosting_score(cell)
+        gc.n_cells = n
         gc.trimmed = True                   # 畫面上要講出來（少了幾格是事實）
         return gc
 
@@ -1319,9 +1354,12 @@ class PitchHelperWindow(QMainWindow):
         self.lab_um.setText(" × ".join(ums).replace(" µm ×", " ×") if ums else "")
         # **按鈕自己講它會複製什麼** —— 「copy 是 copy 誰？」的另一半答案。
         what = self.answer_text()
+        # **沒有答案的時候那顆鈕是灰的。** 一顆按下去只會說「還沒量到東西」
+        # 的按鈕，在畫面上是一個問題，不是一個功能。
+        self.btn_copy.setEnabled(bool(what))
         self.btn_copy.setToolTip(
             ("Copy “%s” to the clipboard." % what) if what
-            else "Copy the period to the clipboard.")
+            else "Nothing measured yet.")
         for i, (bar, tag) in enumerate(zip(self._bars, self._tags)):
             show = flags[i] if self._m is not None else True
             for w in (tag, bar):
@@ -1451,7 +1489,11 @@ class PitchHelperWindow(QMainWindow):
         if cell is None or np.asarray(cell).size == 0:
             self.cell_view.setPixmap(QPixmap())
             self.cell_view.setText("—")
-            self.bar_agree.set_value(0.0, TONE_WARN, "")
+            # ⚠ **還沒疊過的時候不畫那條軌道**（`set_text_only`）。
+            # 這一行本來是 `set_value(0.0, …)`，而自從 0 分改成畫一顆點之後，
+            # 「沒有東西可疊」就跟「疊了，而它们完全對不起來」畫成同一個樣子 ——
+            # 而那正是那個改動要消掉的歧義。
+            self.bar_agree.set_text_only("")
             self.lab_stack.setText("")
             return
         self.cell_view.setPixmap(_pixmap(np.asarray(cell), CELL_BOX))

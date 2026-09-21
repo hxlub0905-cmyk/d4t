@@ -1011,3 +1011,121 @@ def test_a_typed_period_gets_a_score_on_screen(win, ph):
 
     win.spin_px.setValue(120.0)
     assert win.typed_conf()[0] > 50.0, "兩倍週期是真的有重複，不准打成錯的"
+
+
+# --------------------------------------------------------------------------- #
+# 11. ⚠ 純 X／純 Y：**沒在用的那一軸，原點是 0**（F120 第八輪）
+# --------------------------------------------------------------------------- #
+def lines_only(px=60, w=900, h=700, seed=1):
+    """只有直線重複的 line/space —— Y 那一軸完全平。"""
+    rng = np.random.default_rng(seed)
+    _y, x = np.mgrid[0:h, 0:w]
+    img = 110 + 60 * ((x % px) < px * 0.45) + rng.normal(0, 5, (h, w))
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def test_the_unused_axis_does_not_move_the_trim_box(ph):
+    """⚠ **這一輪第四次踩到同一種形狀：同一件事在畫面上有兩個算法。**
+
+    `lattice_boxes` 裡寫著 ``oy = origin[1] if periodic[1] else 0.0`` ——
+    沒在用的那一軸，原點是 0。`trim_to_inner` 本來沒有那一行，於是 X only
+    模式下它拿相位搜尋回來的 `oy`（實測 129）當上邊界，而格子是從 y=0 開始、
+    整張高 —— **一格都塞不進去**。
+    """
+    box = ph.trim_to_inner((700, 900), 60.0, 700.0, (59, 129), (True, False))
+    assert box is not None
+    assert box[1] == 0 and box[3] == 700, ("沒在用的那一軸要整張都算", box)
+    assert box[0] > 0 and box[2] < 900, ("在用的那一軸才剪", box)
+
+
+def test_x_only_still_stacks_cells_with_edges_skipped(win, ph):
+    """使用者看到的那一面：**格線沒了、0 cells、一條紅的「this period is
+    wrong」—— 而那個週期是對的**（信心 92）。"""
+    img = lines_only(px=60)
+    win.set_image(img, "lines.tif")
+    win.chips_axis.set_text(ph.AXIS_X)
+    win._on_done(*_run(win, win._work), "")
+    assert win.skip_edges(), "預設就是去邊界 —— 這個 bug 在預設值上"
+    assert win._gc.n_cells >= ph.MIN_CELLS_AFTER_TRIM, win._gc.n_cells
+    # ⚠ 要真的**剪掉了**，不是靠下面那道「剪完什麼都不剩就回到沒剪的」保險。
+    # 少了這一行，兩個修正裡只要有一個在，這一條就是綠的。
+    assert win._gc.trimmed, "去邊界那一勾是開著的，它就該真的去掉一圈"
+    assert win._gc.n_cells < 14, ("最外一圈要少掉", win._gc.n_cells)
+    assert win._gc.agreement > 0.5, ("對的週期不准被講成錯的", win._gc.agreement)
+    assert win.view.overlay_count() == win._gc.n_cells, "畫的格子＝疊的格子"
+    assert win.rows()[0][1] == "60" and win.rows()[1][1] == ph.PITCH_UNSET
+
+
+def test_a_trim_that_leaves_nothing_falls_back_to_the_untrimmed_stack(win, ph):
+    """⚠ **一個算不出來的答案不准假裝成一個否定的答案。**
+
+    0 格疊出來的 `agreement` 是 0.00，而畫面上 0.00 長得跟「這個週期是錯的」
+    一模一樣。同卡片那一條「算不出來的那一格不寫」。
+    """
+    img = lines_only(px=60)
+    win.set_image(img, "lines.tif")
+    win.chips_axis.set_text(ph.AXIS_X)
+    m, gc = _run(win, win._work)
+    assert gc.n_cells > 0, gc.n_cells
+
+
+def test_nothing_measured_yet_is_not_drawn_as_a_zero(win, ph):
+    """⚠ **「沒有東西可疊」跟「疊了，而它們完全對不起來」不准長得一樣。**
+
+    `Bar` 改成「0 分畫一顆點」之後，這一格就變成了那個改動的反面 —— 還沒有
+    疊過的時候畫一顆點，等於說「這個週期拿了 0 分」。
+    """
+    assert win.bar_agree._track is False, "還沒疊過就不畫軌道"
+    assert not win.btn_copy.isEnabled(), "沒有答案的時候 Copy 是灰的"
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    assert win.bar_agree._track is True and win.btn_copy.isEnabled()
+
+
+def test_the_grid_matches_the_stack_after_a_typed_period(win, ph):
+    """⚠ 同一種形狀的第五次：**畫的格子要跟疊進去的那些是同一批** —— 而
+    使用者打了一個自己的週期之後也一樣。
+
+    這一條跟 `test_the_grid_draws_only_the_cells_that_were_stacked` 的差別是
+    那一條走的是量出來的週期；`trim_to_inner` 吃的是 `effective_period`，
+    所以打進去的那一組是另一條路。
+    """
+    # ⚠ 圖要夠大：`trim_to_inner` 在「剪完剩不到 3 格」時**正確地**不剪，
+    # 而預設的 600×480 配 120×88 剛好就是那一種（4 格剪成 2 格）。
+    img = tiles(px=60, py=44, w=900, h=700)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.spin_px.setValue(120.0)
+    win.spin_py.setValue(88.0)
+    win._on_done(*_run(win, win._work), "")
+    assert win._gc.trimmed, "這個尺寸剪得動，就該剪"
+    assert win.view.overlay_count() == win._gc.n_cells, (
+        win.view.overlay_count(), win._gc.n_cells)
+
+
+def test_a_cancelled_run_does_not_put_a_half_stacked_answer_on_screen(win, ph):
+    """⚠ **被停掉的部分結果拒寫**（鐵則 11 在這個視窗的版本）。
+
+    `run()` 只在「量完週期、還沒開始疊」那一刻檢查 `_stop`。疊圖吃的
+    `progress=self._tick` 回的是 `not self._stop`，所以停在疊圖中途時
+    `build_golden_cell` 會回一份**只疊了一半、`n_cells` 是 0** 的 GoldenCell。
+    那一份走到畫面上長得就是「Cells agree 空白、0 cells」—— 也就是**「這個
+    週期不成立」**，而實情是「這一次沒跑完」。4096² 疊十幾秒，中途改一個設定
+    就踩得到。
+    """
+    img = tiles(px=60, py=44)
+    got = []
+    w = ph._PitchWorker(img, ph.AXIS_AUTO)
+    w.done.connect(lambda m, gc, err: got.append((m, gc, err)))
+    w.stop()                              # 還沒 start 就取消
+    w.run()                               # 同步跑一次（不開執行緒）
+    assert got and got[-1][0] is None, ("停掉的那一份不准帶著 m 出去", got[-1])
+
+    # 而 `_on_done` 對那一份的反應是**什麼都不做** —— 畫面停在上一個完整答案。
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    good = win._gc.n_cells
+    win._on_done(None, None, "")
+    assert win._gc.n_cells == good, "被忽略，不是被覆蓋"

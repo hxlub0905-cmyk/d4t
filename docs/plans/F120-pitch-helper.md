@@ -1,8 +1,8 @@
 # F120 — Pitch helper（丟一張圖進去，回答它的 cell period）
 
-狀態：**第七版，等使用者看過（2026-09-21）** —— `python -m d4t pitch` 開得
-起來，四點追加的需求都在（§5／§5.1／§5.2），使用者七輪回饋都做完（最後一輪
-在 §18）。⚠ **不寫「已收斂」**：使用者還沒
+狀態：**第八版，等使用者看過（2026-09-21）** —— `python -m d4t pitch` 開得
+起來，四點追加的需求都在（§5／§5.1／§5.2），使用者七輪回饋都做完（§18），
+第八輪是「截其他狀態的圖」而那幾張圖抓出三個 bug（§19）。⚠ **不寫「已收斂」**：使用者還沒
 在真實影像上用過，而這種工具的驗收只有那一件事算數。⚠ §5 那顆「格線」按鈕
 **做的時候從「一顆鈕」改成「預設開著」**，理由與它揪出來的那個 bug 在 §10。
 
@@ -692,3 +692,87 @@ landed on each other.` 長的那一段留在 tooltip（tooltip 是免費的）�
 （兩份清單逐行相同）。這一輪把那 3 條修掉了（`numbers.format_feature_value`
 的兩路各自收口、`output.py` 的 `source_label` 拿出來再 `callable` 一次），
 現在是 **128 = 上限**。
+
+---
+
+## 19. 第八輪：截其他狀態的圖，截出三個 bug（2026-09-21）
+
+使用者：「好 其他狀態的」。把七個狀態一個一個跑出來截圖 —— **而三個 bug 是
+被那幾張圖抓出來的，不是被測試**。這一輪因此又是 §16.3 那一條的證據：
+**把它畫出來，那些「跑得完、有數字、而且是錯的」才會現形。**
+
+### 19.1 ⚠ 純 X 模式整個壞掉（而預設值就踩得到）
+
+截 `X only` 那一張看到的是：**格線不見了、`0 cells`、一條紅的
+`Cells agree 0.00`、一句「this period is wrong」** —— 而那個 60 px 是對的
+（信心 92，而且它本來就是我合成那張圖用的週期）。
+
+病根在 `trim_to_inner` 的第一行：
+
+```python
+ox, oy = float(origin[0] or 0.0), float(origin[1] or 0.0)   # ← 錯
+```
+
+`lattice_boxes` 裡同一件事寫的是 `oy = float(origin[1]) if periodic[1] else 0.0`
+—— **沒在用的那一軸，原點是 0**。`trim_to_inner` 沒有那一句，於是 X only 時
+它拿相位搜尋在「一格就是整張高」的 Y 軸上回的那個 `oy`（實測 129）當上邊界，
+而格子是從 y=0 開始、700 高 —— **一格都塞不進去**，全部被濾掉。
+
+> **這是這一輪第四次踩到同一種形狀**（`_on_axis`、`_draw` 的週期、畫的格子
+> 跟疊的格子、這裡）：**同一件事在畫面上有兩個算法**。四次的修法都一樣：
+> 讓第二個算法消失，不是讓它跟第一個對齊。
+
+### 19.2 剪完什麼都不剩的時候，回到沒剪的那一份
+
+`trim_to_inner` 擋的是「沿著哪一軸剪幾格」，它答不出「剪完那一塊裝不裝得下
+一個 cell」。而 0 格疊出來的 `agreement` 是 0.00，畫面上長得**跟「這個週期
+是錯的」一模一樣**。`_without_edges` 現在先數，少於 `MIN_CELLS_AFTER_TRIM`
+就回沒剪的那一份。
+
+> **一個算不出來的答案不准假裝成一個否定的答案。**（同卡片那條「算不出來的
+> 那一格不寫」，CLAUDE.md §3。）
+
+### 19.3 ⚠ 被停掉的那一份跑出去了（鐵則 11 在這個視窗的版本）
+
+截「打了一個自己的週期」那一張時，畫面上是 `Cells agree` 空白 ＋ `0 cells`，
+而 `_on_done` 收到的明明是一份 20 格的 GoldenCell。追下去是背景 worker：
+
+`run()` 只在**量完週期、還沒開始疊**那一刻檢查 `_stop`。疊圖吃的
+`progress=self._tick` 回的是 `not self._stop`，所以停在疊圖中途時
+`build_golden_cell` 回一份**只疊了一半、`n_cells` 是 0** 的 GoldenCell，
+而下面那一行照樣 `self.done.emit(m, gc, "")` 把它送上畫面。
+
+4096² 疊十幾秒，中途改一個設定就踩得到，而使用者看到的是「這個週期不成立」。
+現在疊完再檢查一次 `_stop`，被停掉的那一份發 `(None, None, "")` ——
+`_on_done` 對 `m is None` 直接忽略，畫面停在上一個**完整**的答案上。
+
+### 19.4 兩個小的（都是 §18 那兩個改動的反面）
+
+* **還沒疊過的時候不畫那條軌道。** `Bar` 改成「0 分畫一顆點」之後，
+  `_fill_stack` 的空狀態（`set_value(0.0, …)`）就變成那個改動的反面：
+  「沒有東西可疊」跟「疊了，而它們完全對不起來」畫成同一個樣子。改成
+  `set_text_only("")`。
+* **沒有答案的時候 Copy 是灰的。** 一顆按下去只會說「還沒量到東西」的按鈕，
+  在畫面上是一個問題，不是一個功能。
+
+### 19.5 一個**不是** bug 的（記下來，免得下次再追一次）
+
+截圖上一度看到「caption 說 25 cells、疊圖那一格說 60 cells」。那是**截圖腳本
+自己的 race**：打週期會真的開一支背景 worker，腳本沒停掉它就自己 `_on_done`
+一份，兩次 refresh 混在同一張圖上。產品這一面有測試守著
+（`test_the_grid_matches_the_stack_after_a_typed_period`，這一輪加的）。
+
+⚠ 寫那一條測試的時候第一版是紅的，而**紅的是測試不是產品**：預設的 600×480
+配 120×88 剛好落在「剪完剩不到 3 格」，`trim_to_inner` 正確地不剪。測試改用
+900×700。
+
+### 19.6 這一輪的守門（`tests/test_ui_pitch_helper.py`，89 → 條）
+
+| 測試 | 守什麼 |
+|---|---|
+| `test_the_unused_axis_does_not_move_the_trim_box` | 19.1 的純函式那一面（拿掉修正會紅）|
+| `test_x_only_still_stacks_cells_with_edges_skipped` | 19.1 使用者看到的那一面；順便釘住「真的有剪」，不然 19.2 那道保險會讓它假綠 |
+| `test_a_trim_that_leaves_nothing_falls_back_to_the_untrimmed_stack` | 19.2 |
+| `test_a_cancelled_run_does_not_put_a_half_stacked_answer_on_screen` | 19.3 |
+| `test_nothing_measured_yet_is_not_drawn_as_a_zero` | 19.4 |
+| `test_the_grid_matches_the_stack_after_a_typed_period` | 19.5 |
