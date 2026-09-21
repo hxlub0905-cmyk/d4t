@@ -144,7 +144,7 @@ f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
 7be8a6f82dc5572324c987829bf172622c4a0e63 d4t/ui/param_form.py
-9cf1b38051f924272a7c3123e29922f40a7710df d4t/ui/pitch_helper.py
+6b5f33ff0bb4e8e7bbba1a7ade20f4c2c143afe6 d4t/ui/pitch_helper.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py

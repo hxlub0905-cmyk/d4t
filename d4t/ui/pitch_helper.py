@@ -1039,9 +1039,13 @@ class PitchHelperWindow(QMainWindow):
         self.cell_view = QLabel(box)
         self.cell_view.setFixedSize(CELL_BOX, CELL_BOX)
         self.cell_view.setAlignment(Qt.AlignCenter)
+        # ⚠ 線粗與圓角**吃 token**（`hairline` / `radius_sm`），不寫 1px / 4px
+        # —— 同 U12 那條「字級、線粗、圓角只有一個家」（`tests/test_ui_design_
+        # tokens.py` 會擋）。螢幕變了要一起改，而「一起」的前提是只有一個地方。
         self.cell_view.setStyleSheet(
-            "background:%s;border:1px solid %s;border-radius:4px;color:%s;"
-            % (TOKENS["bg_page"], TOKENS["border_default"], TOKENS["text_hint"]))
+            "background:%s;border:%s solid %s;border-radius:%s;color:%s;"
+            % (TOKENS["bg_page"], TOKENS["hairline"], TOKENS["border_default"],
+               TOKENS["radius_sm"], TOKENS["text_hint"]))
         self.cell_view.setText("—")
         self.cell_view.setToolTip(
             "Every cell the grid cut, averaged on top of each other. Crisp "
