@@ -212,6 +212,7 @@ Path 行都建在它上面。
 | `RegionCheckWindow` | 一邊看區域畫在很多顆上、一邊改那張 Region 卡 |
 | `GcGeneratorWindow` | 產模擬資料是一件**跟主視窗無關**的事（它自己是一個小工具，不吃目前的 recipe）|
 | `LatticeDialog` | 一邊看格線鋪在原圖上對不對、一邊在模板對話框改 cell 尺寸 —— 它是模板對話框那顆「Grid」開關的另一半（F104），開著它 re-stack 格線會跟著換 |
+| `PitchHelperWindow` | 它算出來的那個數字，使用者下一步就是打進 Studio 的模板對話框／卡片裡 —— 一邊看著它一邊打，正是那個迴圈（F120）。跟 `GcGeneratorWindow` 同一種：有自己的 CLI 進入點（`python -m d4t pitch`），不吃目前的 recipe |
 
 其餘一律 modal（`WelcomeDialog`、`TemplateDialog`、`ChartSettingsDialog`、
 `GraphBuilderDialog`、`CurveDialog`、`StatusHistoryDialog`、
