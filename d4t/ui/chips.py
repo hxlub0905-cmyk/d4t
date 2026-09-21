@@ -178,7 +178,12 @@ class _ChipBase(QFrame):
 
     toggled = Signal(str, bool)
 
-    H = 30
+    #: ⚠ **這個數字跟按鈕是同一個節奏**（`theme` 的 QSS：1px 邊框 ＋ 7px
+    #: padding ＋ 18px min-height = 34）。膠囊跟按鈕、輸入框常常排在同一欄裡，
+    #: 只改一邊那一欄就會參差 —— 而那正是 theme 裡那段「one vertical rhythm」
+    #: 的註解寫下來要防的事。
+    #: 30 → 34（F120，2026-09-21，跟按鈕一起）。
+    H = 34
     GLYPH = 19
     #: ⚠ **字級要用 px 並且同時寫進 stylesheet**：QSS 的 ``* { font-size: 13px }``
     #: 會蓋掉 ``setFont``，於是「量寬度用的字」與「畫出來的字」不是同一個 ——

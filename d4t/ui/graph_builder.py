@@ -341,7 +341,17 @@ class GraphBuilderDialog(QDialog):
         labels = dict(getattr(frame, "labels", None) or {})
         fixed = [c for c in cols if c not in chart_draw.metric_columns(frame)]
 
-        root = QVBoxLayout(self)
+        # ⚠ **內容本身就比一台 1366×768 的筆電還高，所以它要能捲。**
+        # 這個對話框的最小高度本來是 723，而那台機器的可用高度是 768 —— 只剩
+        # 45 px 的餘地。F120 把全 app 的控制項從 30 px 抬到 34 px（使用者要求）
+        # 之後它變成 767，`test_ui_small_screen` 當場紅了。
+        #
+        # 但 45 px 的餘地本來就不是「有放下」，是「還沒放不下」：這裡的十一排
+        # 控制項只要再多一排就會撞牆。真正的修法是 `fit_screen` 檔頭寫的那一句
+        # ——「內容本身就比螢幕高的話，把版面掛到 `scroll_host` 上」。
+        # ⚠ **只能在建構時掛**：事後把既有版面搬進捲軸在 PySide6 上是 segfault
+        #（CLAUDE.md §4 三件會安靜做錯的事之一）。
+        root = QVBoxLayout(fit_screen.scroll_host(self))
         root.setContentsMargins(12, 10, 12, 12)
         root.setSpacing(8)
 
