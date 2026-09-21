@@ -83,7 +83,7 @@ from d4t.core.algo import period2d as algo_period2d
 from d4t.core.algo import template as algo_template
 from d4t.core.log import swallowed
 
-from . import fit_screen, theme
+from . import branding, fit_screen, theme
 from .chips import ChoiceChips
 from .crop_dialog import CropDialog, crop_array, describe_crop
 from .image_view import ImageView
@@ -717,6 +717,8 @@ class PitchHelperWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Pitch helper — d4t")
+        # **自己的圖示**（F120）：工作列上要分得出這不是 Studio。
+        self.setWindowIcon(branding.pitch_icon())
 
         self._full: Optional[np.ndarray] = None      # 載進來的原圖
         self._work: Optional[np.ndarray] = None      # 裁過的（量的就是它）
@@ -764,8 +766,12 @@ class PitchHelperWindow(QMainWindow):
             "Measure from one part only — leave out the defect, scribe lines "
             "and the scale bar. They are not the repeating layout.")
         self.btn_crop.clicked.connect(self.ask_crop)
-        for b in (self.btn_open, self.btn_paste, self.btn_crop):
+        # **入口要長得像入口。** 三顆一樣灰的鈕，使用者第一眼不知道該按哪一個
+        # —— 而這個視窗只有一個起點。
+        self.btn_open.setObjectName("primary")   # 藍的那一顆（見 theme 的 #primary）
+        for b in (self.btn_paste, self.btn_crop):
             b.setProperty("variant", "secondary")
+        for b in (self.btn_open, self.btn_paste, self.btn_crop):
             row.addWidget(b)
         self.lab_source = QLabel("Drop an image here, open one, or paste one.",
                                  self)
@@ -797,6 +803,18 @@ class PitchHelperWindow(QMainWindow):
         lay.addLayout(row)
         return box
 
+    @staticmethod
+    def _section(parent: QWidget, text: str) -> QLabel:
+        """一條分段標題（次要色 ＋ 底線）。
+
+        用的是這個 app 自己的 ``paramSection`` 樣式，**不發明第二種分段長相**
+        —— 設定區已經是這個樣子，使用者不必學兩次。它買到的是**節奏**：
+        第一版右欄是五塊東西用 6 px 疊在一起，而「排版很怪」多半就是這個。
+        """
+        lab = QLabel(str(text), parent)
+        lab.setObjectName("paramSection")
+        return lab
+
     def _answer_side(self) -> QWidget:
         box = QWidget(self)
         # ⚠ **這個寬度是量出來的，不是挑的。** 340 的時候：四顆膠囊擠成兩排、
@@ -822,7 +840,7 @@ class PitchHelperWindow(QMainWindow):
             self._tags.append(tag)
             px = QLabel(PITCH_UNSET, box)
             f = px.font()
-            f.setPointSizeF(f.pointSizeF() * 1.7)
+            f.setPointSizeF(f.pointSizeF() * 1.9)
             f.setBold(True)
             px.setFont(f)
             self.grid_answer.addWidget(px, r, 1)
@@ -837,6 +855,7 @@ class PitchHelperWindow(QMainWindow):
         lay.addLayout(self.grid_answer)
 
         # ---- 哪個方向 -----------------------------------------------------
+        lay.addWidget(self._section(box, "Which way it repeats"))
         self.chips_axis = ChoiceChips(AXES, AXIS_ICONS, AXIS_AUTO,
                                       helps=AXIS_HELP, labels=AXIS_LABELS,
                                       parent=box)
@@ -844,6 +863,7 @@ class PitchHelperWindow(QMainWindow):
         lay.addWidget(self.chips_axis)
 
         # ---- 不對的話自己改 -----------------------------------------------
+        lay.addWidget(self._section(box, "Not the cell you want?"))
         fix = QHBoxLayout()
         fix.setSpacing(4)
         self.spin_px = self._period_spin(box, "across")
@@ -876,9 +896,14 @@ class PitchHelperWindow(QMainWindow):
         lay.addLayout(self.row_try)
 
         # ---- 憑什麼相信它：疊出來的 Golden Cell -----------------------------
+        # ⚠ 標題走 `_section`（跟其他三段同一種長相），卡片本身**不帶標題**。
+        # 第一版是 `QGroupBox` 自己的標題樣式，於是同一個畫面上有兩種分段長相
+        # —— 而「排版很怪」多半就是這種不一致累積出來的。
+        lay.addWidget(self._section(box, "Stacked cell — sharp means it is right"))
         lay.addWidget(self._proof_box(box))
 
         # ---- 單位 ---------------------------------------------------------
+        lay.addWidget(self._section(box, "Units"))
         unit = QHBoxLayout()
         self.spin_nm = QDoubleSpinBox(box)
         self.spin_nm.setRange(0.0, 1e6)
@@ -935,9 +960,9 @@ class PitchHelperWindow(QMainWindow):
         那幾格**彼此**對得多齊，無量綱、跨影像可比，所以它才是那個可以配門檻
         的數字。**人眼看那張圖 ＋ 這個數字**，兩個一起才完整。
         """
-        box = QGroupBox("Stacked cell — sharp means the period is right", parent)
+        box = QGroupBox(parent)            # 無標題：標題是上面那一條 `_section`
         lay = QHBoxLayout(box)
-        lay.setContentsMargins(8, 6, 8, 8)
+        lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(10)
         self.cell_view = QLabel(box)
         self.cell_view.setFixedSize(CELL_BOX, CELL_BOX)
@@ -1511,6 +1536,9 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(list(argv or []))
     theme.apply_theme(app)
+    # 這條路是**獨立**的入口（`python -m d4t pitch`），所以整個 app 的圖示
+    # 就是 helper 的，不是 Studio 的。
+    app.setWindowIcon(branding.pitch_icon())
     win = PitchHelperWindow()
     win.show()
     return int(app.exec())

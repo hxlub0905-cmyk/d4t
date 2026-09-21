@@ -111,3 +111,78 @@ def test_ports_carry_the_stage_colours(qapp, label, x, y, token):
         "%s：圖示上是 %s，theme.PALETTES['dark']['%s'] 是 %s —— "
         "改了分段色就要一起改 d4t/ui/assets/d4t.svg"
         % (label, got, token, want))
+
+
+# --------------------------------------------------------------------------
+# 4. Pitch helper 自己的圖示（F120，2026-09-21）
+#
+# 使用者：「這個 helper 要有一個自己的 icon（獨立於 d4t）」。
+# ⚠ **獨立不等於無關**：磚的形狀跟 `d4t.svg` 一樣（同一套工具的不同入口），
+# 分別在顏色 —— d4t 是三段式的藍／橙／紫，這一支只有 Measure 的橙。
+# --------------------------------------------------------------------------
+def test_the_pitch_icon_is_a_separate_file():
+    from d4t.ui.branding import ICON_PATH, PITCH_ICON_PATH
+
+    assert os.path.isfile(PITCH_ICON_PATH)
+    assert PITCH_ICON_PATH != ICON_PATH, "helper 要有自己的一顆，不是共用 d4t 的"
+
+
+def test_the_pitch_icon_is_wellformed_svg():
+    from d4t.ui.branding import PITCH_ICON_PATH
+
+    root = ET.parse(PITCH_ICON_PATH).getroot()
+    assert root.tag == "{%s}svg" % SVG_NS
+    assert root.get("viewBox") == "0 0 64 64"
+
+
+@pytest.mark.parametrize("size", [16, 24, 32, 48, 64, 128, 256])
+def test_the_pitch_icon_renders_at_every_size(qapp, size):
+    """Qt 真的畫得出來 —— 萬一 SVG plugin 沒被打包進去，這裡會紅，
+    而不是等使用者在廠內看到一個空白圖示。"""
+    from d4t.ui.branding import pitch_icon
+
+    pm = pitch_icon().pixmap(size, size)
+    assert not pm.isNull() and pm.width() == size
+
+
+def test_the_pitch_icon_wears_the_measure_colour():
+    """橙色**逐字取自** `theme.PALETTES["dark"]["stage_measure"]`。
+
+    量東西是 Measure 段，而這支 helper 從頭到尾只做那一件事 —— 圖示跟畫面上
+    的階段色講同一套語言。有人改了階段色卻忘了改圖示，這裡就會擋下來。
+    """
+    from d4t.ui.branding import PITCH_ICON_PATH
+
+    text = open(PITCH_ICON_PATH, encoding="utf-8").read()
+    want = theme.PALETTES["dark"]["stage_measure"]
+    assert want in text, "圖示上的橙要是 %s" % want
+
+
+def test_the_pitch_icon_keeps_the_family_shape():
+    """磚的形狀跟 `d4t.svg` 一樣 —— **形狀講家族，顏色講這是哪一段**。
+
+    兩顆圖示擺在工作列上要看得出是同一套工具；差別在顏色，不在輪廓。
+    """
+    from d4t.ui.branding import ICON_PATH, PITCH_ICON_PATH
+
+    def brick(path):
+        for el in ET.parse(path).getroot():
+            if el.tag == "{%s}rect" % SVG_NS:
+                return el.get("rx"), el.get("fill")
+        return None
+
+    assert brick(PITCH_ICON_PATH) == brick(ICON_PATH)
+
+
+def test_the_helper_window_wears_its_own_icon(qapp):
+    """視窗圖示不是 Studio 的 —— 工作列上要分得出來。"""
+    from d4t.ui import pitch_helper
+    from d4t.ui.branding import app_icon
+
+    win = pitch_helper.PitchHelperWindow()
+    try:
+        got = win.windowIcon().pixmap(64, 64).toImage()
+        assert not got.isNull()
+        assert got != app_icon().pixmap(64, 64).toImage(), "那是 Studio 的圖示"
+    finally:
+        win.close()

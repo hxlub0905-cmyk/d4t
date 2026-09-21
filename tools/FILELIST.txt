@@ -99,10 +99,11 @@ e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 d4t/ui/__init__.py
 69081c611d94599b822fd245b3a73541d46d9329 d4t/ui/assets/d4t-wordmark-dark.svg
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
+84571ade5ede4209a11b9e631eb51681ea52c07f d4t/ui/assets/pitch.svg
 bd2b6c2523251e7f43333ff4d33788aceb6da270 d4t/ui/attach_sources.py
 5e31dc421aa5ec78eb6d93af5476c3104f221ea7 d4t/ui/autosave.py
 d7b22eefab71fa356cf843110791075b6f90e889 d4t/ui/baseline.py
-87bce11608d08f4302947e917b2b24d076571775 d4t/ui/branding.py
+2ed949cf83f98744b1e214a9e9f4bb293f92ea77 d4t/ui/branding.py
 5e77c4d8ecdaf8996d63096f385907c1768cbeee d4t/ui/buttons.py
 f27281d83061b0b99978ca37e6fdf1ea27575278 d4t/ui/canvas.py
 ceb86639193167087061b6eeb589466eb2d7d0d1 d4t/ui/canvas_edges.py
@@ -143,7 +144,7 @@ f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
 7be8a6f82dc5572324c987829bf172622c4a0e63 d4t/ui/param_form.py
-57760ab4de5fbc5e1e44e4d5bb5b59003208bd14 d4t/ui/pitch_helper.py
+c9c4572583da46909d96230ddd00b02f773bd02c d4t/ui/pitch_helper.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
@@ -192,7 +193,7 @@ c5f2884af2db0aa389b496c4ebec6cb2962e745a docs/PITFALLS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
 4a56b0ed65886c59f4282f7e67cbc1ac0a64c140 docs/plans/F117-ui-review.md
-e1f071f75d24fcfe4dafaba409fc2eb1787a0e4b docs/plans/F120-pitch-helper.md
+849a656c8c3b6d25f877bac18eda670ce3b494de docs/plans/F120-pitch-helper.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -360,7 +361,7 @@ b413bfbc215fa061999a23332ad0c6846473e458 tests/test_synth_mgepi.py
 4fcfbd113d75ed6080ba9093108132345d43271f tests/test_ui_adc_on_canvas.py
 af2ce1b7e8d8141ed5b7ff487b5803172ac06817 tests/test_ui_autosave.py
 22dfda65f392ac86708e9ac1c66cf93954b89f7b tests/test_ui_baseline.py
-49da1043bd0d178b53467ae55d8d3018765a0b87 tests/test_ui_branding.py
+8e0e2ba31be8c139757b9e52e5f8eab629a0ac59 tests/test_ui_branding.py
 558da48008419d384fb408b8f829c8c2e82b8188 tests/test_ui_bridge_after_delete.py
 01839358c3dfe6728359816fbdc6c2379b4f4b4c tests/test_ui_button_labels.py
 ea726228058ab2350165cc086f03946cf96c6516 tests/test_ui_canvas.py
