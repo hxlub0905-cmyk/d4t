@@ -49,18 +49,30 @@ def qapp():
 
 
 def _ink(widget, x0: int, x1: int) -> int:
-    """widget 畫出來之後，[x0, x1) 這條直帶裡有多少畫素不是它的底色。"""
+    """widget 畫出來之後，[x0, x1) 這條直帶裡有多少畫素不是它的底色。
+
+    ⚠ **高度要問控制項本人，不能寫死。** 這裡本來是 `resize(200, 26)`，而
+    F120 把輸入框的節奏從 30 抬到 34 之後，26 就**比它的最小高度還小** ——
+    `resize` 不會照做，於是 widget 是 32 高、而上面那張 pixmap 是 26 高。
+    兩者不一致的結果是控制項的**下緣邊框落進取樣範圍**，一個 QLineEdit 就
+    「長出了一支箭頭」（實測 42 個墨點）。
+
+    這一條測的是**箭頭畫在不在那條直帶裡**，跟高度無關 —— 所以高度交給
+    `minimumSizeHint()`，而 pixmap 在 resize **之後**才建。
+    """
     from PySide6.QtGui import QColor
 
-    widget.resize(200, 26)
+    widget.resize(200, max(26, widget.minimumSizeHint().height()))
     pm = QPixmap(widget.size())
     pm.fill(QColor("#808080"))          # 中性灰：淺色與深色主題都不會剛好同色
     widget.render(pm)
     img = pm.toImage()
-    bg = img.pixelColor(widget.width() // 2, widget.height() // 2)
+    # ⚠ 用**影像**的尺寸掃，不是 widget 的：`render()` 可能在中途把 widget
+    # 撐到它的最小尺寸，而那張圖已經建好了。
+    bg = img.pixelColor(img.width() // 2, img.height() // 2)
     n = 0
-    for x in range(x0, x1):
-        for y in range(4, widget.height() - 4):
+    for x in range(x0, min(x1, img.width())):
+        for y in range(4, img.height() - 4):
             p = img.pixelColor(x, y)
             if (abs(p.red() - bg.red()) + abs(p.green() - bg.green())
                     + abs(p.blue() - bg.blue())) > 30:
