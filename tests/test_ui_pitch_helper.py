@@ -756,13 +756,24 @@ def test_details_start_folded_and_open_on_demand(win, ph):
 
 
 def test_copy_puts_a_usable_line_on_the_clipboard(win, ph, app):
+    """⚠ **這一條的名字一直是對的，錯的是它的斷言。**
+
+    它本來斷言剪貼簿裡是
+    ``X 60 px (0.150 µm)  Y 44 px (0.110 µm)`` —— 而那是一個**貼進任何
+    一格都會被拒絕的字串**。這個數字的去處是 `Cell W` / `Cell H`
+    兩個各自的輸入框（使用者 2026-09-21：「複製應該要能直接複製
+    數字（不包含單位）」）。
+
+    > **能帶走答案跟能用答案是兩回事。**
+    """
+    from PySide6.QtGui import QGuiApplication
+
     _ready(win)
     win.spin_nm.setValue(2.5)
-    text = win.answer_text()
-    assert "X 60 px" in text and "0.150 µm" in text, text
-    win.copy_answer()
-    from PySide6.QtGui import QGuiApplication
-    assert QGuiApplication.clipboard().text() == text
+    win.copy_axis(0)
+    assert QGuiApplication.clipboard().text() == "60"
+    win.copy_axis(1)
+    assert QGuiApplication.clipboard().text() == "44"
 
 
 def test_copy_only_carries_the_axes_in_use(win, ph):
@@ -983,11 +994,42 @@ def test_the_copy_button_sits_with_the_thing_it_copies(win, ph, app):
 
 
 def test_the_copy_button_says_what_it_will_copy(win, ph):
-    """另一半答案：**tooltip 裡有那一行字本人**，不是「複製 pitch」。"""
+    """另一半答案：**tooltip 裡有那個數字本人**，不是「複製 pitch」。"""
     img = tiles(px=60, py=44)
     win.set_image(img, "a.tif")
     win._on_done(*_run(win, img), "")
-    assert win.answer_text() in win.btn_copy.toolTip(), win.btn_copy.toolTip()
+    for i, (num, cell) in enumerate((("60", "Cell W"), ("44", "Cell H"))):
+        tip = win._copy_buttons[i].toolTip()
+        assert num in tip and cell in tip, tip
+
+
+def test_each_axis_has_its_own_copy_key(win, ph):
+    """使用者 2026-09-21：「X 跟 Y 都要有複製鍵」。
+
+    而**沒在用的那一軸連複製鍵都不出現** —— 同那一列數字的規矩
+    （按下 X only 的人知道 Y 還在，那一列對他只是噪音）。
+    """
+    img = lines_only(px=60)
+    win.set_image(img, "lines.tif")
+    win.chips_axis.set_text(ph.AXIS_X)
+    win._on_done(*_run(win, win._work), "")
+    assert len(win._copy_buttons) == 2
+    assert not win._copy_buttons[0].isHidden()
+    assert win._copy_buttons[1].isHidden(), "Y 沒在用，它的複製鍵不該在"
+    assert win.axis_number(1) == "", "沒在用的軸沒有數字可複"
+
+
+def test_the_copied_number_is_the_one_on_screen(win, ph):
+    """⚠ 複製走的是 `rows()` —— **畫面上那個數字本人**，不是再算一次。
+
+    使用者打進去的週期、×2、候選一鍵套用，複製到的都要是他看到的那一個。
+    """
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    assert win.axis_number(0) == "60"
+    win.spin_px.setValue(120.0)
+    assert win.axis_number(0) == "120", "改了就複改完的那個"
 
 
 def test_typing_does_not_recompute_on_every_keystroke(win, ph):
@@ -1326,7 +1368,11 @@ def test_only_the_real_actions_get_a_box(win, ph):
     right = win.btn_copy.parentWidget()
     boxed = [b for b in right.findChildren(QPushButton)
              if not b.isHidden() and b.property("variant") == "secondary"]
-    assert len(boxed) <= 4, ("有框的鈕太多了", [b.text() for b in boxed])
+    # ⚠ **4 → 5：這個上限漲了一格，而它有理由。** 第十三輪一顆 Copy 拆成
+    # `Copy X` / `Copy Y`（使用者：「X 跟 Y 都要有複製鍵」）—— 多出來的那一顆
+    # 是**一個真的動作**，不是裝飾。這條線守的是「候選不准跟動作一樣吵」，
+    # 那件事沒有變。
+    assert len(boxed) <= 5, ("有框的鈕太多了", [b.text() for b in boxed])
     assert win._try_buttons, "這張圖應該有候選"
     for b in win._try_buttons:
         assert b.property("variant") == "ghost", b.text()

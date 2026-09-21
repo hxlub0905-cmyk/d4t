@@ -912,6 +912,13 @@ class PitchHelperWindow(QMainWindow):
         self.chk_grid = QCheckBox("Cut lines", box)
         self.chk_grid.setChecked(True)
         self.chk_grid.setToolTip("Draw the cell boundaries on the image.")
+        # ⚠ **這一顆的方塊就是色標。** 它旁邊寫著 "Cut lines"，而那些線是青色
+        # 的 —— 勾選框卻是 app 的 accent 藍，於是那個方塊被讀成「線是藍的」。
+        # 另外兩顆勾選框（Ignore defects／Skip edge cells）維持 accent：
+        # 它們開關的是行為，不是畫面上某個有顏色的東西。
+        self.chk_grid.setStyleSheet(
+            "QCheckBox::indicator:checked{background:%s;border-color:%s;}"
+            % (GRID_HEX, GRID_HEX))
         self.chk_grid.toggled.connect(lambda _on: self._draw())
         row.addWidget(self.chk_grid)
 
@@ -1074,15 +1081,27 @@ class PitchHelperWindow(QMainWindow):
         # **把答案帶得走** —— 而且它要**貼著那個答案**。
         # 第一版這顆鈕住在下面的 Units 那一段，於是使用者問「copy 是 copy 誰？」
         # ——  一顆按鈕的意思是它旁邊那個東西，不是它自己的字。
+        # ⚠ **一軸一顆，而且複製的是光禿禿的數字**（使用者 2026-09-21：
+        # 「複製應該要能直接複製數字（不包含單位），X 跟 Y 都要有複製鍵」）。
+        # 那一句指出了一件很具體的事：這個數字的去處是 `Cell W` / `Cell H`
+        # **兩個各自的輸入框**，而原本那顆 Copy 給的是
+        # `X 60 px (0.150 µm)  Y 44 px (0.110 µm)` —— **一個貼進任何一格都會
+        # 被拒絕的字串**。能帶走答案跟能用答案是兩回事。
         row_copy = QHBoxLayout()
+        row_copy.setSpacing(6)
         row_copy.addStretch(1)
-        self.btn_copy = GlyphButton("copy", "Copy", parent=box)
-        self.btn_copy.setProperty("variant", "secondary")
-        self.btn_copy.setMaximumWidth(92)
-        self.btn_copy.clicked.connect(self.copy_answer)
-        row_copy.addWidget(self.btn_copy)
+        self._copy_buttons: List[QPushButton] = []
+        for i, axis_name in enumerate(("X", "Y")):
+            b = GlyphButton("copy", "Copy %s" % axis_name, parent=box)
+            b.setProperty("variant", "secondary")
+            b.setMaximumWidth(108)
+            b.clicked.connect(lambda _c=False, k=i: self.copy_axis(k))
+            row_copy.addWidget(b)
+            self._copy_buttons.append(b)
         row_copy.addStretch(1)
         lay.addLayout(row_copy)
+        # 舊名字留著（測試與 `_fill_answer` 讀它），指向 X 那一顆。
+        self.btn_copy = self._copy_buttons[0]
         # **「然後呢」要有人講。** 這個視窗的產出是一個**要拿去別處用**的數字，
         # 而畫面上本來沒有任何一句說它要貼到哪 —— 使用者拿到答案之後還得自己
         # 想起來 Studio 裡那一格叫什麼。
@@ -1158,6 +1177,11 @@ class PitchHelperWindow(QMainWindow):
         # 兩件事只有一種解法：**要查的那天它在，平常不佔畫面。**
         self.btn_details = QPushButton("▸  Details", box)
         self.btn_details.setProperty("variant", "secondary")
+        # ⚠ **不要橫跨整欄。** 量出來它本來是 411 × 30 = **13.7 : 1** ——
+        # 而一個又寬又扁的盒子會讓裡面的字**看起來被拉長**（實際上沒有：
+        # 量過字型的 stretch 是 1.0000，QSS 裡也沒有 font-stretch）。
+        # 使用者回報「按鈕有點扁、文字有點被拉長」，病根是這個長寬比。
+        self.btn_details.setMaximumWidth(150)
         self.btn_details.setCheckable(True)
         self.btn_details.setStyleSheet("text-align:left;")
         self.btn_details.toggled.connect(self._on_details)
@@ -1540,12 +1564,16 @@ class PitchHelperWindow(QMainWindow):
         # **按鈕自己講它會複製什麼** —— 「copy 是 copy 誰？」的另一半答案。
         what = self.answer_text()
         self.lab_next.setVisible(bool(what))
-        # **沒有答案的時候那顆鈕是灰的。** 一顆按下去只會說「還沒量到東西」
+        # **沒在用的那一軸連複製鍵都不出現**（同那一列數字的規矩），
+        # 而沒有答案的時候剩下的那顆是灰的：一顆按下去只會說「還沒量到東西」
         # 的按鈕，在畫面上是一個問題，不是一個功能。
-        self.btn_copy.setEnabled(bool(what))
-        self.btn_copy.setToolTip(
-            ("Copy “%s” to the clipboard." % what) if what
-            else "Nothing measured yet.")
+        for i, b in enumerate(self._copy_buttons):
+            num = self.axis_number(i)
+            b.setVisible(flags[i] if self._m is not None else True)
+            b.setEnabled(bool(num))
+            b.setToolTip(("Puts %s on the clipboard — just the number, "
+                          "ready for Cell %s." % (num, "W" if i == 0 else "H"))
+                         if num else "Nothing measured yet.")
         for i, (bar, tag) in enumerate(zip(self._bars, self._tags)):
             show = flags[i] if self._m is not None else True
             for w in (tag, bar):
@@ -1667,15 +1695,33 @@ class PitchHelperWindow(QMainWindow):
             bits.append(piece)
         return "  ".join(bits)
 
-    def copy_answer(self) -> None:
-        text = self.answer_text()
+    def axis_number(self, i: int) -> str:
+        """那一軸**光禿禿的數字**（沒有單位、沒有軸名）—— Copy 放上剪貼簿的。
+
+        ⚠ 走的是 `rows()`，也就是畫面上那個數字**本人** —— 不是再算一次。
+        使用者打進去的週期、×2、候選一鍵套用，複製到的都會是他看到的那一個。
+        """
+        rows = self.rows()
+        flags = self._flags()
+        if not (0 <= int(i) < 2) or not flags[int(i)]:
+            return ""
+        val = rows[int(i)][1]
+        return "" if val == PITCH_UNSET else str(val)
+
+    def copy_axis(self, i: int) -> None:
+        """把那一軸的數字放上剪貼簿。"""
+        text = self.axis_number(int(i))
         if not text:
             self._say("Nothing measured yet.")
             return
         cb = QGuiApplication.clipboard()
         if cb is not None:
             cb.setText(text)
-        self._say("Copied: %s" % text)
+        self._say("Copied %s" % text)
+
+    def copy_answer(self) -> None:
+        """X 那一軸（舊的進入點 —— 測試與鍵盤走這裡）。"""
+        self.copy_axis(0)
 
     def _fill_stack(self) -> None:
         """疊出來那一格 ＋ 一致性 —— 這是「憑什麼相信它」那一塊。"""
