@@ -28,6 +28,42 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F120 Pitch helper：七輪，而第七輪才發現前三輪沒生效（2026-09-21）
+
+使用者要把「算 repeating pattern 的 cell period」獨立成一個 helper（原本 ROI
+那張卡一個字不動），形狀照 `simgen`：`python -m d4t pitch`。七輪回饋全部在
+[`docs/plans/F120-pitch-helper.md`](docs/plans/F120-pitch-helper.md)。
+
+**這一輪唯一值得記下來的事**：使用者連著三輪說「Period 答案要清楚一點」，而
+**我每一輪都改了、每一輪都沒有生效**。程式碼寫的是
+`f.setPointSizeF(f.pointSizeF() * 2.6)` —— 這個 app 的 QSS 用**像素**設字級，
+所以 `pointSizeF()` 回 **-1**，乘出來是負數，Qt **安靜地忽略**；而且就算改成
+`setPixelSize` 也沒用，因為 QSS 的 `* { font-size }` 贏過 per-widget 的
+`setFont()`。量出來答案的字一直是 13 px，跟旁邊的說明一模一樣。
+
+> **一個沒有生效的視覺改動，看起來跟沒有被聽見一模一樣。**
+> 使用者第三次講同一句話的時候，該懷疑的是「它到底有沒有發生」，不是「要放多大」。
+
+修法是走 QSS 的 objectName（`theme` 新增 `font_answer` token ＋ 三條規則），
+而守門的測試**量渲染出來的 `fontMetrics().height()`**，不是「我們設了什麼」
+—— 已驗證把 objectName 換掉它會紅。⚠ 測試裡要先 `ensurePolished()`：QSS 是
+polish 的時候才套上去的。
+
+同一輪的另外六點：自定義 period 也有 confidence 了（`period.confidence_at`
+—— 不是新演算法，是 `_analyze_axis` 的尾巴在呼叫者指定的 lag 上求值，所以跟
+引擎報的分數同尺度：打 45 對一張 60 的圖得 0.0，長條當場變紅）、換算後的單位
+改 µm、Copy 搬到答案正下方（「copy 是 copy 誰？」）、`X + Y` 改名
+`Force both`、打字中途不重算、疊圖那一行三句收成一句。連帶修掉 `Bar` 的
+「0 分畫成空軌道」（跟「沒有被評分過」長得一樣）與 `_fill_try` 的孤兒候選鈕
+（`removeWidget` 不會讓它從畫面上消失，實拍到它疊在最大的那個答案上）。
+
+⚠ **更正我自己上一輪講錯的數字**：`main` 的 pyright 不是 128 而是 **131**
+（同容器、同版 pyright，用 `git worktree` 開 `origin/main` 量的），也就是
+`main` 自己就超過它自己的上限，而 F120 這條分支一條都沒有加（兩份清單逐行
+相同）。這一輪把那 3 條修掉了，現在 128 = 上限，沒有調高任何天花板。
+
+---
+
 ## F117 I6：畫布、Features、Results 互相指（2026-09-20）
 
 走查 52/58 → 53/58。這三塊講的是同一顆 defect 的三個面向 —— 畫布是**怎麼算
