@@ -263,6 +263,35 @@ class MeasuredPeriod:
     stagger: float = 0.0
     doubled: Tuple[bool, bool] = (False, False)
 
+    # ---- 三票各自的答案（F120，2026-09-21）--------------------------------
+    #
+    # 使用者：「我可以看到每個方法的分數嗎？（顯示細節）」
+    #
+    # 它們本來就**算出來了，然後被丟掉** —— 只有仲裁完的那一組活下來。而
+    # 三票不一致正是「這張圖有點特別」的信號：投影法看到 30、二維看到 60，
+    # 答案是 60，而「投影法看到 30」是關於這個 layout 的一個**事實**
+    # （相鄰列交錯），不是雜訊。留下來給畫面上的 Details 用。
+    #
+    # ⚠ **全部選填、全部有預設值。** 這個 dataclass 不進 recipe、不進 feature、
+    # 不進黃金值，所以加欄位不會動到任何一個數字 —— 但它有第二個呼叫者
+    # （`build_golden_cell`），而那一支只讀 px/py/conf/notes/stagger/doubled。
+    #: 投影法（`period.estimate_period`）自己的答案。``None`` ＝ 那一軸沒找到。
+    proj_px: Optional[float] = None
+    proj_py: Optional[float] = None
+    proj_conf_x: float = 0.0
+    proj_conf_y: float = 0.0
+    #: 二維自相關（`period2d.estimate_period_2d`）自己的答案（次像素）。
+    ac_px: Optional[float] = None
+    ac_py: Optional[float] = None
+    ac_conf_x: float = 0.0
+    ac_conf_y: float = 0.0
+    #: 半週期檢查的增益（`ac[2q] - ac[q]`，正得夠多就加倍）。
+    half_gain_x: float = 0.0
+    half_gain_y: float = 0.0
+    #: 諧波上的其他可能（`estimate_period` 本來就會算）—— 「取錯怎麼辦」的答案。
+    candidates: List[Tuple[Optional[int], Optional[int]]] = field(
+        default_factory=list)
+
 
 def period_text(px: float, py: float) -> str:
     """``"40 x 240"`` 或 ``"41 x 79.5"``（``%d`` 對小數會安靜截斷，所以要有這一支）。"""
@@ -362,9 +391,24 @@ def measure_period(gray: np.ndarray,
             notes.append("the period %s was doubled after the half-period check "
                          "(%s → %s px); rows are probably staggered"
                          % (axis, algo_period2d.fmt_px(was), algo_period2d.fmt_px(now)))
-    return MeasuredPeriod(px=fx, py=fy, conf_x=cx, conf_y=cy,
-                          notes=notes, stagger=float(hp.stagger),
-                          doubled=(bool(hp.doubled_x), bool(hp.doubled_y)))
+    return MeasuredPeriod(
+        px=fx, py=fy, conf_x=cx, conf_y=cy,
+        notes=notes, stagger=float(hp.stagger),
+        doubled=(bool(hp.doubled_x), bool(hp.doubled_y)),
+        # 三票各自的答案（見 `MeasuredPeriod` 那幾個欄位的說明）。
+        proj_px=(float(est.px) if est.px else None),
+        proj_py=(float(est.py) if est.py else None),
+        proj_conf_x=float(est.confidence_x or 0.0),
+        proj_conf_y=float(est.confidence_y or 0.0),
+        ac_px=(float(two.px_sub) if two.px_sub else
+               (float(two.px) if two.px else None)),
+        ac_py=(float(two.py_sub) if two.py_sub else
+               (float(two.py) if two.py else None)),
+        ac_conf_x=float(two.confidence_x or 0.0),
+        ac_conf_y=float(two.confidence_y or 0.0),
+        half_gain_x=float(hp.gain_x or 0.0),
+        half_gain_y=float(hp.gain_y or 0.0),
+        candidates=list(est.candidates or []))
 
 
 def build_golden_cell(image: Any, px: Optional[float] = None,

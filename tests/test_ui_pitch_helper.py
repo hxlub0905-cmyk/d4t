@@ -558,3 +558,183 @@ def test_a_flat_image_says_so_once_not_twice(win, ph):
     assert "no periodic structure detected" not in said, (
         "引擎那句開發者的話不該出現在使用者面前：%r" % said)
     assert "Crop" in said, "答不出來的時候要給下一步"
+
+
+# --------------------------------------------------------------------------- #
+# 7. 取錯怎麼辦：候選、細節、以及「格數太少分數信不過」
+#    （使用者 2026-09-21 第三輪）
+# --------------------------------------------------------------------------- #
+def test_the_candidates_are_the_harmonics_and_never_the_current_one(ph):
+    """取錯幾乎永遠是取到諧波裡的另一個，而那份清單 `estimate_period`
+    **本來就算好了** —— 以前算完就丟。"""
+    m = _M()
+    m.candidates = [(60, 44), (30, 44), (120, 44), (60, 88)]
+    got = ph.candidate_periods(m, (True, True), (60.0, 44.0))
+    assert (60.0, 44.0) not in got, "現在用的那一組不必再提一次"
+    assert (30.0, 44.0) in got and (120.0, 44.0) in got
+
+
+def test_only_the_axes_in_use_appear_in_a_candidate(ph):
+    """純 X 的時候提 `60 × 88` 是沒有意義的 —— Y 根本沒在切。"""
+    m = _M()
+    m.candidates = [(60, 44), (30, 44), (60, 88), (120, 44)]
+    got = ph.candidate_periods(m, (True, False), (60.0, 44.0))
+    assert all(y == 44.0 for _x, y in got), got
+    assert (30.0, 44.0) in got
+    labels = [ph.candidate_label(x, y, (True, False)) for x, y in got]
+    assert all("×" not in s for s in labels), labels
+
+
+def test_the_detail_table_shows_each_method_separately(ph):
+    """使用者：「我可以看到每個方法的分數嗎？」"""
+    m = _M()
+    m.proj_px, m.proj_py, m.proj_conf_x, m.proj_conf_y = 60.0, 44.0, 92.0, 93.0
+    m.ac_px, m.ac_py, m.ac_conf_x, m.ac_conf_y = 60.0, 44.0, 98.0, 98.0
+    m.half_gain_x = m.half_gain_y = 0.0
+    m.doubled = (False, False)
+    rows = ph.detail_rows(m, (True, True))
+    names = [r[0] for r in rows]
+    assert names == ["Projection", "2-D autocorr", "Half-period", "Used"]
+    assert "92" in rows[0][1] and "98" in rows[1][1], rows
+
+
+def test_an_axis_not_in_use_is_a_dash_in_the_detail_table(ph):
+    m = _M()
+    m.proj_px, m.proj_py = 60.0, 44.0
+    rows = ph.detail_rows(m, (True, False))
+    assert all(r[2] == "—" for r in rows), rows
+
+
+def test_too_few_cells_says_the_score_cannot_be_trusted(ph):
+    """⚠ **這一條是量出來的**（F120 第三輪）。漂移 ＝ 誤差 × 格數，所以同一個
+    相對誤差在小圖上累積不起來：真實 60、用 65 去疊，900 px 寬（15 格）
+    agree 0.39 紅，300 px 寬（5 格）**0.76 綠** —— 那個綠燈是假的。
+    """
+    assert ph.trust_note(15) == ""
+    said = ph.trust_note(5)
+    assert said and "5 cells" in said
+    assert "larger" in said or "picture" in said, said
+
+
+def test_the_cell_count_that_matters_is_per_axis_not_the_total(ph):
+    """⚠ **第一版拿錯數字去判斷了**（渲染的時候抓到）。
+
+    300×240 的圖用 65×44 去切是 4×5 ＝ **20 格**，看起來很多 —— 但沿 X 只有
+    **4** 格，而漂移 ＝ 誤差 × 那一軸的格數。拿總格數去比門檻的話，
+    最該被警告的那張圖不會被警告到。
+    """
+    assert ph.cells_along((240, 300), 65.0, 44.0, (True, True)) == 4
+    assert ph.cells_along((240, 300), 65.0, 44.0, (False, True)) == 5
+    assert ph.trust_note(ph.cells_along((240, 300), 65.0, 44.0, (True, True)))
+    assert ph.cells_along((700, 900), 60.0, 44.0, (True, True)) == 15
+    assert ph.trust_note(ph.cells_along((700, 900), 60.0, 44.0, (True, True))) == ""
+
+
+def test_the_score_really_does_go_green_on_a_small_crop(ph):
+    """把上面那句話**釘在真的數字上** —— 沒有這一條，那段註解只是一個說法。"""
+    from d4t.core.algo import template as algo_template
+
+    big = tiles(px=60, py=44, w=900, h=700)
+    small = tiles(px=60, py=44, w=300, h=240)
+    a_big = algo_template.build_golden_cell(big, px=65.0, py=44.0).agreement
+    a_small = algo_template.build_golden_cell(small, px=65.0, py=44.0).agreement
+    assert ph.agree_tone(a_big) == ph.TONE_BAD, a_big
+    assert ph.agree_tone(a_small) == ph.TONE_GOOD, a_small
+    assert ph.trust_note(ph.cells_along((240, 300), 65.0, 44.0, (True, True))), \
+        "小圖那一邊一定要有警告"
+
+
+def test_agreement_degrades_smoothly_with_a_small_error(ph):
+    """使用者：「period 取錯一點點的分數跟影像」—— 它**單調**，所以讀得出來。"""
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44, w=900, h=700)
+    got = [algo_template.build_golden_cell(img, px=p, py=44.0).agreement
+           for p in (60.0, 61.0, 62.0, 63.0)]
+    assert got == sorted(got, reverse=True), got
+    assert ph.agree_tone(got[0]) == ph.TONE_GOOD
+    assert ph.agree_tone(got[-1]) != ph.TONE_GOOD, "差 3 px 不該還是綠的"
+
+
+def test_sharpness_is_not_monotonic_on_small_errors(ph):
+    """⚠ **使用者提的 sharpness 在「差一點點」上會反過來騙人。**
+
+    差 0.5 px 的 stack 拿 39 分，差 3 px 的拿 81 分 —— 照 sharpness 排序會
+    挑掉錯得更多的那一個。這是 F40 那個結論在這個情境下的直接證據。
+    """
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44, w=900, h=700)
+    nearly = algo_template.build_golden_cell(img, px=60.5, py=44.0)
+    worse = algo_template.build_golden_cell(img, px=63.0, py=44.0)
+    assert worse.ghosting > nearly.ghosting, "sharpness 反過來了（這正是重點）"
+    assert worse.agreement < nearly.agreement, "而 agreement 沒有"
+
+
+# --------------------------------------------------------------------------- #
+# 8. 視窗：新加的那幾顆
+# --------------------------------------------------------------------------- #
+def _ready(win, img=None):
+    from d4t.core.algo import template as algo_template
+    img = tiles(px=60, py=44) if img is None else img
+    win.set_image(img, "synthetic.tif")
+    win._on_done(algo_template.measure_period(img), stacked(img), "")
+    return img
+
+
+def test_choosing_one_axis_hides_the_other_row_entirely(win, ph):
+    """使用者 2026-09-21：「純 X 或純 Y 請只要顯示對應的 X 或 Y 就好」。
+
+    ⚠ 這**推翻了第一版**（那時寫 `not used`）：按下 X only 的人是自己按的，
+    他知道 Y 還在 —— 那一列對他只是噪音。
+    """
+    _ready(win)
+    assert win._tags[1].isVisibleTo(win), "Auto 兩軸都在"
+    win.chips_axis.set_text(ph.AXIS_X)
+    win._on_axis(ph.AXIS_X)
+    assert win._tags[0].isVisibleTo(win)
+    assert not win._tags[1].isVisibleTo(win), "Y 那一列要整列不見"
+    assert not win._bars[1].isVisibleTo(win)
+
+
+def test_a_candidate_button_applies_it(win, ph):
+    _ready(win)
+    assert win._try_buttons, "要提得出其他可能"
+    before = [r[1] for r in win.rows()]
+    win._try_buttons[0].click()
+    assert [r[1] for r in win.rows()] != before, "按了要真的換掉"
+    assert win.override() != (None, None)
+
+
+def test_details_start_folded_and_open_on_demand(win, ph):
+    """要查的那天它在，平常不佔畫面（使用者同一輪也說了「不要看一堆文字」）。"""
+    _ready(win)
+    assert not win.details.isVisibleTo(win)
+    win.btn_details.setChecked(True)
+    assert win.details.isVisibleTo(win)
+    text = win.details.text()
+    assert "Projection" in text and "2-D autocorr" in text
+
+
+def test_copy_puts_a_usable_line_on_the_clipboard(win, ph, app):
+    _ready(win)
+    win.spin_nm.setValue(2.5)
+    text = win.answer_text()
+    assert "X 60 px" in text and "150 nm" in text, text
+    win.copy_answer()
+    from PySide6.QtGui import QGuiApplication
+    assert QGuiApplication.clipboard().text() == text
+
+
+def test_copy_only_carries_the_axes_in_use(win, ph):
+    _ready(win)
+    win.chips_axis.set_text(ph.AXIS_X)
+    win._on_axis(ph.AXIS_X)
+    assert "Y" not in win.answer_text(), win.answer_text()
+
+
+def test_the_median_stack_is_a_tick_not_a_hidden_setting(win, ph):
+    """大圖中間常常就是缺陷本體，而 mean 會把它抹進 GC。"""
+    assert win.stack_method() == "mean"
+    win.chk_median.setChecked(True)
+    assert win.stack_method() == "median"

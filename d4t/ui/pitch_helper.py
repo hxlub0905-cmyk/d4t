@@ -105,7 +105,9 @@ __all__ = [
     "pitch_rows", "effective_period", "conf_tone", "agree_tone", "Override",
     "PITCH_UNSET", "PITCH_NOT_USED", "CONF_TYPED", "TONE_GOOD", "TONE_WARN",
     "TONE_BAD", "CONF_GOOD_FROM", "AGREE_GOOD_FROM", "CELL_BOX",
-    "BAR_W", "BAR_H", "run",
+    "BAR_W", "BAR_H", "candidate_periods", "candidate_label",
+    "detail_rows", "trust_note", "MIN_CELLS_TO_TRUST",
+    "MAX_CANDIDATES", "cells_along", "run",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -217,6 +219,142 @@ def nm_text(value: float, used: bool, nm_per_px: float) -> str:
     nm = v * s
     return "%s nm" % ("{:,.1f}".format(nm).rstrip("0").rstrip(".")
                       if nm < 1000 else "{:,.0f}".format(nm))
+
+
+#: 一張圖裡至少要放得下這麼多格，`agreement` 才讀得出「差一點點」。
+#:
+#: ⚠ **這個數字是量出來的，而且它推翻了一個我原本以為成立的假設**（F120，
+#: 2026-09-21）。漂移 ＝ 誤差 × 格數，所以同一個相對誤差在小圖上根本累積不起來：
+#: 真實 pitch 60、故意用 65（差 8.3%）去疊 ——
+#:
+#: =========  ======  ================
+#: 影像        格數    cells agree
+#: =========  ======  ================
+#: 900 px 寬   15      **0.39**（紅，對）
+#: 300 px 寬   5       **0.76**（綠，錯）
+#: =========  ======  ================
+#:
+#: 也就是說**裁太小的時候那個綠燈是假的**。分數本身沒有錯（那幾格在那張小圖上
+#: 真的對得起來），錯的是拿它回答「週期對不對」。所以格數太少要講出來。
+MIN_CELLS_TO_TRUST = 8
+
+#: 最多提幾個候選（畫面上一排，多了就變成一張表）。
+MAX_CANDIDATES = 4
+
+
+def cells_along(shape: Tuple[int, int], px: float, py: float,
+                flags: Tuple[bool, bool]) -> int:
+    """**在用的那幾軸裡，格數最少的那一軸有幾格。**
+
+    ⚠ **不是總格數。** 第一版拿 `GoldenCell.n_cells`（= nx × ny）去判斷，而
+    那答的是另一個問題：300×240 的圖用 65×44 去切是 4×5 ＝ **20 格**，看起來
+    很多 —— 但沿 X 只有 **4** 格，而漂移 ＝ 誤差 × **那一軸的**格數。
+    拿 20 去比門檻的話，最該警告的那張圖不會被警告到。
+    """
+    h, w = int(shape[0]), int(shape[1])
+    counts = []
+    if flags[0] and float(px or 0) >= MIN_PERIOD_PX:
+        counts.append(int(w // float(px)))
+    if flags[1] and float(py or 0) >= MIN_PERIOD_PX:
+        counts.append(int(h // float(py)))
+    return min(counts) if counts else 0
+
+
+def trust_note(n_along: int) -> str:
+    """格數夠不夠讓 `agreement` 說得上話；夠的話回空字串。
+
+    ``n_along`` 是 :func:`cells_along` 的答案（**單軸**，不是總格數）。
+    """
+    n = int(n_along or 0)
+    if n >= MIN_CELLS_TO_TRUST:
+        return ""
+    return ("only %d cells fit along one direction — “cells agree” cannot tell "
+            "a slightly wrong period from a right one at this size. Judge by "
+            "the stacked picture, or measure from a larger area." % n)
+
+
+def candidate_periods(measured: Any, flags: Tuple[bool, bool],
+                      current: Tuple[float, float],
+                      cap: int = MAX_CANDIDATES
+                      ) -> List[Tuple[float, float]]:
+    """「取錯怎麼辦」的答案：**諧波上的其他可能**，點一下就套用。
+
+    取錯幾乎永遠是取到諧波裡的另一個（半週期、兩倍、只有一軸是倍數），而
+    `estimate_period` **本來就把那份清單算出來了**（`MeasuredPeriod.candidates`）
+    —— 它以前算完就被丟掉。分數回答「它為什麼選這個」，這份清單回答
+    「**那我現在該怎麼辦**」，而使用者問的是後者。
+
+    規則：現在用的那一組不列（它已經在畫面上了）、沒在用的軸不列
+    （純 X 的時候提 `60×88` 是沒有意義的）、同一個值只列一次。
+    """
+    cur_x, cur_y = float(current[0] or 0.0), float(current[1] or 0.0)
+    out: List[Tuple[float, float]] = []
+    seen = set()
+    for cx, cy in (getattr(measured, "candidates", None) or []):
+        x = float(cx or 0.0) if flags[0] else cur_x
+        y = float(cy or 0.0) if flags[1] else cur_y
+        if flags[0] and x < MIN_PERIOD_PX:
+            continue
+        if flags[1] and y < MIN_PERIOD_PX:
+            continue
+        if (abs(x - cur_x) < 0.5 and abs(y - cur_y) < 0.5) or (x, y) in seen:
+            continue
+        seen.add((x, y))
+        out.append((x, y))
+        if len(out) >= cap:
+            break
+    return out
+
+
+def candidate_label(px: float, py: float, flags: Tuple[bool, bool]) -> str:
+    """候選鈕上的字 —— **沒在用的軸不寫**（純 X 的時候 `60 × 88` 是噪音）。"""
+    fx = algo_period2d.fmt_px(px)
+    fy = algo_period2d.fmt_px(py)
+    if flags[0] and flags[1]:
+        return "%s × %s" % (fx, fy)
+    return fx if flags[0] else fy
+
+
+def detail_rows(measured: Any, flags: Tuple[bool, bool]
+                ) -> List[Tuple[str, str, str]]:
+    """三票各自的答案 → ``[(方法, X, Y), …]``（Details 那一塊的唯一算法）。
+
+    ⚠ **三票不一致不是錯誤，是關於這張圖的事實。** 投影法看到 30、二維看到
+    60、答案是 60 —— 那句「投影法看到 30」講的是這個 layout 相鄰列交錯，
+    而使用者看得懂那件事。
+    """
+    def cell(v, conf, used):
+        if not used:
+            return "—"
+        if v is None or float(v) < MIN_PERIOD_PX:
+            return "not found"
+        return "%s  (%.0f)" % (algo_period2d.fmt_px(float(v)), float(conf or 0))
+
+    m = measured
+    rows = [
+        ("Projection", cell(getattr(m, "proj_px", None),
+                            getattr(m, "proj_conf_x", 0), flags[0]),
+                       cell(getattr(m, "proj_py", None),
+                            getattr(m, "proj_conf_y", 0), flags[1])),
+        ("2-D autocorr", cell(getattr(m, "ac_px", None),
+                              getattr(m, "ac_conf_x", 0), flags[0]),
+                         cell(getattr(m, "ac_py", None),
+                              getattr(m, "ac_conf_y", 0), flags[1])),
+    ]
+    gx = float(getattr(m, "half_gain_x", 0.0) or 0.0)
+    gy = float(getattr(m, "half_gain_y", 0.0) or 0.0)
+    dx, dy = getattr(m, "doubled", (False, False))
+    rows.append(("Half-period",
+                 ("doubled (+%.2f)" % gx) if dx else
+                 ("no (%+.2f)" % gx if flags[0] else "—"),
+                 ("doubled (+%.2f)" % gy) if dy else
+                 ("no (%+.2f)" % gy if flags[1] else "—")))
+    rows.append(("Used",
+                 algo_period2d.fmt_px(float(getattr(m, "px", 0) or 0))
+                 if flags[0] else "—",
+                 algo_period2d.fmt_px(float(getattr(m, "py", 0) or 0))
+                 if flags[1] else "—"))
+    return rows
 
 
 Override = Tuple[Optional[float], Optional[float]]
@@ -427,12 +565,14 @@ class _PitchWorker(QThread):
 
     def __init__(self, image: np.ndarray, axis: str,
                  measured: Optional[Any] = None,
-                 override: Override = (None, None), parent=None):
+                 override: Override = (None, None), method: str = "mean",
+                 parent=None):
         super().__init__(parent)
         self._image = image
         self._axis = str(axis)
         self._measured = measured        # 有就不重量（只重疊）
         self._override = override
+        self._method = str(method)       # mean / median（median 免疫稀疏缺陷）
         self._stop = False
 
     def stop(self) -> None:
@@ -455,15 +595,18 @@ class _PitchWorker(QThread):
             if flags[0] or flags[1]:
                 ux, uy = lattice_periods(self._image.shape[:2], ex, ey, flags)
                 gc = algo_template.build_golden_cell(
-                    self._image, px=ux, py=uy,
-                    progress=lambda st, d, t: self._tick(st))
+                    self._image, px=ux, py=uy, method=self._method,
+                    progress=self._tick)
         except Exception as e:           # 講出來，不要吞掉（鐵則 7 的 UI 版）
             self.done.emit(None, None, "Could not measure this image: %s" % e)
         else:
             self.done.emit(m, gc, "")
 
-    def _tick(self, stage: str) -> bool:
-        self.stage.emit(str(stage))
+    def _tick(self, stage: str, done: int = 0, total: int = 0) -> bool:
+        """進度講到哪一步 **而且講到第幾格** —— 7680² 要十幾秒，一條跑不完的
+        進度條答不出「它還在動嗎」。"""
+        self.stage.emit("%s  %d/%d" % (stage, done, total) if total > 1
+                        else str(stage))
         return not self._stop
 
 
@@ -602,10 +745,12 @@ class PitchHelperWindow(QMainWindow):
         self.grid_answer.setVerticalSpacing(2)
         self._cells: List[List[QLabel]] = []
         self._bars: List[Bar] = []
+        self._tags: List[QLabel] = []
         for r, axis_name in enumerate(("X", "Y")):
             tag = QLabel(axis_name, box)
             tag.setObjectName("paramHint")
             self.grid_answer.addWidget(tag, r, 0)
+            self._tags.append(tag)
             px = QLabel(PITCH_UNSET, box)
             f = px.font()
             f.setPointSizeF(f.pointSizeF() * 1.7)
@@ -651,6 +796,16 @@ class PitchHelperWindow(QMainWindow):
             fix.addWidget(b)
         lay.addLayout(fix)
 
+        # ---- 取錯了怎麼辦：諧波上的其他可能，點一下就套用 -------------------
+        self.row_try = QHBoxLayout()
+        self.row_try.setSpacing(4)
+        self.lab_try = QLabel("Or try", box)
+        self.lab_try.setObjectName("paramHint")
+        self.row_try.addWidget(self.lab_try)
+        self._try_buttons: List[QPushButton] = []
+        self.row_try.addStretch(1)
+        lay.addLayout(self.row_try)
+
         # ---- 憑什麼相信它：疊出來的 Golden Cell -----------------------------
         lay.addWidget(self._proof_box(box))
 
@@ -668,7 +823,30 @@ class PitchHelperWindow(QMainWindow):
         self.spin_nm.valueChanged.connect(lambda _v: self._fill_answer())
         unit.addWidget(self.spin_nm)
         unit.addStretch(1)
+        # **把答案帶得走。** 不然每一次都要自己重打一遍。
+        self.btn_copy = QPushButton("Copy", box)
+        self.btn_copy.setProperty("variant", "secondary")
+        self.btn_copy.setToolTip("Copy the pitch to the clipboard.")
+        self.btn_copy.clicked.connect(self.copy_answer)
+        unit.addWidget(self.btn_copy)
         lay.addLayout(unit)
+
+        # ---- 細節：**預設收起來** -------------------------------------------
+        # 使用者要得到「每個方法的分數」，但同一輪也說了「不要看一堆文字」。
+        # 兩件事只有一種解法：**要查的那天它在，平常不佔畫面。**
+        self.btn_details = QPushButton("▸  Details", box)
+        self.btn_details.setProperty("variant", "secondary")
+        self.btn_details.setCheckable(True)
+        self.btn_details.setStyleSheet("text-align:left;")
+        self.btn_details.toggled.connect(self._on_details)
+        lay.addWidget(self.btn_details)
+        self.details = QLabel("", box)
+        self.details.setObjectName("paramHint")
+        self.details.setTextFormat(Qt.RichText)
+        # ⚠ 沒有這一行的話那段說明會被右邊界切掉（"the number ir…"）。
+        self.details.setWordWrap(True)
+        self.details.setVisible(False)
+        lay.addWidget(self.details)
         lay.addStretch(1)
         return box
 
@@ -702,7 +880,9 @@ class PitchHelperWindow(QMainWindow):
         self.cell_view.setToolTip(
             "Every cell the grid cut, averaged on top of each other. Crisp "
             "means they landed on each other, so the period is right. Blurred "
-            "or doubled means it is not.")
+            "or doubled means it is not. Click to see it bigger.")
+        self.cell_view.setCursor(Qt.PointingHandCursor)
+        self.cell_view.mouseReleaseEvent = lambda _e: self.show_cell_big()
         lay.addWidget(self.cell_view)
         side = QVBoxLayout()
         side.setSpacing(2)
@@ -715,6 +895,15 @@ class PitchHelperWindow(QMainWindow):
         self.lab_stack.setObjectName("paramHint")
         self.lab_stack.setWordWrap(True)
         side.addWidget(self.lab_stack)
+        # **大圖中間常常就是缺陷本體，而 mean 會把它抹進 GC。** median 對稀疏
+        # 缺陷免疫（`golden.stack_cells` 的 `method`），所以那是一個勾選，
+        # 不是一個要去別的地方改的設定。
+        self.chk_median = QCheckBox("Ignore defects", box)
+        self.chk_median.setToolTip(
+            "Stack with the median instead of the mean. A defect sitting in "
+            "one cell then does not smear into the stacked picture.")
+        self.chk_median.toggled.connect(lambda _on: self.remeasure(reuse=True))
+        side.addWidget(self.chk_median)
         side.addStretch(1)
         lay.addLayout(side, 1)
         return box
@@ -820,7 +1009,7 @@ class PitchHelperWindow(QMainWindow):
             return
         self._worker = _PitchWorker(self._work, self.axis(),
                                     self._m if reuse else None,
-                                    self.override(), self)
+                                    self.override(), self.stack_method(), self)
         self._worker.stage.connect(self._say)
         self._worker.done.connect(self._on_done)
         self._worker.finished.connect(self._on_finished)
@@ -845,8 +1034,11 @@ class PitchHelperWindow(QMainWindow):
 
     def _busy(self, on: bool) -> None:
         for w in (self.btn_open, self.btn_paste, self.btn_crop, self.chips_axis,
-                  self.spin_px, self.spin_py, self.btn_double, self.btn_reset):
+                  self.spin_px, self.spin_py, self.btn_double, self.btn_reset,
+                  self.chk_median):
             w.setEnabled(not on)
+        for b in self._try_buttons:
+            b.setEnabled(not on)
 
     def _on_axis(self, _value: str) -> None:
         """軸向改了 —— **週期不重量**，但格線與疊圖都要重來。
@@ -895,6 +1087,10 @@ class PitchHelperWindow(QMainWindow):
     def nm_per_px(self) -> float:
         return float(self.spin_nm.value())
 
+    def stack_method(self) -> str:
+        """``"median"`` ＝ 忽略缺陷（`golden.stack_cells` 的那個參數）。"""
+        return "median" if self.chk_median.isChecked() else "mean"
+
     def override(self) -> Override:
         """使用者自己打的那一組（``None`` ＝ 那一軸用量到的）。"""
         px, py = float(self.spin_px.value()), float(self.spin_py.value())
@@ -928,16 +1124,33 @@ class PitchHelperWindow(QMainWindow):
         self._fill_answer()
         self._draw()
         self._fill_stack()
+        self._fill_try()
+        self._fill_details()
         self._fill_warning()
 
     def _fill_answer(self) -> None:
+        """答案那兩列。**沒在用的那一軸整列不顯示**（使用者 2026-09-21 定的）。
+
+        ⚠ 這一條**推翻了第一版的決定**，而理由是使用者的：第一版寫 `not used`，
+        想法是「藏起來他會以為量不到」。但**選 X only 的人是自己按的那顆鈕**
+        —— 他知道 Y 還在，那一列對他只是噪音。原本的顧慮只在 Auto 自己丟掉
+        一軸時才成立，而那一種 Auto 本來就不會把它列出來（`flags` 是 False），
+        所以改由**警告條**去講（「這一軸信心不足」），不是留一列半殘的資料。
+        """
         rows = self.rows()
         ov = self.override()
+        flags = self._flags()
         confs = (float(getattr(self._m, "conf_x", 0.0) or 0.0) if self._m else 0.0,
                  float(getattr(self._m, "conf_y", 0.0) or 0.0) if self._m else 0.0)
-        for i, (cells, row, bar) in enumerate(zip(self._cells, rows, self._bars)):
-            cells[0].setText(row[1] + (" px" if row[1] not in
-                                       (PITCH_UNSET, PITCH_NOT_USED) else ""))
+        for i, (cells, row, bar, tag) in enumerate(
+                zip(self._cells, rows, self._bars, self._tags)):
+            # 還沒有圖的時候兩列都留著（那是「等著填」，不是「用不到」）。
+            show = flags[i] if self._m is not None else True
+            for w in (tag, cells[0], cells[1], bar):
+                w.setVisible(show)
+            if not show:
+                continue
+            cells[0].setText(row[1] + (" px" if row[1] != PITCH_UNSET else ""))
             cells[1].setText(row[2])
             if self._m is None:
                 bar.set_value(0.0, TONE_WARN, "")
@@ -947,6 +1160,105 @@ class PitchHelperWindow(QMainWindow):
             else:
                 c = confs[i]
                 bar.set_value(c / 100.0, conf_tone(c), "%.0f" % c)
+
+    def _fill_try(self) -> None:
+        """候選那一排 —— **點一下就套用**（見 `candidate_periods` 的說明）。"""
+        for b in self._try_buttons:
+            self.row_try.removeWidget(b)
+            b.deleteLater()
+        self._try_buttons = []
+        flags = self._flags()
+        cands = (candidate_periods(self._m, flags,
+                                   effective_period(self._m, self.override()))
+                 if self._m is not None else [])
+        self.lab_try.setVisible(bool(cands))
+        for px, py in cands:
+            b = QPushButton(candidate_label(px, py, flags), self)
+            b.setProperty("variant", "secondary")
+            # 一排四顆要塞進 380 px：留白收掉，字才不會被切成 "L20 × 44"。
+            b.setStyleSheet("padding-left:6px;padding-right:6px;")
+            b.setToolTip(
+                "Try this instead — it is one of the harmonics of what was "
+                "measured, and a wrong period is almost always one of these. "
+                "The grid and the stacked cell redraw so you can compare.")
+            b.clicked.connect(lambda _c=False, a=px, bb=py: self._set_override(a, bb))
+            self.row_try.insertWidget(self.row_try.count() - 1, b)
+            self._try_buttons.append(b)
+
+    def _fill_details(self) -> None:
+        """三票各自的答案（折在 ``▸ Details`` 後面）。"""
+        if self._m is None:
+            self.details.setText("")
+            return
+        rows = detail_rows(self._m, self._flags())
+        cells = "".join(
+            "<tr><td style='padding-right:12px'>%s</td>"
+            "<td style='padding-right:12px'>%s</td><td>%s</td></tr>"
+            % r for r in rows)
+        self.details.setText(
+            "<table><tr><td></td><td><b>X</b></td><td><b>Y</b></td></tr>%s</table>"
+            "<br>Each row is one of the three ways it looks for a repeat; the "
+            "number in brackets is that method's own confidence. They are "
+            "allowed to disagree — that is a fact about the layout, not a "
+            "fault." % cells)
+
+    def _on_details(self, on: bool) -> None:
+        self.btn_details.setText(("▾  Details" if on else "▸  Details"))
+        self.details.setVisible(bool(on))
+
+    def show_cell_big(self) -> None:
+        """疊出來那一格點一下 → 放大看。
+
+        150 px 對細 pattern 不夠判斷糊不糊，而**看得出糊不糊是它存在的唯一
+        理由**。走 `lattice_dialog` 用的那個 `ImageView`（滾輪縮放、拖曳平移）。
+        """
+        cell = getattr(self._gc, "cell", None) if self._gc is not None else None
+        if cell is None or np.asarray(cell).size == 0:
+            return
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Stacked cell")
+        fit_screen.fit(dlg, 620, 620)
+        lay = QVBoxLayout(dlg)
+        view = ImageView(dlg)
+        view.set_image(np.asarray(cell))
+        lay.addWidget(view, 1)
+        hint = QLabel("Crisp edges mean the cells landed on each other. "
+                      "Blurred or doubled means the period is off. "
+                      "Wheel zooms, drag pans.", dlg)
+        hint.setObjectName("paramHint")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        bb = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, dlg)
+        bb.rejected.connect(dlg.reject)
+        bb.clicked.connect(lambda _b: dlg.reject())
+        lay.addWidget(bb)
+        apply_button_cursors(dlg)
+        dlg.exec()
+
+    def answer_text(self) -> str:
+        """Copy 出去的那一段字（測試讀這個）。"""
+        rows = self.rows()
+        flags = self._flags()
+        bits = []
+        for i, name in enumerate(("X", "Y")):
+            if not flags[i]:
+                continue
+            piece = "%s %s px" % (name, rows[i][1])
+            if rows[i][2]:
+                piece += " (%s)" % rows[i][2]
+            bits.append(piece)
+        return "  ".join(bits)
+
+    def copy_answer(self) -> None:
+        text = self.answer_text()
+        if not text:
+            self._say("Nothing measured yet.")
+            return
+        cb = QGuiApplication.clipboard()
+        if cb is not None:
+            cb.setText(text)
+        self._say("Copied: %s" % text)
 
     def _fill_stack(self) -> None:
         """疊出來那一格 ＋ 一致性 —— 這是「憑什麼相信它」那一塊。"""
@@ -989,6 +1301,13 @@ class PitchHelperWindow(QMainWindow):
                              "not the repeating layout.")
             else:
                 lines.extend(getattr(self._m, "notes", None) or [])
+            note = ""
+            if self._gc is not None and not nothing and self._work is not None:
+                ex, ey = effective_period(self._m, self.override())
+                note = trust_note(cells_along(self._work.shape[:2], ex, ey,
+                                              self._flags()))
+            if note:
+                lines.append(note)
             ox, oy = self.override()
             if ox or oy:
                 got = ", ".join(
