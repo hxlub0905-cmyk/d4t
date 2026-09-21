@@ -107,7 +107,8 @@ __all__ = [
     "TONE_BAD", "CONF_GOOD_FROM", "AGREE_GOOD_FROM", "CELL_BOX",
     "BAR_W", "BAR_H", "candidate_periods", "candidate_label",
     "detail_rows", "trust_note", "MIN_CELLS_TO_TRUST",
-    "MAX_CANDIDATES", "cells_along", "run",
+    "MAX_CANDIDATES", "cells_along", "trim_to_inner",
+    "MIN_CELLS_AFTER_TRIM", "run",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -357,6 +358,47 @@ def detail_rows(measured: Any, flags: Tuple[bool, bool]
     return rows
 
 
+#: 去掉最外一圈之後，每一軸至少要留下這麼多格才值得去。
+#:
+#: 少於它就不去了 —— 拿掉邊界是為了讓 GC 乾淨，而把 3×3 疊成 1×1 換不到乾淨，
+#: 只換到一個「其實沒有在疊」的 stack。
+MIN_CELLS_AFTER_TRIM = 3
+
+
+def trim_to_inner(shape: Tuple[int, int], px: float, py: float,
+                  origin: Tuple[float, float], flags: Tuple[bool, bool]
+                  ) -> Optional[Tuple[int, int, int, int]]:
+    """**把最外一圈格子切掉**的那一塊（``(x0, y0, x1, y1)``；不值得去回 None）。
+
+    使用者 2026-09-21：「邊界其實我有點不太想放。」而那是量得出來的 ——
+    帶真實掃描邊緣效應（最外 40 px 偏亮／偏暗 ＋ 額外雜訊）的合成圖上：
+    整張疊 `agreement` **0.872**（210 格），去掉最外一圈 **0.980**（156 格）；
+    乾淨影像上兩者都是 0.980，也就是**它在不需要的時候不花任何成本**。
+
+    切的是**沿著格線**的一整圈，不是隨便一圈像素 —— 切完之後相位不變
+    （``origin`` 相對新的左上角變成 0），所以疊出來的還是同一組格子，只是少了
+    貼邊的那些。不在用的軸不切（那一軸一格就是整張影像，切了就什麼都不剩）。
+    """
+    h, w = int(shape[0]), int(shape[1])
+    ox, oy = float(origin[0] or 0.0), float(origin[1] or 0.0)
+    x0, y0, x1, y1 = int(ox), int(oy), w, h
+    if flags[0] and float(px or 0) >= MIN_PERIOD_PX:
+        nx = int((w - int(ox)) // float(px))
+        if nx - 2 < MIN_CELLS_AFTER_TRIM:
+            return None
+        x0 = int(ox + px)
+        x1 = int(ox + px * (nx - 1))
+    if flags[1] and float(py or 0) >= MIN_PERIOD_PX:
+        ny = int((h - int(oy)) // float(py))
+        if ny - 2 < MIN_CELLS_AFTER_TRIM:
+            return None
+        y0 = int(oy + py)
+        y1 = int(oy + py * (ny - 1))
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return None
+    return (x0, y0, x1, y1)
+
+
 Override = Tuple[Optional[float], Optional[float]]
 
 #: 使用者自己打了一個週期時，信心那一欄寫什麼。
@@ -566,13 +608,14 @@ class _PitchWorker(QThread):
     def __init__(self, image: np.ndarray, axis: str,
                  measured: Optional[Any] = None,
                  override: Override = (None, None), method: str = "mean",
-                 parent=None):
+                 skip_edges: bool = True, parent=None):
         super().__init__(parent)
         self._image = image
         self._axis = str(axis)
         self._measured = measured        # 有就不重量（只重疊）
         self._override = override
         self._method = str(method)       # mean / median（median 免疫稀疏缺陷）
+        self._skip_edges = bool(skip_edges)
         self._stop = False
 
     def stop(self) -> None:
@@ -597,10 +640,36 @@ class _PitchWorker(QThread):
                 gc = algo_template.build_golden_cell(
                     self._image, px=ux, py=uy, method=self._method,
                     progress=self._tick)
+                if self._skip_edges and gc is not None and gc.cell.size:
+                    gc = self._without_edges(gc, ux, uy, flags)
         except Exception as e:           # 講出來，不要吞掉（鐵則 7 的 UI 版）
             self.done.emit(None, None, "Could not measure this image: %s" % e)
         else:
             self.done.emit(m, gc, "")
+
+    def _without_edges(self, gc: Any, ux: float, uy: float,
+                       flags: Tuple[bool, bool]) -> Any:
+        """把最外一圈格子拿掉，**只重疊一次，不重跑相位搜尋**。
+
+        相位已經知道了（`gc.origin`），而切掉的那一圈是沿著格線切的 —— 新的
+        左上角就落在一條格線上，所以在那一塊裡原點是 (0, 0)。因此這裡叫的是
+        `golden.stack_cells` / `stack_agreement` **本人**（`build_golden_cell`
+        內部叫的也是這兩支），不是再跑一次整支 —— 相位搜尋在 4096² 要 5 秒，
+        而它的答案不會因為少了一圈格子而改變。
+        """
+        from d4t.core.algo import golden as algo_golden
+        box = trim_to_inner(self._image.shape[:2], ux, uy, gc.origin, flags)
+        if box is None:
+            return gc                       # 格子太少，拿掉不划算（見 `trim_to_inner`）
+        x0, y0, x1, y1 = box
+        inner = self._image[y0:y1, x0:x1]
+        ix, iy = int(round(ux)), int(round(uy))
+        gc.cell = algo_golden.stack_cells(inner, ix, iy, method=self._method)
+        gc.agreement = algo_golden.stack_agreement(inner, ix, iy)
+        gc.ghosting, gc.lap_var, _e = algo_golden.ghosting_score(gc.cell)
+        gc.n_cells = len(algo_golden.tile_coords(inner.shape, ix, iy))
+        gc.trimmed = True                   # 畫面上要講出來（少了幾格是事實）
+        return gc
 
     def _tick(self, stage: str, done: int = 0, total: int = 0) -> bool:
         """進度講到哪一步 **而且講到第幾格** —— 7680² 要十幾秒，一條跑不完的
@@ -904,6 +973,17 @@ class PitchHelperWindow(QMainWindow):
             "one cell then does not smear into the stacked picture.")
         self.chk_median.toggled.connect(lambda _on: self.remeasure(reuse=True))
         side.addWidget(self.chk_median)
+        # 邊界那一圈：**量出來的**（帶掃描邊緣效應的合成圖 0.872 → 0.980，
+        # 乾淨影像 0.980 → 0.980），而使用者也說「不太想放」。所以預設打開。
+        self.chk_edges = QCheckBox("Skip edge cells", box)
+        self.chk_edges.setChecked(True)
+        self.chk_edges.setToolTip(
+            "Leave out the ring of cells touching the image border. The scan "
+            "edge is often brighter, darker or noisier than the rest, and "
+            "those cells drag the stacked picture down. Costs nothing on a "
+            "clean image.")
+        self.chk_edges.toggled.connect(lambda _on: self.remeasure(reuse=True))
+        side.addWidget(self.chk_edges)
         side.addStretch(1)
         lay.addLayout(side, 1)
         return box
@@ -1009,7 +1089,8 @@ class PitchHelperWindow(QMainWindow):
             return
         self._worker = _PitchWorker(self._work, self.axis(),
                                     self._m if reuse else None,
-                                    self.override(), self.stack_method(), self)
+                                    self.override(), self.stack_method(),
+                                    self.skip_edges(), self)
         self._worker.stage.connect(self._say)
         self._worker.done.connect(self._on_done)
         self._worker.finished.connect(self._on_finished)
@@ -1035,7 +1116,7 @@ class PitchHelperWindow(QMainWindow):
     def _busy(self, on: bool) -> None:
         for w in (self.btn_open, self.btn_paste, self.btn_crop, self.chips_axis,
                   self.spin_px, self.spin_py, self.btn_double, self.btn_reset,
-                  self.chk_median):
+                  self.chk_median, self.chk_edges):
             w.setEnabled(not on)
         for b in self._try_buttons:
             b.setEnabled(not on)
@@ -1086,6 +1167,9 @@ class PitchHelperWindow(QMainWindow):
 
     def nm_per_px(self) -> float:
         return float(self.spin_nm.value())
+
+    def skip_edges(self) -> bool:
+        return bool(self.chk_edges.isChecked())
 
     def stack_method(self) -> str:
         """``"median"`` ＝ 忽略缺陷（`golden.stack_cells` 的那個參數）。"""
@@ -1282,7 +1366,8 @@ class PitchHelperWindow(QMainWindow):
                     "off. Try ×2.")
         else:
             word = "The cells did not agree — this period is wrong."
-        self.lab_stack.setText("%d cells. %s" % (n, word))
+        edge = " Edge cells left out." if getattr(gc, "trimmed", False) else ""
+        self.lab_stack.setText("%d cells.%s %s" % (n, edge, word))
 
     def _fill_warning(self) -> None:
         """⚠ **只在有事的時候出現。** 第一版有一塊常駐的「What it decided」，
@@ -1341,6 +1426,19 @@ class PitchHelperWindow(QMainWindow):
         ux, uy = lattice_periods(shape, ex, ey, flags)
         origin = tuple(getattr(self._gc, "origin", None) or (0.0, 0.0))
         boxes, total = lattice_boxes(shape, ux, uy, origin, flags)
+        # ⚠ **畫的格子要跟疊進去的那些是同一批。** 少了這一段，邊界那一圈明明
+        # 沒有被疊進去，畫面上卻還框著它 —— 而使用者盯著的正是那張圖。
+        # 這是這一輪第三次踩到同一種形狀（`_on_axis`、`_draw` 的週期、這裡），
+        # 病根都是「同一件事在畫面上有兩個算法」。
+        if getattr(self._gc, "trimmed", False):
+            box = trim_to_inner(shape, ux, uy, origin, flags)
+            if box is not None:
+                h, w = shape
+                x0, y0, x1, y1 = (box[0] / w, box[1] / h, box[2] / w, box[3] / h)
+                boxes = [b for b in boxes
+                         if b[0] >= x0 - 1e-6 and b[1] >= y0 - 1e-6
+                         and b[0] + b[2] <= x1 + 1e-6 and b[1] + b[3] <= y1 + 1e-6]
+                total = len(boxes)
         self.view.set_overlay(boxes)
         text = "%s px · %d cells" % (algo_template.period_text(ux, uy), total)
         if len(boxes) < total:

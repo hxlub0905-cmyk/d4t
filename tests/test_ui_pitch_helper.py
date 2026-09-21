@@ -738,3 +738,149 @@ def test_the_median_stack_is_a_tick_not_a_hidden_setting(win, ph):
     assert win.stack_method() == "mean"
     win.chk_median.setChecked(True)
     assert win.stack_method() == "median"
+
+
+# --------------------------------------------------------------------------- #
+# 9. Crop 的相位、以及邊界那一圈（使用者 2026-09-21 第四輪）
+# --------------------------------------------------------------------------- #
+def _edgy(px=60, py=44, w=900, h=700, seed=1, band=40):
+    """帶真實掃描邊緣效應的圖：最外一圈偏亮／偏暗 ＋ 額外雜訊。"""
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:h, 0:w]
+    img = 110 + 55 * (((x % px) < px * 0.42) + 0.8 * ((y % py) < py * 0.5))
+    img = img + rng.normal(0, 5, (h, w))
+    img[:band, :] += 55
+    img[-band:, :] -= 45
+    img[:, :band] += 35
+    img[:, -band:] -= 40
+    img[:band, :] += rng.normal(0, 25, img[:band, :].shape)
+    img[-band:, :] += rng.normal(0, 25, img[-band:, :].shape)
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+@pytest.mark.parametrize("off", [(0, 0), (37, 19), (13, 7)])
+def test_cropping_anywhere_keeps_the_grid_on_the_same_structure(off):
+    """使用者 2026-09-21：「crop image 也是要確保格線落在正確的位置喔」。
+
+    判準是**換算回原圖的相位**：不管裁在哪裡（包括不是週期整數倍的位置），
+    `origin + 裁切偏移` 對週期取餘數要是同一個值 —— 也就是格線落在同一個
+    地標上。靠的是 `build_golden_cell` 的 `anchor_cell`。
+    """
+    from d4t.core.algo import template as algo_template
+    from d4t.ui.crop_dialog import crop_array
+
+    full = tiles(px=60, py=44, w=900, h=700)
+    base = algo_template.build_golden_cell(full)
+    want = (base.origin[0]) % base.period_x
+
+    ox, oy = off
+    sub = crop_array(full, (ox, oy, 500, 400))
+    got = algo_template.build_golden_cell(sub)
+    assert got.period_x == base.period_x and got.period_y == base.period_y
+    assert (got.origin[0] + ox) % base.period_x == want, (
+        "裁過之後格線落到別的地方了：裁 %s → 相位 %s，整張圖是 %s"
+        % (off, (got.origin[0] + ox) % base.period_x, want))
+
+
+def test_leaving_the_edge_cells_out_rescues_a_scan_edge(ph):
+    """⚠ **這一條是量出來的，不是一個說法。** 使用者：「邊界其實我有點不太想放。」
+
+    帶掃描邊緣效應的圖：整張疊 0.872，去掉最外一圈 0.980。
+    """
+    from d4t.core.algo import golden as algo_golden
+    from d4t.core.algo import template as algo_template
+
+    img = _edgy()
+    gc = algo_template.build_golden_cell(img)
+    box = ph.trim_to_inner(img.shape[:2], gc.period_x, gc.period_y,
+                           gc.origin, (True, True))
+    assert box is not None
+    x0, y0, x1, y1 = box
+    inner = img[y0:y1, x0:x1]
+    better = algo_golden.stack_agreement(inner, int(gc.period_x), int(gc.period_y))
+    assert better > gc.agreement + 0.05, (gc.agreement, better)
+    assert ph.agree_tone(better) == ph.TONE_GOOD
+
+
+def test_leaving_the_edge_out_costs_nothing_on_a_clean_image(ph):
+    """**反向**：它在不需要的時候不准變差，否則預設打開是不對的。"""
+    from d4t.core.algo import golden as algo_golden
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44, w=900, h=700)
+    gc = algo_template.build_golden_cell(img)
+    box = ph.trim_to_inner(img.shape[:2], gc.period_x, gc.period_y,
+                           gc.origin, (True, True))
+    inner = img[box[1]:box[3], box[0]:box[2]]
+    after = algo_golden.stack_agreement(inner, int(gc.period_x), int(gc.period_y))
+    assert after >= gc.agreement - 0.01, (gc.agreement, after)
+
+
+def test_the_trim_keeps_the_phase(ph):
+    """切的是**沿著格線**的一整圈 —— 新的左上角要正好落在一條格線上，
+    否則疊出來的是另一組格子（而畫面上看不出來）。"""
+    box = ph.trim_to_inner((700, 900), 60.0, 44.0, (22.0, 25.0), (True, True))
+    x0, y0, _x1, _y1 = box
+    assert (x0 - 22) % 60 == 0, x0
+    assert (y0 - 25) % 44 == 0, y0
+
+
+def test_the_trim_backs_off_when_there_is_nothing_left_to_trim(ph):
+    """把 3×3 疊成 1×1 換不到乾淨，只換到一個『其實沒有在疊』的 stack。"""
+    assert ph.trim_to_inner((160, 200), 60.0, 44.0, (0.0, 0.0), (True, True)) is None
+
+
+def test_an_axis_not_in_use_is_never_trimmed(ph):
+    """那一軸一格就是整張影像 —— 切了就什麼都不剩。"""
+    box = ph.trim_to_inner((700, 900), 60.0, 700.0, (0.0, 0.0), (True, False))
+    assert box is not None
+    assert (box[1], box[3]) == (0, 700), box
+
+
+def test_the_screen_says_the_edge_was_left_out(win, ph):
+    """少了幾格是事實，而使用者盯著的正是那個格數。"""
+    img = _edgy()
+    win.set_image(img, "edgy.tif")
+    win._on_done(*_run(win, img), "")
+    assert "Edge cells left out" in win.lab_stack.text(), win.lab_stack.text()
+
+
+def test_the_edge_tick_is_on_by_default(win, ph):
+    assert win.skip_edges() is True
+    win.chk_edges.setChecked(False)
+    assert win.skip_edges() is False
+
+
+def _run(win, img):
+    """同步跑一次 worker 做的事（測試不開執行緒）。"""
+    from d4t.ui import pitch_helper as ph
+    from d4t.core.algo import template as algo_template
+    m = algo_template.measure_period(img)
+    win._m = m
+    flags = win._flags()
+    ux, uy = ph.lattice_periods(img.shape[:2], *ph.effective_period(m, win.override()), flags)
+    w = ph._PitchWorker(img, win.axis(), m, win.override(), win.stack_method(),
+                        win.skip_edges())
+    gc = algo_template.build_golden_cell(img, px=ux, py=uy)
+    if win.skip_edges():
+        gc = w._without_edges(gc, ux, uy, flags)
+    return m, gc
+
+
+def test_the_grid_draws_only_the_cells_that_were_stacked(win, ph):
+    """⚠ **這一輪第三次踩到同一種形狀**（`_on_axis`、`_draw` 的週期、這裡）：
+    **同一件事在畫面上有兩個算法**。
+
+    邊界那一圈沒有被疊進去，格線就不准還框著它 —— 使用者盯著的正是那張圖，
+    而「畫面上有 210 格、疊的是 156 格」他看不出來。
+    """
+    img = _edgy()
+    win.set_image(img, "edgy.tif")
+    win._on_done(*_run(win, img), "")
+    drawn = win.view.overlay_count()
+    assert drawn == win._gc.n_cells, (drawn, win._gc.n_cells)
+
+    win.chk_edges.setChecked(False)
+    win._on_done(*_run(win, img), "")
+    assert win.view.overlay_count() == win._gc.n_cells
+    assert win.view.overlay_count() > drawn, "不去邊界的時候格子要變多"
