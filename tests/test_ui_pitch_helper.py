@@ -1140,7 +1140,12 @@ def test_nothing_measured_yet_is_not_drawn_as_a_zero(win, ph):
     `Bar` 改成「0 分畫一顆點」之後，這一格就變成了那個改動的反面 —— 還沒有
     疊過的時候畫一顆點，等於說「這個週期拿了 0 分」。
     """
-    assert win.bar_agree._track is False, "還沒疊過就不畫軌道"
+    # ⚠ **三條都要問。** 這一條本來只斷言 `bar_agree`，而同一張卡裡另外兩條
+    # （Repeat along X / Y）走的是另一段程式 —— 它們在空狀態各畫一顆琥珀色的
+    # 點（=「被評分過，拿了 0 分」），而這一條完全沒發現。
+    # **三條裡守一條，另外兩條就大搖大擺地漏過去。**
+    for b in (win.bar_agree, win._bars[0], win._bars[1]):
+        assert b._track is False, "還沒量過就不畫軌道"
     assert not win.btn_copy.isEnabled(), "沒有答案的時候 Copy 是灰的"
 
     img = tiles(px=60, py=44)
@@ -1543,3 +1548,72 @@ def test_the_helper_turns_the_two_tone_line_on_and_studio_does_not(win, ph):
         assert plain.overlay_look() is None, "沒人要求就不要換樣子"
     finally:
         plain.deleteLater()
+
+
+# --------------------------------------------------------------------------- #
+# 15. 空狀態：使用者打開這個工具看到的第一個畫面（F120 第十五輪）
+# --------------------------------------------------------------------------- #
+def test_nothing_on_the_empty_screen_invites_a_press_it_cannot_answer(win, ph):
+    """⚠ **鐵則 7「不 raise 不等於不記」的 UI 版。**
+
+    空狀態下這些控制項全部按得動，而按下去：`Crop…` 回 False **狀態列一個字
+    都沒有**（按了像壞掉）；`Ruler` 真的打開量尺模式、還說「Drag across the
+    image」—— 而沒有 image；週期欄收下 60、答案仍然是 `—`；`×2` 靜靜地沒反應。
+
+    一顆按了什麼都不會發生、也不說為什麼的按鈕，變灰是那句「為什麼」最便宜的
+    講法。
+    """
+    for w in win._needs_image():
+        assert not w.isEnabled(), (w.objectName() or type(w).__name__)
+    # 但入口一定要按得動，不然這個視窗就沒有出路了。
+    assert win.btn_open.isEnabled() and win.btn_paste.isEnabled()
+    # pixel size 不在裡面：先填機台的 nm/px 再開圖是合理的用法。
+    assert win.spin_nm.isEnabled()
+
+
+def test_the_controls_come_back_when_an_image_arrives(win, ph):
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    for w in win._needs_image():
+        assert w.isEnabled(), (w.objectName() or type(w).__name__)
+
+
+def test_the_pixel_size_prompt_fits_in_its_box(app, ph):
+    """⚠ **一句被切掉的話比沒有話更糟。**
+
+    這一格本來寫 `pixel size not known`（132 px），而框裡真正留給字的只有
+    112 px —— 畫面上長出來的是 **`el size not known`**，一句看不懂又有點嚇人
+    的話。順便釘住最長的真實值：`1234.567 nm/px` 本來也只差 5 px 就要被切。
+    """
+    from PySide6.QtGui import QFontMetrics
+
+    from d4t.ui import theme
+
+    theme.apply_theme(app)
+    win = ph.PitchHelperWindow()
+    try:
+        win.spin_nm.ensurePolished()
+        fm = QFontMetrics(win.spin_nm.font())
+        room = win.spin_nm.maximumWidth() - 34      # 箭頭 20 ＋ padding 12 ＋ 邊框 2
+        for text in (win.spin_nm.specialValueText(), "1234.567 nm/px"):
+            assert fm.horizontalAdvance(text) <= room - 10, (
+                text, fm.horizontalAdvance(text), room)
+    finally:
+        win.close()
+
+
+def test_the_empty_canvas_says_what_to_do_and_says_it_once(win, ph):
+    """⚠ **指令要在空間裡，不是在角落。**
+
+    預設的 `(no image)` 只描述現況；而這個視窗空著的時候，唯一要做的事本來
+    寫在工具列 11px 的灰字裡 —— 700×700 的畫布上卻只有一句「沒有影像」。
+
+    而搬過去之後**工具列那一句要拿掉**：同一則訊息出現兩次，使用者會先花一秒
+    確認那是不是兩件事。
+    """
+    assert "Drop an image here" in win.view._EMPTY_TEXT
+    assert win.lab_source.text() == "", "同一句話不要講兩次"
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    assert "a.tif" in win.lab_source.text(), "載入之後它的工作是講檔名與尺寸"

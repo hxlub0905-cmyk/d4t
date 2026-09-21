@@ -168,6 +168,7 @@ class ImageView(QWidget):
 
     _MIN_SCALE = 0.02
     _MAX_SCALE = 60.0
+    #: 沒有影像時畫在正中間的字。**可以換** —— 見 :meth:`set_empty_text`。
     _EMPTY_TEXT = "(no image)"
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -565,6 +566,16 @@ class ImageView(QWidget):
     def overlay_look(self):
         """現在的疊框外觀（``(colour, cased)``；沒設就 None）。測試讀這個。"""
         return self._overlay_look
+
+    def set_empty_text(self, text: str) -> None:
+        """沒有影像時，中間那句話要寫什麼（F120）。
+
+        預設的 `(no image)` **只描述現況，沒有告訴人下一步**。在一個空畫布
+        佔了 700×700、而唯一要做的事寫在工具列 11px 灰字裡的視窗上，那句話
+        待在錯的地方：**指令要在空間裡，不是在角落。**
+        """
+        self._EMPTY_TEXT = str(text) or "(no image)"
+        self.update()
 
     def set_measure_mode(self, on: bool) -> None:
         """量尺模式：左鍵拖曳**改成量長度**，不再平移（F120）。

@@ -884,8 +884,10 @@ class PitchHelperWindow(QMainWindow):
             b.setProperty("variant", "secondary")
         for b in (self.btn_open, self.btn_paste, self.btn_crop):
             row.addWidget(b)
-        self.lab_source = QLabel("Drop an image here, open one, or paste one.",
-                                 self)
+        # ⚠ **空的時候就空著。** 這裡本來也寫「Drop an image here, open one, or
+        # paste one.」—— 而畫布正中間現在講的是同一句話。同一則訊息出現兩次，
+        # 使用者會先花一秒確認那是不是兩件事。它的工作是載入之後講檔名與尺寸。
+        self.lab_source = QLabel("", self)
         self.lab_source.setObjectName("paramHint")
         row.addWidget(self.lab_source, 1)
         self.progress = QProgressBar(self)
@@ -907,6 +909,11 @@ class PitchHelperWindow(QMainWindow):
         # 而一條在某些地方看不見的格線，比沒有格線更糟（使用者會以為那裡沒有
         # 被切到）。完整的數字在 `ImageView.set_overlay_look`。
         self.view.set_overlay_look(GRID_HEX, cased=True)
+        # **要做的那件事，寫在要用到的那塊空間裡。** 預設的 `(no image)` 只
+        # 描述現況；而這個視窗空著的時候，唯一要做的事本來寫在工具列 11px 的
+        # 灰字裡 —— 700×700 的畫布上卻只有一句「沒有影像」。
+        self.view.set_empty_text(
+            "Drop an image here\n\nor use Open image… / Paste (Ctrl+V)")
         self.view.measured.connect(self._on_measured)
         row = QHBoxLayout()
         self.chk_grid = QCheckBox("Cut lines", box)
@@ -1063,7 +1070,13 @@ class PitchHelperWindow(QMainWindow):
         self.spin_nm.setDecimals(3)
         self.spin_nm.setSingleStep(0.1)
         self.spin_nm.setSuffix(" nm/px")
-        self.spin_nm.setSpecialValueText("pixel size not known")
+        # ⚠ **這句話要塞得進那個框。** 原本寫 `pixel size not known`（132 px），
+        # 而框裡真正留給字的只有 112 px —— 畫面上長出來的是
+        # **`el size not known`**，一句看不懂又有點嚇人的話。
+        # 現在 `set pixel size` 是 84 px，而框加寬到 170（字有 136 px）——
+        # 順便讓最長的真實值 `1234.567 nm/px`（107 px）也排得下，它本來也只差
+        # 5 px 就要被切。
+        self.spin_nm.setSpecialValueText("set pixel size")
         self.spin_nm.setKeyboardTracking(False)   # 打字中途不重算
         self.spin_nm.setToolTip(
             "How many nanometres one pixel is, from the tool's settings. Fill "
@@ -1072,7 +1085,7 @@ class PitchHelperWindow(QMainWindow):
         # 不是一個動作；滿框的輸入盒擺在信心長條跟 Copy 中間會把答案那一塊
         # 切成兩半。
         self.spin_nm.setObjectName("pitchPixelSize")
-        self.spin_nm.setMaximumWidth(146)
+        self.spin_nm.setMaximumWidth(170)
         self.spin_nm.setAlignment(Qt.AlignCenter)
         self.spin_nm.valueChanged.connect(lambda _v: self._fill_answer())
         unit.addWidget(self.spin_nm)
@@ -1424,14 +1437,42 @@ class PitchHelperWindow(QMainWindow):
         self.view.clear_measure()
         self.btn_use_ruler.setVisible(False)
 
+    #: 沒有影像就沒有意義的那些控制項（見 `_sync_enabled`）。
+    #: ⚠ `spin_nm`（pixel size）**不在裡面**：先填好機台的 nm/px 再開圖是合理的
+    #: 用法，而它填的值撐得過換圖。
+    def _needs_image(self):
+        return (self.btn_crop, self.chips_axis, self.spin_px, self.spin_py,
+                self.btn_double, self.btn_reset, self.chk_median,
+                self.chk_edges, self.chk_grid, self.btn_ruler,
+                self.btn_details)
+
+    def _sync_enabled(self) -> None:
+        """**沒有圖的時候，按不出結果的東西要看起來按不出結果。**
+
+        空狀態下這些控制項全部是「按得動」的，而按下去：`Crop…` 回 False
+        **狀態列一個字都沒有**（按了像壞掉）；`Ruler` 真的打開量尺模式、還說
+        「Drag across the image」—— 而沒有 image；週期欄收下 60、答案仍然是
+        `—`；`×2` 靜靜地沒反應。
+
+        這是鐵則 7「不 raise 不等於不記」的 UI 版：**一顆按了什麼都不會發生、
+        也不說為什麼的按鈕**。變灰是那句「為什麼」最便宜的講法。
+        """
+        has = self._work is not None and bool(np.asarray(self._work).size)
+        for w in self._needs_image():
+            w.setEnabled(has)
+        if not has:                      # 關掉的模式不要留著
+            self.btn_ruler.setChecked(False)
+
     def _busy(self, on: bool) -> None:
-        for w in (self.btn_open, self.btn_paste, self.btn_crop, self.chips_axis,
-                  self.spin_px, self.spin_py, self.btn_double, self.btn_reset,
-                  self.chk_median, self.chk_edges, self.btn_ruler,
-                  self.btn_use_ruler):
+        for w in (self.btn_open, self.btn_paste, self.btn_use_ruler) \
+                + self._needs_image():
             w.setEnabled(not on)
         for b in self._try_buttons:
             b.setEnabled(not on)
+        if not on:
+            # ⚠ 跑完不是「全部打開」，是「回到該有的樣子」—— 不然沒有圖的那條
+            # 路會被這裡一口氣全部啟用。
+            self._sync_enabled()
 
     def _on_axis(self, _value: str) -> None:
         """軸向改了 —— **週期不重量**，但格線與疊圖都要重來。
@@ -1533,6 +1574,7 @@ class PitchHelperWindow(QMainWindow):
 
     def _refresh(self) -> None:
         """一次把畫面對齊到目前的狀態 —— **只有這一支**（少呼叫一半就是說謊）。"""
+        self._sync_enabled()
         self._fill_answer()
         self._draw()
         self._fill_stack()
@@ -1581,7 +1623,14 @@ class PitchHelperWindow(QMainWindow):
             if not show:
                 continue
             if self._m is None:
-                bar.set_value(0.0, TONE_WARN, "")
+                # ⚠ **還沒量過就不畫軌道**（同 `bar_agree` 那一條）。
+                # 這裡本來是 `set_value(0.0, …)`，於是還沒載圖的時候這兩條各畫
+                # 一顆琥珀色的點（=「被評分過，拿了 0 分」），而正下方的
+                # `Cells agree` 什麼都沒畫（=「還沒有東西可評」）——
+                # **同一張卡、三條、兩種意思**。
+                # 第十二輪修的是那一條，而我寫的測試也只斷言了那一條：
+                # 三條裡守了一條，另外兩條就大搖大擺地漏過去。
+                bar.set_text_only("")
             elif ov[i] and tc[i] is None:
                 # 打進去了，但這張圖打不出分數（還沒載圖／lag 大過半張圖）。
                 bar.set_text_only(CONF_TYPED)
