@@ -156,6 +156,9 @@ class ImageView(QWidget):
     #: 並排比對兩張圖時，兩邊靠這個訊號互相跟隨 —— 沒有連動的並排沒有意義，
     #: 使用者得手動把兩邊拖到同一個位置才比得起來。
     view_changed = Signal(float, QPointF)
+    #: 量尺拖曳中／拖完：``(axis, start, end)``，影像像素座標。
+    #: 放開之後**不會**自動清掉（見 :meth:`set_measure_mode`）。
+    measured = Signal(str, float, float)
 
     _MIN_SCALE = 0.02
     _MAX_SCALE = 60.0
@@ -176,6 +179,9 @@ class ImageView(QWidget):
         self._panning = False
         self._pan_start = QPointF()
         self._pan_offset = QPointF()
+        #: 量尺模式（F120）：左鍵拖曳改成量，不是平移。見 `set_measure_mode`。
+        self._measure_mode = False
+        self._measuring: Optional[QPointF] = None
         #: 疊在影像上的 ROI 框（正規化座標）。見 :meth:`set_overlay`。
         self._overlay: List[Tuple[float, float, float, float]] = []
         self._overlay_focus = -1
@@ -518,6 +524,38 @@ class ImageView(QWidget):
         a, b = float(start), float(end)
         self._measure = (axis, min(a, b), max(a, b))
         self.update()
+
+    def set_measure_mode(self, on: bool) -> None:
+        """量尺模式：左鍵拖曳**改成量長度**，不再平移（F120）。
+
+        為什麼是一個模式而不是一個修飾鍵
+        --------------------------------
+        這張圖上左鍵本來就是平移，而平移是這個視窗最常用的手勢。搶走它要讓
+        使用者**看得見自己搶走了** —— 一顆按下去會亮的鈕做得到，
+        ``Shift`` 做不到（按鍵在畫面上沒有形狀，而一個「為什麼拖不動了」的
+        使用者不會想到去放開一個他沒有按下的鍵）。
+
+        ⚠ **放開之後那條帶留著。** 這一點跟 F8 曲線上那把尺**刻意相反**：
+        那一把是「現在正在量」的回饋，量完就沒事了；這一把量出來的數字
+        **使用者下一步要拿去用**（按一下就填進週期欄），所以它得活到那一下。
+        離開模式、換圖、重裁就清掉 —— 那三件事都表示「剛剛量的不算了」。
+
+        量的是**沿著主要拖曳方向的那一段**（|dx| > |dy| 就是 X）：pitch 問的
+        是「隔多遠重複一次」，而那是一個軸上的距離，不是一條斜線的長度。
+        """
+        on = bool(on)
+        if on == self._measure_mode:
+            return
+        self._measure_mode = on
+        self._measuring = None
+        if not on:
+            self.clear_measure()
+        self.setCursor(Qt.CrossCursor if on else Qt.ArrowCursor)
+        if not on:
+            self.unsetCursor()
+
+    def measure_mode(self) -> bool:
+        return self._measure_mode
 
     def clear_measure(self) -> None:
         """放開量測尺 —— 標記跟著消失（它是「現在正在量」的回饋，不是註記）。"""
@@ -875,6 +913,10 @@ class ImageView(QWidget):
     def mousePressEvent(self, e) -> None:
         if self._pixmap is None:
             return
+        if self._measure_mode and e.button() == Qt.LeftButton:
+            self._measuring = self._to_image(QPointF(e.position()))
+            self._auto_fit = False
+            return
         if e.button() in (Qt.LeftButton, Qt.MiddleButton, Qt.RightButton):
             self._panning = True
             self._pan_start = QPointF(e.position())
@@ -884,6 +926,9 @@ class ImageView(QWidget):
 
     def mouseMoveEvent(self, e) -> None:
         pos = QPointF(e.position())
+        if self._measuring is not None:
+            self._drag_measure(pos)
+            return
         if self._panning:
             self._offset = self._pan_offset + (pos - self._pan_start)
             self.update()
@@ -892,9 +937,31 @@ class ImageView(QWidget):
         self._emit_cursor(pos)
 
     def mouseReleaseEvent(self, _e) -> None:
+        if self._measuring is not None:
+            self._measuring = None
+            return
         if self._panning:
             self._panning = False
             self.unsetCursor()
+
+    def _drag_measure(self, pos: QPointF) -> None:
+        """拖曳中：沿**主要方向**那一軸標出來，並把讀數發出去。"""
+        if self._measuring is None or self._image is None:
+            return
+        now = self._to_image(pos)
+        dx = abs(now.x() - self._measuring.x())
+        dy = abs(now.y() - self._measuring.y())
+        h, w = self._image.shape[:2]
+        if dx >= dy:
+            a, b = self._measuring.x(), now.x()
+            axis, hi = "x", float(w)
+        else:
+            a, b = self._measuring.y(), now.y()
+            axis, hi = "y", float(h)
+        a = min(max(float(a), 0.0), hi)
+        b = min(max(float(b), 0.0), hi)
+        self.set_measure(axis, a, b)
+        self.measured.emit(axis, min(a, b), max(a, b))
 
     def mouseDoubleClickEvent(self, e) -> None:
         if e.button() == Qt.LeftButton:

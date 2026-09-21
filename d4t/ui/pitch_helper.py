@@ -87,6 +87,7 @@ from d4t.core.log import swallowed
 from . import branding, fit_screen, theme
 from .chips import ChoiceChips
 from .crop_dialog import CropDialog, crop_array, describe_crop
+from .icons import GlyphButton
 from .image_view import ImageView
 from .lattice_dialog import lattice_boxes
 # ⚠ **為了一個常數 import 一整支 1,300 行的對話框**，而那是刻意的：
@@ -101,7 +102,7 @@ from .theme import TOKENS
 from .widgets import apply_button_cursors, to_uint8
 
 __all__ = [
-    "PitchHelperWindow", "Bar", "AXES", "AXIS_AUTO", "AXIS_X", "AXIS_Y",
+    "PitchHelperWindow", "Bar", "AXES", "AXIS_X", "AXIS_Y",
     "AXIS_BOTH", "axis_flags", "lattice_periods", "px_text", "nm_text",
     "pitch_rows", "effective_period", "conf_tone", "agree_tone", "Override",
     "PITCH_UNSET", "PITCH_NOT_USED", "CONF_TYPED", "TONE_GOOD", "TONE_WARN",
@@ -115,34 +116,45 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # 軸向：使用者說了算（F120，使用者 2026-09-21「也能支援純 X 純 Y」）
 # --------------------------------------------------------------------------- #
-AXIS_AUTO = "auto"
 AXIS_X = "x"
 AXIS_Y = "y"
 AXIS_BOTH = "both"
 
-#: 四選一，順序就是畫面上膠囊的順序。
-AXES = (AXIS_AUTO, AXIS_X, AXIS_Y, AXIS_BOTH)
-AXIS_ICONS = ("target_auto", "axis_x", "axis_y", "place_crossing")
-#: ⚠ **``X + Y`` 改名成 ``Force both``**（使用者 2026-09-21：「Auto 跟 X+Y 差在
-#: 哪裡？」）。差別是真的存在的 —— Auto 會把信心不夠的那一軸丟掉，這一顆不會
-#: —— 但 ``X + Y`` 這個字**只講了它做什麼，沒講它跟 Auto 差在哪**，而畫面上
-#: 一個看不出差別的選項等於一個陷阱。``Force`` 這個字就是那個差別。
+#: 三選一，順序就是畫面上膠囊的順序。**預設是兩軸都切。**
+#:
+#: ⚠ **這裡本來有第四顆 `Auto`，2026-09-21 使用者拿掉了**（「我覺得就分 X+Y
+#: 跟 X 跟 Y 就好」）。它上一輪才剛因為「Auto 跟 X+Y 差在哪裡？」被改名成
+#: `Force both` —— 而一個要靠改名才講得清楚的差別，多半是那個差別不該存在。
+#:
+#: ⚠ **而那個差別實測上根本不存在。** Auto 做的唯一一件事是把信心
+#: < `MIN_PERIOD_CONFIDENCE`（40）的軸丟掉，但 `estimate_period` 自己的
+#: `strength_threshold`（0.18 ≈ 信心 18）在那之前就已經回 `px=None` 了。
+#: 實測掃過訊號強度（900×700、σ=30 的雜訊上疊一條週期 60 的線）：
+#:
+#:   振幅 1 → px=0（引擎自己就擋了）  ·  振幅 2 → px=60、信心 41.3
+#:
+#: **中間沒有東西。** 那兩道門之間的 18–40 那一段，在這些圖上是空的 ——
+#: 所以 Auto 從來沒有丟掉過任何東西，它只是一顆看不出跟隔壁差在哪的鈕。
+#: 萬一真的有圖落在那一段，現在的處置是**講出來而不是默默丟掉**
+#: （見 `_fill_warning` 的低信心那一句）—— 那比較誠實：使用者看得到那個數字
+#: 跟它的紅色長條，而不是一片空白。
+AXES = (AXIS_BOTH, AXIS_X, AXIS_Y)
+AXIS_ICONS = ("place_crossing", "axis_x", "axis_y")
+#: ⚠ ``Force both`` 改回 ``X + Y``：``Force`` 那個字是上一輪拿來講
+#: 「跟 Auto 差在哪」的，而 Auto 已經不在了 —— 沒有對照組的時候，
+#: ``Force`` 只是一個多出來的字。
 AXIS_LABELS = {
-    AXIS_AUTO: "Auto",
     AXIS_X: "X only",
     AXIS_Y: "Y only",
-    AXIS_BOTH: "Force both",
+    AXIS_BOTH: "X + Y",
 }
 #: ⚠ 每一句只留**「什麼時候按它」**。第一版四句話加起來 60 個字掛在四顆膠囊
 #: 底下，而使用者同一輪說了「UI 內字太多」——  說明的長度跟它被讀到的機率成
 #: 反比。
 AXIS_HELP = {
-    AXIS_AUTO: ("Let the image decide. A direction it is not confident about "
-                "is left out - a made-up period is worse than none."),
     AXIS_X: "It only repeats across. One cell is the full height.",
     AXIS_Y: "It only repeats down. One cell is the full width.",
-    AXIS_BOTH: ("Both directions, even where Auto was not confident. That is "
-                "the only difference from Auto."),
+    AXIS_BOTH: "It repeats both ways. One cell is a tile.",
 }
 
 #: 一軸要至少這麼多像素才算得上一個週期（同 `build_golden_cell` 的判準）。
@@ -160,27 +172,27 @@ PITCH_NOT_USED = "not used"
 def axis_flags(axis: str, px: float, py: float,
                conf_x: float = 100.0, conf_y: float = 100.0
                ) -> Tuple[bool, bool]:
-    """``(用不用 X, 用不用 Y)`` —— 軸向選擇 ＋ 量到的東西一起決定。
+    """``(用不用 X, 用不用 Y)`` —— **使用者選的那一顆說了算**。
 
-    * **Auto** 照 `build_golden_cell` 的判準：``p >= 2 且 信心 >= 40``。
-      「量到一個數字」不等於「真的有週期」—— 純雜訊也會被找出一個假週期
-      （實測信心 20 上下，真的有週期的是 87）。
-    * **明講的軸**（X only／Y only／X + Y）**跳過信心那一關**：使用者明講的
-      一律相信，同 `build_golden_cell` 的 ``given`` 規則。但它變不出一個沒有
-      量到的數字 —— ``p < 2`` 仍然是沒有。
+    三顆膠囊（X + Y／X only／Y only）**都跳過信心那一關**：使用者明講的
+    一律相信，同 `build_golden_cell` 的 ``given`` 規則。但它變不出一個沒有量到
+    的數字 —— ``p < 2`` 仍然是沒有（而純雜訊實測就是 ``px=0``，因為
+    `estimate_period` 自己的 ``strength_threshold`` 在那之前就擋下來了）。
+
+    ``conf_x``／``conf_y`` 留著是為了呼叫端的簽名不要跟著 `AXES` 變 ——
+    這一支不再看它們（見 :data:`AXES` 的說明：使用者 2026-09-21 拿掉了
+    `Auto`，而那是唯一看信心的那一顆）。低信心現在是**警告**，不是否決權。
+
+    不認得的軸向當成 ``X + Y``（預設那一顆）。
     """
     has_x = float(px or 0.0) >= MIN_PERIOD_PX
     has_y = float(py or 0.0) >= MIN_PERIOD_PX
-    a = str(axis or AXIS_AUTO)
+    a = str(axis or AXIS_BOTH)
     if a == AXIS_X:
         return (has_x, False)
     if a == AXIS_Y:
         return (False, has_y)
-    if a == AXIS_BOTH:
-        return (has_x, has_y)
-    ok_x = has_x and float(conf_x or 0.0) >= algo_template.MIN_PERIOD_CONFIDENCE
-    ok_y = has_y and float(conf_y or 0.0) >= algo_template.MIN_PERIOD_CONFIDENCE
-    return (ok_x, ok_y)
+    return (has_x, has_y)
 
 
 def lattice_periods(shape: Tuple[int, int], px: float, py: float,
@@ -782,6 +794,8 @@ class PitchHelperWindow(QMainWindow):
         self._m: Optional[Any] = None                # 上一次的 MeasuredPeriod
         self._gc: Optional[Any] = None               # 上一次疊出來的 Golden Cell
         self._worker: Optional[_PitchWorker] = None
+        #: 量尺量到的 ``(axis, 長度 px)``；沒量就 None。
+        self._measured: Optional[Tuple[str, float]] = None
 
         root = QWidget(self)
         self.setCentralWidget(root)
@@ -811,15 +825,20 @@ class PitchHelperWindow(QMainWindow):
     def _toolbar(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(6)
-        self.btn_open = QPushButton("Open image…", self)
+        # ⚠ 圖示走 `icons.GlyphButton`（自繪），**不是字元**：廠內是 Windows，
+        # 而 Segoe UI 蓋不到那些符號 —— 退字型之後同一排每顆的大小與 baseline
+        # 都不一樣，最壞是豆腐框，而我們在開發機上看不到
+        # （`draw_glyph_icon` 的檔頭逐字說明了這件事）。
+        self.btn_open = GlyphButton("image", "Open image…", parent=self)
         self.btn_open.clicked.connect(self.open_image)
-        self.btn_paste = QPushButton("Paste", self)
-        self.btn_paste.setToolTip("Paste an image from the clipboard (Ctrl+V).")
+        self.btn_paste = GlyphButton(
+            "paste", "Paste",
+            "Paste an image from the clipboard (Ctrl+V).", self)
         self.btn_paste.clicked.connect(self.paste_image)
-        self.btn_crop = QPushButton("Crop…", self)
-        self.btn_crop.setToolTip(
+        self.btn_crop = GlyphButton(
+            "crop", "Crop…",
             "Measure from one part only — leave out the defect, scribe lines "
-            "and the scale bar. They are not the repeating layout.")
+            "and the scale bar. They are not the repeating layout.", self)
         self.btn_crop.clicked.connect(self.ask_crop)
         # **入口要長得像入口。** 三顆一樣灰的鈕，使用者第一眼不知道該按哪一個
         # —— 而這個視窗只有一個起點。
@@ -846,17 +865,81 @@ class PitchHelperWindow(QMainWindow):
         lay.setSpacing(4)
         self.view = ImageView(box)
         lay.addWidget(self.view, 1)
+        self.view.measured.connect(self._on_measured)
         row = QHBoxLayout()
         self.chk_grid = QCheckBox("Cut lines", box)
         self.chk_grid.setChecked(True)
         self.chk_grid.setToolTip("Draw the cell boundaries on the image.")
         self.chk_grid.toggled.connect(lambda _on: self._draw())
         row.addWidget(self.chk_grid)
+
+        # ---- 量尺（F120 第九輪，使用者：「畫布上也添加量尺功能」）----------
+        # ⚠ **它不是「再算一次 period」，它是「我自己量一段」。** 兩者在畫面上
+        # 要分得出來：量尺是綠的（`ImageView._paint_measure` 本人），格線是藍的。
+        self.btn_ruler = GlyphButton("ruler", "Ruler", parent=box)
+        self.btn_ruler.setCheckable(True)
+        self.btn_ruler.setProperty("variant", "secondary")
+        self.btn_ruler.setToolTip(
+            "Drag on the image to measure a distance. Turn it on and the "
+            "left button measures instead of panning.")
+        self.btn_ruler.toggled.connect(self._on_ruler)
+        row.addWidget(self.btn_ruler)
+        # **量到的數字要用得掉。** 只印一個長度的尺，使用者還是得自己把它打進
+        # 週期欄 —— 而那一格就在旁邊，中間隔著一次手抄。
+        self.btn_use_ruler = QPushButton("Use as period", box)
+        self.btn_use_ruler.setProperty("variant", "secondary")
+        self.btn_use_ruler.setToolTip(
+            "Put what you just measured into the period box for that axis.")
+        self.btn_use_ruler.clicked.connect(self.use_measured)
+        self.btn_use_ruler.setVisible(False)
+        row.addWidget(self.btn_use_ruler)
+
         self.caption = QLabel("", box)
         self.caption.setObjectName("paramHint")
         row.addWidget(self.caption, 1)
         lay.addLayout(row)
         return box
+
+    # -- 量尺 ---------------------------------------------------------------
+    def _on_ruler(self, on: bool) -> None:
+        self.view.set_measure_mode(bool(on))
+        if not on:
+            self._measured = None
+            self.btn_use_ruler.setVisible(False)
+            self._draw()                      # 帶子沒了，說明也要跟著回去
+        else:
+            self._say("Drag across the image to measure. "
+                      "Release and the reading stays.")
+
+    def _on_measured(self, axis: str, a: float, b: float) -> None:
+        span = abs(float(b) - float(a))
+        self._measured = (str(axis), span)
+        self.btn_use_ruler.setVisible(span >= MIN_PERIOD_PX)
+        self.btn_use_ruler.setText(
+            "Use as %s period" % ("X" if axis == "x" else "Y"))
+        self._say_caption("")          # 內容由 `_say_caption` 自己從 `_measured` 生
+
+    def measured_span(self) -> Optional[Tuple[str, float]]:
+        """量尺現在量到的 ``(axis, 長度 px)``（沒量就 None）。測試讀這個。"""
+        return self._measured
+
+    def use_measured(self) -> None:
+        """把量到的那一段**填進對應那一軸的週期欄**。
+
+        ⚠ 填的是 `spin_px`／`spin_py`，走的是既有的「使用者自己打一個週期」
+        那條路（`_on_override`）—— **不是第三條算週期的路**。所以格線、疊圖、
+        信心（`confidence_at`）全部跟著重算，而且跟手打的完全一樣。
+        """
+        if self._measured is None:
+            return
+        axis, span = self._measured
+        if span < MIN_PERIOD_PX:
+            return
+        (self.spin_px if axis == "x" else self.spin_py).setValue(float(span))
+        # **用掉之後就收起來。** 那個數字現在住在週期欄裡，畫面上不需要兩份；
+        # 而留著一顆「Use as period」會讓人以為還沒生效。
+        self._clear_ruler()
+        self.btn_ruler.setChecked(False)
 
     @staticmethod
     def _section(parent: QWidget, text: str) -> QLabel:
@@ -923,9 +1006,9 @@ class PitchHelperWindow(QMainWindow):
         # ——  一顆按鈕的意思是它旁邊那個東西，不是它自己的字。
         row_copy = QHBoxLayout()
         row_copy.addStretch(1)
-        self.btn_copy = QPushButton("Copy", box)
+        self.btn_copy = GlyphButton("copy", "Copy", parent=box)
         self.btn_copy.setProperty("variant", "secondary")
-        self.btn_copy.setMaximumWidth(72)
+        self.btn_copy.setMaximumWidth(92)
         self.btn_copy.clicked.connect(self.copy_answer)
         row_copy.addWidget(self.btn_copy)
         row_copy.addStretch(1)
@@ -933,7 +1016,7 @@ class PitchHelperWindow(QMainWindow):
 
         # ---- 哪個方向 -----------------------------------------------------
         lay.addWidget(self._section(box, "Which way it repeats"))
-        self.chips_axis = ChoiceChips(AXES, AXIS_ICONS, AXIS_AUTO,
+        self.chips_axis = ChoiceChips(AXES, AXIS_ICONS, AXIS_BOTH,
                                       helps=AXIS_HELP, labels=AXIS_LABELS,
                                       parent=box)
         self.chips_axis.changed.connect(self._on_axis)
@@ -953,12 +1036,14 @@ class PitchHelperWindow(QMainWindow):
             "Double both — for when one cell of yours is two of the repeats it "
             "measured (two MG lines making the unit you compare).")
         self.btn_double.clicked.connect(self._on_double)
-        self.btn_reset = QPushButton("Reset", box)
+        self.btn_reset = GlyphButton("undo", "Reset", parent=box)
         self.btn_reset.setToolTip("Back to the measured period.")
         self.btn_reset.clicked.connect(self._on_reset)
-        for b in (self.btn_double, self.btn_reset):
+        for b, cap in ((self.btn_double, 46), (self.btn_reset, 86)):
             b.setProperty("variant", "secondary")
-            b.setMaximumWidth(64)
+            # ⚠ Reset 現在左邊多了一個圖示格，64 會把字切成 "Res…"。
+            # 寬度跟著內容走，不是兩顆抄同一個數字。
+            b.setMaximumWidth(cap)
             fix.addWidget(b)
         lay.addLayout(fix)
 
@@ -1181,6 +1266,9 @@ class PitchHelperWindow(QMainWindow):
             return
         self._work = crop_array(self._full, self._crop)
         self._m = self._gc = None
+        # ⚠ **底下的像素換了，剛剛量的那一段就不算了。** 留著的話那條綠帶會
+        # 落在一張它從來沒有被拉過的圖上，而畫面不會說那是舊的。
+        self._clear_ruler()
         h, w = self._work.shape[:2]
         bits = ["%s%d × %d px" % ((self._name + " · ") if self._name else "", w, h)]
         crop = describe_crop(self._crop)
@@ -1220,10 +1308,17 @@ class PitchHelperWindow(QMainWindow):
         self.progress.setVisible(False)
         self._busy(False)
 
+    def _clear_ruler(self) -> None:
+        """量尺歸零（模式留著 —— 使用者按的那一顆鈕不會自己彈回去）。"""
+        self._measured = None
+        self.view.clear_measure()
+        self.btn_use_ruler.setVisible(False)
+
     def _busy(self, on: bool) -> None:
         for w in (self.btn_open, self.btn_paste, self.btn_crop, self.chips_axis,
                   self.spin_px, self.spin_py, self.btn_double, self.btn_reset,
-                  self.chk_median, self.chk_edges):
+                  self.chk_median, self.chk_edges, self.btn_ruler,
+                  self.btn_use_ruler):
             w.setEnabled(not on)
         for b in self._try_buttons:
             b.setEnabled(not on)
@@ -1270,7 +1365,7 @@ class PitchHelperWindow(QMainWindow):
 
     # -- 畫面 ---------------------------------------------------------------
     def axis(self) -> str:
-        return self.chips_axis.text() or AXIS_AUTO
+        return self.chips_axis.text() or AXIS_BOTH
 
     def nm_per_px(self) -> float:
         return float(self.spin_nm.value())
@@ -1542,6 +1637,22 @@ class PitchHelperWindow(QMainWindow):
                                               self._flags()))
             if note:
                 lines.append(note)
+            # ⚠ **低信心的那一軸現在用講的，不是默默丟掉。**
+            # 那是 `Auto` 留下來的唯一一件有用的事（見 :data:`AXES`）——
+            # 使用者 2026-09-21 把 `Auto` 拿掉之後，這一句就是它的去處。
+            # 打進去的那一軸不算（使用者明講的數字不需要引擎背書）。
+            flags_now = self._flags()
+            weak = [name for i, (name, conf) in enumerate(
+                (("X", float(getattr(self._m, "conf_x", 0.0) or 0.0)),
+                 ("Y", float(getattr(self._m, "conf_y", 0.0) or 0.0))))
+                if flags_now[i] and not self.override()[i]
+                and conf < algo_template.MIN_PERIOD_CONFIDENCE]
+            if weak:
+                lines.append(
+                    "%s barely repeats (confidence under %d) — the number is "
+                    "there, but check the stacked cell before you trust it."
+                    % (" and ".join(weak),
+                       int(algo_template.MIN_PERIOD_CONFIDENCE)))
             ox, oy = self.override()
             if ox or oy:
                 got = ", ".join(
@@ -1557,16 +1668,34 @@ class PitchHelperWindow(QMainWindow):
         self.warn.setText(("⚠  " + text) if text else "")
         self.warn.setVisible(bool(text))
 
+    def _say_caption(self, text: str) -> None:
+        """圖底下那一行字 —— **只有這一支寫它**。
+
+        ⚠ 量尺的讀數跟格線的說明搶同一行，而它們由不同的事件觸發（拖曳 vs
+        重算完）。少了這道收口，worker 回來的那一刻會把使用者剛量到的數字
+        蓋掉 —— 這個視窗這一輪已經為了「同一件事有兩個算法」付過四次錢了。
+        **量尺在量的時候它說了算**，其餘時間交給格線。
+        """
+        if self._measured is not None:
+            axis, span = self._measured
+            um = nm_text(span, True, self.nm_per_px())
+            self.caption.setText(
+                "Ruler: %s px%s along %s"
+                % (algo_period2d.fmt_px(span), ("  ·  " + um) if um else "",
+                   "X" if axis == "x" else "Y"))
+            return
+        self.caption.setText(str(text))
+
     def _draw(self) -> None:
         """格線鋪回原圖 —— **`lattice_boxes` 本人**，不自己再算一次格子。"""
         if self._work is None or self._m is None or not self.chk_grid.isChecked():
             self.view.set_overlay(None)
-            self.caption.setText("")
+            self._say_caption("")
             return
         flags = self._flags()
         if not flags[0] and not flags[1]:
             self.view.set_overlay(None)
-            self.caption.setText("No period to draw.")
+            self._say_caption("No period to draw.")
             return
         shape = self._work.shape[:2]
         # ⚠ 畫的是**真的在用的那一組**，不是量到的那一組 —— 少了這一行，
@@ -1592,7 +1721,7 @@ class PitchHelperWindow(QMainWindow):
         text = "%s px · %d cells" % (algo_template.period_text(ux, uy), total)
         if len(boxes) < total:
             text += " (%d drawn)" % len(boxes)
-        self.caption.setText(text)
+        self._say_caption(text)
 
     def _say(self, text: str) -> None:
         self.statusBar().showMessage(str(text), 8000)

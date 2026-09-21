@@ -829,6 +829,13 @@ QPushButton {
     min-height: 18px;
     font-weight: 500;
 }
+/* A push button that draws its own glyph has to be told to leave room for it,
+   exactly like the toolbar rule above (F7-23 round 4). Without this the glyph
+   lands on top of the first letter - "Open image..." renders as a picture with
+   an O under it. The toolbar rule only matches `QToolBar QToolButton`, so a
+   plain QPushButton with a glyph (icons.GlyphButton, F120) got nothing.
+   The glyph is drawn at x = 7..21, so 26 clears it with room to spare. */
+QPushButton[hasGlyph="true"] { padding-left: 26px; }
 QPushButton:hover { border-color: $border_hover; background: $hover_warm; }
 /* Pressed has to be a real step, not a shade (F7-23 round 3). It used to reuse
  * the hover colour one notch darker - about 3.5 in L* - and a press lasts
@@ -847,6 +854,10 @@ QPushButton#primary {
     background: $accent; color: #ffffff; border: $hairline solid $accent;
     padding: 5px 18px; font-weight: 600;
 }
+/* #primary sets its own `padding: 5px 18px`, which beats the rule above on
+   specificity - so the glyph room has to be restated here, wider because the
+   side padding is wider (the same pair as the toolbar copy). */
+QPushButton#primary[hasGlyph="true"] { padding-left: 30px; }
 /* Same as the toolbar copy above: the border follows the fill. */
 QPushButton#primary:hover { background: $accent_hover;
                             border-color: $accent_hover; }

@@ -1,8 +1,9 @@
 # F120 — Pitch helper（丟一張圖進去，回答它的 cell period）
 
-狀態：**第八版，等使用者看過（2026-09-21）** —— `python -m d4t pitch` 開得
+狀態：**第九版，等使用者看過（2026-09-21）** —— `python -m d4t pitch` 開得
 起來，四點追加的需求都在（§5／§5.1／§5.2），使用者七輪回饋都做完（§18），
-第八輪是「截其他狀態的圖」而那幾張圖抓出三個 bug（§19）。⚠ **不寫「已收斂」**：使用者還沒
+第八輪是「截其他狀態的圖」而那幾張圖抓出三個 bug（§19），
+第九輪三顆膠囊／按鈕圖示／畫布量尺（§20）。⚠ **不寫「已收斂」**：使用者還沒
 在真實影像上用過，而這種工具的驗收只有那一件事算數。⚠ §5 那顆「格線」按鈕
 **做的時候從「一顆鈕」改成「預設開著」**，理由與它揪出來的那個 bug 在 §10。
 
@@ -100,14 +101,17 @@ helper 照抄卡片那一套（`steps/_util.nm_per_px_spec`）：
 
 一維的 layout 是常態（垂直條紋只有 X 有週期），而自動判斷會在**兩軸都量得到
 東西**的時候兩軸都切 —— 使用者要的那個單元卻可能只在一個方向上重複。所以
-軸向是一格**使用者說了算**的選擇，四選一（`chip_choice` 的膠囊形狀）：
+軸向是一格**使用者說了算**的選擇，三選一（`chip_choice` 的膠囊形狀）：
 
 | 選項 | 意思 |
 |---|---|
-| **Auto** | 量到哪一軸就用哪一軸（今天的行為，預設） |
+| **X + Y**（預設）| 兩軸都切。一格是一塊磚 |
 | **X only** | 只切直線。Y 那一軸「一格就是整張影像」（`lattice_boxes` 本來就這樣處理沒有週期的軸）|
 | **Y only** | 只切橫線 |
-| **Force both** | 兩軸都切，**即使某一軸信心不足**（使用者明講的一律相信 —— 同 `build_golden_cell` 的 `given` 規則）。⚠ 原本叫 `X + Y`，第七輪改名，理由在 §18.4 |
+
+三顆**都跳過信心那一關** —— 使用者明講的一律相信，同 `build_golden_cell` 的
+`given` 規則。⚠ 這裡本來有第四顆 `Auto`（唯一會看信心的那一顆），
+**2026-09-21 使用者拿掉了，而量過之後發現它從來沒有做過任何事** —— 見 §20.1。
 
 ⚠ **它不改量出來的數字**，只改「哪幾軸算數」。兩軸的 px／py 一直都量得到。
 
@@ -776,3 +780,99 @@ ox, oy = float(origin[0] or 0.0), float(origin[1] or 0.0)   # ← 錯
 | `test_a_cancelled_run_does_not_put_a_half_stacked_answer_on_screen` | 19.3 |
 | `test_nothing_measured_yet_is_not_drawn_as_a_zero` | 19.4 |
 | `test_the_grid_matches_the_stack_after_a_typed_period` | 19.5 |
+
+---
+
+## 20. 第九輪：三顆膠囊、按鈕上的圖示、畫布上的量尺（使用者 2026-09-21）
+
+> 我覺得就分 X+Y 跟 X 跟 Y 就好 ／ UI 按鈕可以加 icon ／ 另外畫布上也添加量尺功能
+
+### 20.1 ⚠ `Auto` 拿掉了 —— 而它從來沒有做過任何事
+
+`Auto` 上一輪才剛因為「Auto 跟 X+Y 差在哪裡？」被改名成 `Force both`（§18.4）。
+**一個要靠改名才講得清楚的差別，多半是那個差別不該存在** —— 這一輪使用者直接
+把它拿掉了。
+
+拿掉之前先量：`Auto` 做的唯一一件事是丟掉信心 < `MIN_PERIOD_CONFIDENCE`（40）
+的軸。但 `estimate_period` 自己的 `strength_threshold`（0.18 ≈ 信心 18）在那
+之前就已經回 `px=None` 了。掃過訊號強度（900×700、σ=30 的雜訊上疊一條週期
+60 的線）：
+
+| 振幅 | `px` | `conf_x` | |
+|---|---|---|---|
+| 1 | 0 | 16.1 | 引擎自己就擋了 |
+| **2** | **60** | **41.3** | Auto 也留著 |
+| 3 / 4 / 6 | 60 | 59.7 / 70.7 / 81.5 | Auto 也留著 |
+
+**18–40 那一段是空的。** 兩道門之間沒有東西，所以 `Auto` 從來沒有丟掉過任何
+一軸 —— 它只是一顆看不出跟隔壁差在哪的鈕。純雜訊實測 `px=0`，擋住它的是引擎
+不是 `Auto`。
+
+萬一真有圖落在那一段：現在**講出來而不是默默丟掉**（`_fill_warning` 多一句
+「X barely repeats (confidence under 40)」）。那比較誠實 —— 使用者看得到那個
+數字跟它的紅色長條，而不是一片空白。`Force both` 也跟著改回 `X + Y`：`Force`
+那個字是拿來跟 `Auto` 對照的，對照組不在了它就只是一個多出來的字。
+
+### 20.2 按鈕上的圖示：四張新的字形 ＋ 一個只在畫面上出現的 bug
+
+`paste` / `copy` / `crop` / `ruler` 四張新字形（`ui/icons.py`）。⚠ 全部**自繪**
+不用字元 —— 廠內是 Windows 而 Segoe UI 蓋不到那些符號，退字型的結果是同一排每
+顆的大小與 baseline 都不一樣，最壞是豆腐框，而**我們在開發機上看不到**
+（`draw_glyph_icon` 的檔頭逐字寫著這件事）。四顆並排所以輪廓刻意各不相同，
+而 `ruler` 是唯一**斜的** —— 16 px 下那是最容易認出來的差別。
+
+「有文字 ＋ 左邊一個圖示」這種按鈕之前只有 `studio_layout._GlyphToolButton`
+做得到，而它是 `QToolButton`，套不進一排 `QPushButton` 裡。拆出
+`icons.GlyphButton`（`IconButton` 的鄰居）。
+
+⚠ **第一版渲染出來圖示畫在第一個字母上面**（`Open image…` 變成一張圖底下壓著
+一個 O）。空出那一格的是 QSS 的 `[hasGlyph="true"] { padding-left }`，而那條
+規則只寫給 `QToolBar QToolButton` —— 一顆 `QPushButton` 什麼都拿不到。
+補兩條（`#primary` 自己的 padding specificity 更高，所以要各講一次）。
+**這種 bug 只在畫面上存在**，所以守它的測試量的是**寬度差**（規則沒匹配到
+的時候那個數字是 0）。
+
+### 20.3 量尺：`ImageView` 已經有一半了
+
+`ImageView.set_measure()` / `_paint_measure()` 本來就在（F8 的曲線量尺按著時，
+在影像上標同一段）—— 綠色那條帶子是**現成的**。缺的只有「在圖上拖曳」這個手勢。
+所以這一輪加的是 `ImageView.set_measure_mode()`，畫法一行都沒有重寫。
+
+三個決定：
+
+1. **一個模式，不是一個修飾鍵。** 左鍵本來是平移，而平移是這個視窗最常用的
+   手勢。搶走它要讓使用者**看得見自己搶走了** —— 一顆會亮的鈕做得到，
+   `Shift` 做不到（按鍵在畫面上沒有形狀，而一個「為什麼拖不動了」的使用者
+   不會想到去放開一個他沒有按下的鍵）。
+2. **量的是沿主要拖曳方向的那一段**（`|dx| > |dy|` 就是 X），不是斜線長度。
+   pitch 問的是「隔多遠重複一次」，那永遠是一個軸上的距離 —— 而使用者的手
+   一定會歪一點，`hypot` 會把那一點歪算進去。
+3. ⚠ **放開之後讀數留著** —— 這一點跟 F8 那把尺**刻意相反**。那一把是
+   「現在正在量」的回饋，量完就沒事；這一把量出來的數字**使用者下一步要拿去
+   用**（「Use as X period」按一下就填進週期欄），所以它得活到那一下。
+   離開模式、換圖、重裁就清掉 —— 那三件事都表示「剛剛量的不算了」。
+
+⚠ **它不是第三條算週期的路**：`use_measured()` 填的是 `spin_px`／`spin_py`，
+走既有的「使用者自己打一個週期」那條（`_on_override`），所以格線、疊圖、
+`confidence_at` 全部跟著重算，而且跟手打的完全一樣。
+
+⚠ 量尺的讀數跟格線的說明**搶同一行**，而它們由不同事件觸發（拖曳 vs 重算完）。
+收口成 `_say_caption()`：**量尺在量的時候它說了算**。少了這一道，worker 回來
+的那一刻會把使用者剛量到的數字蓋掉 —— 這個視窗已經為了「同一件事有兩個算法」
+付過四次錢了（§19.1），這是第五次，而這一次是**在寫的時候就擋掉**的。
+
+### 20.4 守門（`tests/test_ui_pitch_helper.py` 89 → 96 條）
+
+| 測試 | 守什麼 |
+|---|---|
+| `test_the_three_chips_are_x_plus_y_x_and_y` | 三顆、順序、`AXIS_AUTO` 真的不在了 |
+| `test_every_chip_trusts_what_the_user_picked` | 三顆都跳過信心那一關 |
+| `test_a_period_that_was_never_measured_is_still_not_invented` | 相信使用者 ≠ 變出一個數字 |
+| `test_the_ruler_measures_along_the_way_you_dragged` | 20.3 的第 2 點（拉歪了不該變大）|
+| `test_the_reading_survives_the_release` | 20.3 的第 3 點 |
+| `test_using_the_reading_goes_through_the_same_path_as_typing_it` | 不是第三條路 |
+| `test_a_new_image_clears_the_ruler` | 像素換了就不算了 |
+| `test_the_ruler_reading_is_not_clobbered_by_a_refresh` | `_say_caption` 那道收口 |
+| `test_turning_the_ruler_off_gives_the_caption_back` | 模式關掉要還原 |
+| `test_the_toolbar_buttons_have_their_own_glyphs` | 六顆六個圖示，不准共用 |
+| `test_a_glyph_button_leaves_room_for_its_glyph` | 20.2 那個只在畫面上存在的 bug（已驗證拿掉規則會紅）|

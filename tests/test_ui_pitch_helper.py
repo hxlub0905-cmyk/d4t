@@ -63,20 +63,36 @@ class _M:
 # --------------------------------------------------------------------------- #
 # 1. 軸向：使用者說了算（使用者 2026-09-21「也能支援純 X 純 Y」）
 # --------------------------------------------------------------------------- #
-def test_auto_uses_both_axes_when_both_are_confident(ph):
-    assert ph.axis_flags(ph.AXIS_AUTO, 60, 44, 92, 93) == (True, True)
+def test_the_three_chips_are_x_plus_y_x_and_y(ph):
+    """使用者 2026-09-21：「我覺得就分 X+Y 跟 X 跟 Y 就好」。
+
+    ⚠ `Auto` 上一輪才剛因為「Auto 跟 X+Y 差在哪裡？」被改名成
+    `Force both` —— **而一個要靠改名才講得清楚的差別，多半是那個差別不該
+    存在**。預設是兩軸都切。
+    """
+    assert ph.AXES == (ph.AXIS_BOTH, ph.AXIS_X, ph.AXIS_Y)
+    assert not hasattr(ph, "AXIS_AUTO"), "拿掉就是拿掉，不留一個沒人按的常數"
+    assert ph.AXIS_LABELS[ph.AXIS_BOTH] == "X + Y"
+    assert len(ph.AXIS_ICONS) == len(ph.AXES)
 
 
-def test_auto_drops_an_axis_it_is_not_confident_about(ph):
-    """**「量到一個數字」不等於「真的有週期」** —— 純雜訊也會被找出一個假週期
-    （實測信心 20 上下）。Auto 那一關就是為了它。"""
-    assert ph.axis_flags(ph.AXIS_AUTO, 60, 44, 92, 20) == (True, False)
+def test_every_chip_trusts_what_the_user_picked(ph):
+    """三顆都跳過信心那一關 —— 使用者明講的一律相信。"""
+    weak = _M(conf_x=11.0, conf_y=9.0)
+    assert ph.axis_flags(ph.AXIS_BOTH, weak.px, weak.py, weak.conf_x, weak.conf_y) == (True, True)
+    assert ph.axis_flags(ph.AXIS_X, weak.px, weak.py, weak.conf_x, weak.conf_y) == (True, False)
+    assert ph.axis_flags(ph.AXIS_Y, weak.px, weak.py, weak.conf_x, weak.conf_y) == (False, True)
 
 
-@pytest.mark.parametrize("axis,want", [("x", (True, False)), ("y", (False, True))])
-def test_one_axis_only_cuts_one_way(ph, axis, want):
-    assert ph.axis_flags(axis, 60, 44, 92, 93) == want
+def test_a_period_that_was_never_measured_is_still_not_invented(ph):
+    """⚠ 相信使用者**不等於變出一個數字**。
 
+    純雜訊實測回 ``px=0``（`estimate_period` 自己的
+    ``strength_threshold`` 在信心 ~18 就擋下來了）—— 拿掉 `Auto` 之後
+    擋住雜訊的就是這一道，而它是引擎自己的。
+    """
+    assert ph.axis_flags(ph.AXIS_BOTH, 0.0, 0.0) == (False, False)
+    assert ph.axis_flags(ph.AXIS_X, 1.0, 44.0) == (False, False), "比 2 px 還小就是沒有"
 
 def test_an_explicit_axis_is_believed_even_when_the_confidence_is_low(ph):
     """使用者明講的一律相信 —— 同 `build_golden_cell` 的 ``given`` 規則。"""
@@ -141,7 +157,7 @@ def test_an_unused_axis_has_no_converted_pitch_either(ph):
 
 
 def test_the_table_says_both_axes_and_their_confidence(ph):
-    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 2.5)
+    rows = ph.pitch_rows(_M(), ph.AXIS_BOTH, 2.5)
     assert [r[0] for r in rows] == ["Across (X)", "Down (Y)"]
     assert [r[1] for r in rows] == ["60", "44"]
     assert [r[2] for r in rows] == ["0.150 µm", "0.110 µm"]
@@ -333,7 +349,7 @@ def test_a_typed_period_does_not_borrow_the_measured_confidence(ph):
     改成 120 之後還掛著 92/100，等於拿一個他沒問過的問題的答案，去背書他剛
     打進去的數字。
     """
-    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 0.0, (120.0, None))
+    rows = ph.pitch_rows(_M(), ph.AXIS_BOTH, 0.0, (120.0, None))
     assert rows[0][1] == "120"
     assert rows[0][3] != "92 / 100", "不准沿用量到的那個分數"
     assert rows[1][3] == "93 / 100", "沒改的那一軸照樣講它量到的信心"
@@ -341,7 +357,7 @@ def test_a_typed_period_does_not_borrow_the_measured_confidence(ph):
 
 def test_a_typed_period_with_no_score_says_so_instead_of_faking_one(ph):
     """還算不出分數的時候（還沒載圖）寫 ``yours``，**不寫 0**。"""
-    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 0.0, (120.0, None), (None, None))
+    rows = ph.pitch_rows(_M(), ph.AXIS_BOTH, 0.0, (120.0, None), (None, None))
     assert rows[0][3] == ph.CONF_TYPED
 
 
@@ -351,18 +367,18 @@ def test_a_typed_period_gets_its_own_score_when_there_is_one(ph):
     可以 —— 但那是**對他打的那個數字重問一次**的分數（`confidence_at`），
     不是量出來那個數字的分數。
     """
-    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 0.0, (120.0, None), (41.0, None))
+    rows = ph.pitch_rows(_M(), ph.AXIS_BOTH, 0.0, (120.0, None), (41.0, None))
     assert rows[0][3] == "41 / 100"
 
 
 def test_a_typed_period_is_believed_even_where_the_measurement_was_not(ph):
     """使用者明講的一律相信 —— 否則畫面上會變成「我改了，但它不理我」。"""
-    rows = ph.pitch_rows(_M(px=60.0, conf_x=11.0), ph.AXIS_AUTO, 0.0, (60.0, None))
+    rows = ph.pitch_rows(_M(px=60.0, conf_x=11.0), ph.AXIS_BOTH, 0.0, (60.0, None))
     assert rows[0][1] == "60", "信心 11 但他自己打的，就該用"
 
 
 def test_a_typed_period_is_converted_too(ph):
-    rows = ph.pitch_rows(_M(), ph.AXIS_AUTO, 2.5, (120.0, None))
+    rows = ph.pitch_rows(_M(), ph.AXIS_BOTH, 2.5, (120.0, None))
     assert rows[0][2] == "0.300 µm"
 
 
@@ -974,15 +990,12 @@ def test_typing_does_not_recompute_on_every_keystroke(win, ph):
         assert not sp.keyboardTracking(), sp.objectName() or sp.suffix()
 
 
-def test_force_both_says_how_it_differs_from_auto(ph):
-    """使用者 2026-09-21：「Auto 跟 X+Y 差在哪裡？」
-
-    差別是真的存在的（Auto 會丟掉信心不夠的那一軸），但 `X + Y` 這個字
-    **只講了它做什麼，沒講它跟 Auto 差在哪** —— 而一個看不出差別的選項是
-    一個陷阱，不是一個選擇。
-    """
-    assert ph.AXIS_LABELS[ph.AXIS_BOTH] == "Force both"
-    assert "Auto" in ph.AXIS_HELP[ph.AXIS_BOTH]
+def test_the_chip_says_what_the_layout_looks_like(ph):
+    """三顆膠囊問的是**使用者的樣品長什麼樣**，不是問軟體怎麼做
+    （CLAUDE.md §3 那條「改變「量得出什麼」的選擇是屬路」）。"""
+    for key in ph.AXES:
+        assert "repeats" in ph.AXIS_HELP[key], (key, ph.AXIS_HELP[key])
+        assert "Auto" not in ph.AXIS_HELP[key], "Auto 拿掉了，字裡也不該還提"
 
 
 def test_a_zero_score_is_drawn_not_left_blank(ph):
@@ -1117,7 +1130,7 @@ def test_a_cancelled_run_does_not_put_a_half_stacked_answer_on_screen(win, ph):
     """
     img = tiles(px=60, py=44)
     got = []
-    w = ph._PitchWorker(img, ph.AXIS_AUTO)
+    w = ph._PitchWorker(img, ph.AXIS_BOTH)
     w.done.connect(lambda m, gc, err: got.append((m, gc, err)))
     w.stop()                              # 還沒 start 就取消
     w.run()                               # 同步跑一次（不開執行緒）
@@ -1129,3 +1142,157 @@ def test_a_cancelled_run_does_not_put_a_half_stacked_answer_on_screen(win, ph):
     good = win._gc.n_cells
     win._on_done(None, None, "")
     assert win._gc.n_cells == good, "被忽略，不是被覆蓋"
+
+
+# --------------------------------------------------------------------------- #
+# 12. 量尺（F120 第九輪，使用者：「畫布上也添加量尺功能」）
+# --------------------------------------------------------------------------- #
+def _drag(view, x0, y0, x1, y1):
+    """直接餵**影像座標**拉一段（不必模擬滑鼠事件的座標換算）。"""
+    from PySide6.QtCore import QPointF
+    sc, off = view.view_state()
+    view._measuring = QPointF(float(x0), float(y0))
+    view._drag_measure(QPointF(off.x() + float(x1) * sc,
+                               off.y() + float(y1) * sc))
+    view._measuring = None
+
+
+def test_the_ruler_measures_along_the_way_you_dragged(win, ph):
+    """⚠ **量的是一個軸上的距離，不是一條斜線的長度。**
+
+    pitch 問的是「隔多遠重複一次」—— 那永遠是沿著一個方向。拉得歪一點不該
+    讓讀數變大（`hypot` 會，而使用者的手一定會歪一點）。
+    """
+    win.set_image(tiles(px=60, py=44), "a.tif")
+    win.btn_ruler.setChecked(True)
+    _drag(win.view, 180, 300, 420, 320)          # 橫的為主，但 y 也動了 20
+    assert win.measured_span() == ("x", 240.0), win.measured_span()
+    _drag(win.view, 100, 100, 118, 276)          # 直的為主
+    assert win.measured_span() == ("y", 176.0), win.measured_span()
+
+
+def test_the_reading_survives_the_release(win, ph):
+    """⚠ 這一點跟 F8 曲線上那把尺**刻意相反**，而理由寫在
+    `ImageView.set_measure_mode`：那一把是「現在正在量」的回饋，這一把量出來
+    的數字**使用者下一步要拿去用**，所以它得活到那一下。
+    """
+    win.set_image(tiles(), "a.tif")
+    win.btn_ruler.setChecked(True)
+    _drag(win.view, 100, 100, 340, 110)
+    assert win.view.measure_span() is not None, "放開之後帶子還在"
+    # ⚠ `isVisible()` 對一個沒被 show 過的視窗底下的子元件永遠是 False；
+    # 這裡問的是**我們有沒有把它藏起來**，那是 `isHidden()`。
+    assert not win.btn_use_ruler.isHidden()
+
+
+def test_using_the_reading_goes_through_the_same_path_as_typing_it(win, ph):
+    """⚠ **量尺不是第三條算週期的路。**
+
+    它把數字填進 `spin_px`／`spin_py`，走的是既有的「使用者自己打一個週期」
+    —— 所以格線、疊圖、`confidence_at` 全部跟著重算，而且跟手打的完全一樣。
+    這個視窗這一輪為了「同一件事有兩個算法」付過四次錢了。
+    """
+    win.set_image(tiles(px=60, py=44), "a.tif")
+    win._on_done(*_run(win, win._work), "")
+    win.btn_ruler.setChecked(True)
+    _drag(win.view, 100, 100, 340, 108)          # 240 px
+    win.use_measured()
+    assert win.override()[0] == 240.0
+    assert win.spin_py.value() == 0.0, "只填拉的那一軸"
+    assert win.measured_span() is None, "用掉就收起來 —— 畫面上不需要兩份"
+    assert not win.btn_ruler.isChecked()
+
+
+def test_a_new_image_clears_the_ruler(win, ph):
+    """⚠ 底下的像素換了，剛剛量的那一段就不算了 —— 留著的話那條綠帶會落在
+    一張它從來沒有被拉過的圖上，而畫面不會說那是舊的。"""
+    win.set_image(tiles(), "a.tif")
+    win.btn_ruler.setChecked(True)
+    _drag(win.view, 100, 100, 340, 110)
+    assert win.measured_span() is not None
+    win.set_image(tiles(px=30, py=22), "b.tif")
+    assert win.measured_span() is None
+    assert win.view.measure_span() is None
+
+
+def test_the_ruler_reading_is_not_clobbered_by_a_refresh(win, ph):
+    """⚠ 量尺的讀數跟格線的說明搶同一行，而它們由不同的事件觸發。
+
+    少了 `_say_caption` 那道收口，worker 回來的那一刻會把使用者剛量到的數字
+    蓋掉。
+    """
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.btn_ruler.setChecked(True)
+    _drag(win.view, 100, 100, 340, 110)
+    before = win.caption.text()
+    assert before.startswith("Ruler:")
+    win._refresh()
+    assert win.caption.text() == before, "重算不准蓋掉使用者手上正在做的事"
+
+
+def test_turning_the_ruler_off_gives_the_caption_back(win, ph):
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    grid_text = win.caption.text()
+    win.btn_ruler.setChecked(True)
+    _drag(win.view, 100, 100, 340, 110)
+    win.btn_ruler.setChecked(False)
+    assert win.caption.text() == grid_text
+    assert win.view.measure_mode() is False
+
+
+def test_the_toolbar_buttons_have_their_own_glyphs(win, ph):
+    """使用者 2026-09-21：「UI 按鈕可以加 icon」。
+
+    ⚠ 圖示是**自繪**的，不是字元 —— 廠內是 Windows 而 Segoe UI 蓋不到那些
+    符號（`draw_glyph_icon` 的檔頭）。而四顆並排，所以名字不准重複。
+    """
+    from d4t.ui import icons as icons_mod
+    got = {b.glyph_name() for b in (win.btn_open, win.btn_paste, win.btn_crop,
+                                    win.btn_ruler, win.btn_copy, win.btn_reset)}
+    assert len(got) == 6, ("六顆六個圖示，不准兩顆共用", got)
+    for name in got:
+        assert name in icons_mod.GLYPH_ICONS, name
+
+
+def test_a_glyph_button_leaves_room_for_its_glyph(app, ph):
+    """⚠ **這一條守的是一個只會在畫面上出現的 bug。**
+
+    圖示畫在 `rect().left() + 7`，而空出那一格的是 QSS 的
+    ``[hasGlyph="true"] { padding-left }``。那條規則本來只寫給
+    ``QToolBar QToolButton`` —— 一顆 `QPushButton` 什麼都拿不到，於是圖示**畫
+    在第一個字母上面**（實拍：`Open image…` 變成一張圖底下壓著一個 O）。
+    `#primary` 另外有自己的 padding，specificity 更高，所以要各講一次。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    from d4t.ui import theme
+    theme.apply_theme(app)
+    win = ph.PitchHelperWindow()
+    try:
+        for b in (win.btn_open, win.btn_paste, win.btn_crop):
+            # ⚠ **不能讀 `contentsRect().left()`** —— QSS 樣式下它的**尺寸**扣掉了
+            # padding，但**原點仍然是 (0, 0)**（`_paint_glyph` 的註解逐字講了這件
+            # 事）。量得到的是**寬度差**：同一段字，有圖示的那一顆要寬出一格。
+            plain = QPushButton(b.text(), win)
+            plain.setObjectName(b.objectName())
+            plain.setProperty("variant", b.property("variant"))
+            b.ensurePolished()
+            plain.ensurePolished()
+            # 算術：普通鈕的 ``padding-left`` 是 12（`#primary` 是 18），帶圖示的
+            # 是 26（`#primary` 30）—— 所以寬度差是 14 跟 12。而圖示畫在
+            # x = 7..21，所以 26 跟 30 都跨過它了。這裡只問**有沒有空出來**：
+            # 那條規則沒有匹配到的時候這個數字是 **0**。
+            room = b.sizeHint().width() - plain.sizeHint().width()
+            assert room >= 10, (b.text(), room, "圖示會壓到字")
+            plain.deleteLater()
+        # 連機制一起釘住：兩條規則各講一次（`#primary` 自己的 padding
+        # specificity 更高，沒有第二條的話它拿不到）。
+        qss = app.styleSheet()
+        assert 'QPushButton[hasGlyph="true"]' in qss
+        assert 'QPushButton#primary[hasGlyph="true"]' in qss
+    finally:
+        win.close()
