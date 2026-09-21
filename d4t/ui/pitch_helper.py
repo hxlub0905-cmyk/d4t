@@ -88,6 +88,7 @@ from . import branding, fit_screen, theme
 from .chips import ChoiceChips
 from .crop_dialog import CropDialog, crop_array, describe_crop
 from .icons import GlyphButton
+from .splitters import HairlineSplitter
 from .image_view import ImageView
 from .lattice_dialog import lattice_boxes
 # ⚠ **為了一個常數 import 一整支 1,300 行的對話框**，而那是刻意的：
@@ -109,7 +110,7 @@ __all__ = [
     "TONE_BAD", "CONF_GOOD_FROM", "AGREE_GOOD_FROM", "CELL_BOX",
     "BAR_W", "BAR_H", "candidate_periods", "candidate_label",
     "detail_rows", "trust_note", "MIN_CELLS_TO_TRUST",
-    "MAX_CANDIDATES", "cells_along", "trim_to_inner",
+    "MAX_CANDIDATES", "cells_along", "trim_to_inner", "NEXT_STEP",
     "MIN_CELLS_AFTER_TRIM", "run",
 ]
 
@@ -159,6 +160,16 @@ AXIS_HELP = {
 
 #: 一軸要至少這麼多像素才算得上一個週期（同 `build_golden_cell` 的判準）。
 MIN_PERIOD_PX = 2.0
+
+#: 拿到答案之後**下一步去哪**（只在有答案時出現）。
+#:
+#: ⚠ **名字要是真的那個名字，而我第一版寫錯了。** 我原本寫 "Cell size" ——
+#: 那四個字只活在 `template_dialog` 的**檔頭註解**裡，畫面上那兩格的標籤是
+#: `Cell W` / `Cell H`。一句指路的話寫了一個找不到的名字，比不寫還糟：使用者
+#: 會去找一個不存在的東西，然後開始懷疑其他每一句。
+#: `tests/test_ui_pitch_helper.py::test_the_next_step_names_something_that_exists`
+#: 從 `template_dialog` 的原始碼反查，所以那邊改名這裡就會紅。
+NEXT_STEP = "Next: paste it into Template & regions → Cell W / Cell H"
 
 #: 還沒有答案的那一格寫什麼。**一個破折號，不是 0** —— 0 在那一格看起來像一個
 #: 量出來的答案（同 `gc_generator.PERIOD_UNSET`，F117 G5 定的）。
@@ -811,11 +822,27 @@ class PitchHelperWindow(QMainWindow):
         outer.setSpacing(8)
         outer.addLayout(self._toolbar())
 
-        split = QHBoxLayout()
-        split.setSpacing(10)
-        split.addWidget(self._image_side(), 1)
+        # ⚠ **左右由使用者拉，不是我挑一個數字。** 右欄本來寫死 380，而那個
+        # 數字是在「四顆膠囊排得下」量出來的 —— 它答不出「這張圖有多寬」。
+        # 一張 4096² 的 patch 跟一張 900×700 的 SEM 要的比例不一樣，而只有
+        # 坐在那裡的人知道他現在在看哪一種。
+        # 380 因此從**固定寬**變成**最小寬**（那個量測仍然成立：低於它膠囊
+        # 會擠成兩排、疊圖那一格會跟旁邊的說明重疊）。
+        # `HairlineSplitter` 是這個 repo 唯一准用的分隔器（CLAUDE.md §4：
+        # `d4t/ui` 裡不准直接用 Qt 那一個，有測試數像素）。
+        # ⚠ 這一句本來把那個被禁的呼叫**逐字寫出來**當說明，而
+        # `test_ui_splitters` 是**逐行 grep 原始碼**的 —— 於是一句解釋規矩的
+        # 註解自己違反了那條規矩。守門的東西不分辨程式碼跟散文，那是它保守的
+        # 地方，不是它的 bug。
+        split = HairlineSplitter(Qt.Horizontal, root)
+        split.addWidget(self._image_side())
         split.addWidget(self._answer_side())
-        outer.addLayout(split, 1)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 1)
+        split.setCollapsible(0, False)     # 圖收掉的話量尺就沒地方拉了
+        split.setCollapsible(1, False)     # 答案收掉的話這個視窗就沒有輸出了
+        self.split = split
+        outer.addWidget(split, 1)
 
         self.warn = QLabel("", root)
         self.warn.setObjectName("paramHint")
@@ -966,7 +993,11 @@ class PitchHelperWindow(QMainWindow):
         # 疊出來那一格跟旁邊的說明**畫在一起**（Qt 在空間不夠時就是會重疊，
         # 不會報錯 —— 那是版面 bug 最常見的長相）。380 是四顆膠囊排得下、
         # 150 的 cell ＋ 一致性那一欄也排得下的寬度。
-        box.setFixedWidth(380)
+        # ⚠ 380 現在是**最小**寬不是固定寬（見上面那個 splitter）。原本的量測
+        # 沒有變：340 的時候四顆膠囊擠成兩排、疊出來那一格跟旁邊的說明**畫在
+        # 一起**（Qt 在空間不夠時就是會重疊，不會報錯 —— 那是版面 bug 最常見
+        # 的長相）。
+        box.setMinimumWidth(380)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
@@ -1048,6 +1079,19 @@ class PitchHelperWindow(QMainWindow):
         row_copy.addWidget(self.btn_copy)
         row_copy.addStretch(1)
         lay.addLayout(row_copy)
+        # **「然後呢」要有人講。** 這個視窗的產出是一個**要拿去別處用**的數字，
+        # 而畫面上本來沒有任何一句說它要貼到哪 —— 使用者拿到答案之後還得自己
+        # 想起來 Studio 裡那一格叫什麼。
+        # ⚠ 這一句**只在有答案的時候出現**（同警告條那條規矩：一塊永遠在那裡、
+        # 內容通常沒用的東西，教會使用者不要看它）。名字是**真的那個名字**：
+        # `template_dialog` 的視窗標題是 "Template & regions"，那兩格叫
+        # `Cell W` / `Cell H` —— 見 `NEXT_STEP` 的說明（我第一版寫錯過）。
+        self.lab_next = QLabel(NEXT_STEP, box)
+        self.lab_next.setObjectName("paramHint")
+        self.lab_next.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        self.lab_next.setWordWrap(True)
+        self.lab_next.setVisible(False)
+        lay.addWidget(self.lab_next)
 
         # ---- 憑什麼相信它：疊出來的 Golden Cell -----------------------------
         # ⚠ **它要緊貼著答案，因為它們回答的是同一個問題。**
@@ -1086,6 +1130,7 @@ class PitchHelperWindow(QMainWindow):
         self.btn_reset = GlyphButton("undo", "Reset", parent=box)
         self.btn_reset.setToolTip("Back to the measured period.")
         self.btn_reset.clicked.connect(self._on_reset)
+        fix.addStretch(1)      # 兩格週期靠左成一對，×2／Reset 靠右
         for b, cap in ((self.btn_double, 46), (self.btn_reset, 86)):
             b.setProperty("variant", "secondary")
             # ⚠ Reset 現在左邊多了一個圖示格，64 會把字切成 "Res…"。
@@ -1209,6 +1254,10 @@ class PitchHelperWindow(QMainWindow):
         # ⚠ 84 的時候 ``specialValueText`` 被切成 "easured" —— 一個**看起來像
         # 壞掉**的畫面，而它其實只是少了 14 px。
         sp.setMinimumWidth(104)
+        # ⚠ **也要有上限。** 右欄現在拉得寬（第十一輪的 splitter），而沒有上限
+        # 的話這兩格會各自撐到一半，中間那個 `×` 落在兩格之間的空地上 ——
+        # 一對東西看起來就不再是一對。實拍在 538 px 寬的時候就是那樣。
+        sp.setMaximumWidth(132)
         sp.setSpecialValueText("measured")
         # ⚠ **打字的中途不算。** 預設 Qt 每敲一個鍵就發 `valueChanged`，於是
         # 要打 45 的人會先看到整個視窗用 4 重算一次（使用者 2026-09-21：
@@ -1475,6 +1524,7 @@ class PitchHelperWindow(QMainWindow):
         self.lab_um.setText(" × ".join(ums).replace(" µm ×", " ×") if ums else "")
         # **按鈕自己講它會複製什麼** —— 「copy 是 copy 誰？」的另一半答案。
         what = self.answer_text()
+        self.lab_next.setVisible(bool(what))
         # **沒有答案的時候那顆鈕是灰的。** 一顆按下去只會說「還沒量到東西」
         # 的按鈕，在畫面上是一個問題，不是一個功能。
         self.btn_copy.setEnabled(bool(what))

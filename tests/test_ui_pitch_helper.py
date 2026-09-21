@@ -1384,3 +1384,49 @@ def test_the_stacked_picture_does_not_overlap_the_column_beside_it(win, ph):
         x = w.mapTo(win, w.rect().topLeft()).x()
         assert x - right_edge >= 8, (w.objectName() or type(w).__name__,
                                      x, right_edge)
+
+
+def test_the_next_step_names_something_that_exists(ph):
+    """⚠ **一句指路的話寫了一個找不到的名字，比不寫還糟。**
+
+    第一版寫的是 "Cell size" —— 而那四個字只活在 `template_dialog` 的檔頭
+    註解裡，畫面上那兩格的標籤是 `Cell W` / `Cell H`。使用者會去找一個不存在
+    的東西，然後開始懷疑其他每一句。
+
+    這一條從 `template_dialog` 的**原始碼**反查，所以那邊改名這裡就會紅。
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "d4t" / "ui"
+           / "template_dialog.py").read_text(encoding="utf-8")
+    assert 'setWindowTitle("Template & regions")' in src, "視窗標題改了"
+    for name in ("Cell W", "Cell H"):
+        assert '("%s"' % name in src, ("那一格的標籤改了", name)
+        assert name in ph.NEXT_STEP, (name, ph.NEXT_STEP)
+
+
+def test_the_next_step_only_shows_once_there_is_an_answer(win, ph):
+    """同警告條那條規矩：一塊永遠在那裡、內容通常沒用的東西，教會使用者不要
+    看它。"""
+    assert win.lab_next.isHidden(), "還沒量到東西就不必講下一步"
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    assert not win.lab_next.isHidden()
+
+
+def test_the_panel_can_be_dragged_but_not_squashed(win, ph):
+    """⚠ **左右由使用者拉，不是我挑一個數字。**
+
+    380 是在「四顆膠囊排得下」量出來的 —— 它答不出「這張圖有多寬」。一張
+    4096² 的 patch 跟一張 900×700 的 SEM 要的比例不一樣，而只有坐在那裡的人
+    知道他在看哪一種。380 因此從固定寬變成**最小**寬。
+    """
+    win.resize(1180, 780)
+    win.show()
+    assert win.split.count() == 2
+    assert not win.split.isCollapsible(0) and not win.split.isCollapsible(1)
+    win.split.setSizes([1100, 60])          # 想把右欄壓扁
+    assert win.split.sizes()[1] >= 380, ("最小寬沒擋住", win.split.sizes())
+    win.split.setSizes([300, 880])          # 反過來要一個寬的右欄
+    assert win.split.sizes()[1] > 700, ("拉不大", win.split.sizes())
