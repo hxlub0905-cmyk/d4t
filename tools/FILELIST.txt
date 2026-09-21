@@ -143,7 +143,7 @@ f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
 7be8a6f82dc5572324c987829bf172622c4a0e63 d4t/ui/param_form.py
-4bc6cd34454157aa516d588c165eb2a3d4405099 d4t/ui/pitch_helper.py
+ab7d79dc9b87cd256ea03a84499c77eb151316aa d4t/ui/pitch_helper.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
@@ -177,7 +177,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 934c5ac7cecab2b250c431fdbd5a273d57c88b0b d4t/ui/wording.py
 133bc87c427642bfce9f4c9c533d589b8e597efe d4t/ui/workbench.py
 82acc13a4004df7770d7ade4ae3e10468ad094ff d4t/ui/workers.py
-927cd09c2cc14bc60c213160096cf5860497d92d docs/ARCHITECTURE.md
+63c18f9cbe8e847b82b1c448af99d3244acc9e9b docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
@@ -192,7 +192,7 @@ c5f2884af2db0aa389b496c4ebec6cb2962e745a docs/PITFALLS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
 4a56b0ed65886c59f4282f7e67cbc1ac0a64c140 docs/plans/F117-ui-review.md
-4afebc312057ce37e1bea6021f3016511860c8f7 docs/plans/F120-pitch-helper.md
+62891c502007fccca7fc710e0ad2ec0e0bc61817 docs/plans/F120-pitch-helper.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -446,7 +446,7 @@ ee2409f03b5bdad686549ea5d9639d5653151350 tests/test_ui_number_picker.py
 d7fc1d0894914f00950a97cc3314e6c9b870d6fb tests/test_ui_outcome_chips.py
 517c38a66c0973adcc445eaae1b50d4f1748e0cf tests/test_ui_panel_truth.py
 d346560d0285c87606673279e3417ad6109e7c38 tests/test_ui_panels_pr2.py
-a4a1c84df132d0c160924a762c2fb102446f5161 tests/test_ui_pitch_helper.py
+9358dedffcfcf15b47ca026be65871a1a39091a4 tests/test_ui_pitch_helper.py
 6a3f59e4edeb47dc32395c89d7ebf0fc702a8eea tests/test_ui_preview_why.py
 a34f4bc35c3ba61865120a2f96deb5c815dbd95a tests/test_ui_problems_bar.py
 04e532ab8cfc38320756feddf90eb03161597fcb tests/test_ui_quiet_canvas.py

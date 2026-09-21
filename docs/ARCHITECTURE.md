@@ -406,9 +406,14 @@ d4t/
     │                         #     `tools/make_lot_from_gc.py`
     ├── pitch_helper.py       #   **Pitch helper**（F120）：丟一張圖進去，回答它的
     │                         #     cell period（px，填了 nm/px 就多一欄 nm）。
-    │                         #     `python -m d4t pitch`；量週期不抄第二份 ——
-    │                         #     叫 `algo/template.measure_period`（三票制），
-    │                         #     裁切用 `crop_dialog`、格線用 `lattice_dialog`
+    │                         #     `python -m d4t pitch`。⚠ **一行自己的演算法
+    │                         #     都沒有**：量週期是 `algo/template.measure_period`
+    │                         #     （三票制）、疊 Golden Cell 是
+    │                         #     `build_golden_cell` 本人、裁切 `crop_dialog`、
+    │                         #     格線 `lattice_dialog`、糊不糊的門檻沿用
+    │                         #     `template_dialog.BLURRED_BELOW`。
+    │                         #     畫面上是**兩張圖**：原圖＋切點格線、疊起來那
+    │                         #     一格（清楚＝週期對），配 0–100 的綠黃紅橫條
     ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口各一個旗標，
     │                         #     開關狀態的唯一出處是 `ui/scope.py`）
     ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒

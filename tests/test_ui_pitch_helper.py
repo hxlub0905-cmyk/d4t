@@ -31,6 +31,15 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+def stacked(img, px=None, py=None):
+    """疊一次 —— 測試裡同步跑（`_on_done` 吃的就是這個東西）。"""
+    from d4t.core.algo import template as algo_template
+    if px is None:
+        m = algo_template.measure_period(img)
+        px, py = m.px, m.py
+    return algo_template.build_golden_cell(img, px=float(px), py=float(py))
+
+
 def tiles(px: int = 60, py: int = 44, w: int = 600, h: int = 480,
           seed: int = 3) -> np.ndarray:
     """直條 × 橫帶交叉的重複 layout（固定種子）。"""
@@ -155,7 +164,6 @@ def test_it_opens_with_no_answer_rather_than_a_zero(win, ph):
 
 def test_an_image_goes_in_and_the_pitch_comes_out(win, ph):
     """端到端（同步走一次，不用執行緒）：量到的要跟產生它的參數一樣。"""
-    from d4t.core.algo import period as algo_period
     from d4t.core.algo import template as algo_template
 
     img = tiles(px=60, py=44)
@@ -163,9 +171,7 @@ def test_an_image_goes_in_and_the_pitch_comes_out(win, ph):
     m = algo_template.measure_period(img)
     flags = ph.axis_flags(win.axis(), m.px, m.py, m.conf_x, m.conf_y)
     ux, uy = ph.lattice_periods(img.shape[:2], m.px, m.py, flags)
-    origin = algo_period.choose_origin(img.shape, int(round(ux)), int(round(uy)),
-                                       image=img)
-    win._on_done(m, origin, "")
+    win._on_done(m, stacked(img, ux, uy), "")
 
     assert [r[1] for r in win.rows()] == ["60", "44"]
     assert win.view.overlay_count() > 0, "格線要畫出來（預設開著）"
@@ -182,7 +188,7 @@ def test_switching_the_axis_redraws_the_grid_at_once(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_done(algo_template.measure_period(img), None, "")
     both = win.view.overlay_count()
 
     win.chips_axis.set_text(ph.AXIS_X)
@@ -198,7 +204,7 @@ def test_hiding_the_grid_leaves_the_image_alone(win, ph):
 
     img = tiles()
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_done(algo_template.measure_period(img), None, "")
     win.chk_grid.setChecked(False)
     assert win.view.overlay_count() == 0
     assert win.view.has_image(), "藏格線不是藏圖"
@@ -210,7 +216,7 @@ def test_a_new_image_clears_the_previous_answer(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "a.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_done(algo_template.measure_period(img), None, "")
     assert win.rows()[0][1] == "60"
 
     win.set_image(tiles(px=30, py=30, seed=7), "b.tif")
@@ -231,14 +237,20 @@ def test_cropping_changes_which_pixels_are_measured(win, ph):
     assert round(float(m.px)) == 40, "裁下來那一塊的 pitch 才是答案"
 
 
-def test_the_notes_say_something_even_when_there_is_nothing_to_say(win, ph):
-    """一個空框答不出「是沒問題，還是它根本沒跑？」—— 而那兩件事長得一樣。"""
+def test_a_clean_measurement_shows_no_warning_strip_at_all(win, ph):
+    """⚠ **這一條換了方向**（使用者 2026-09-21：「What it decided 這我不知道
+    可以幹嘛？」）。
+
+    第一版有一塊常駐的面板，而最常見的情形是它空著 —— 所以它教會使用者不要
+    看它，而真的有話要說的那一天他也不會看。現在沒有話就整條不佔位置。
+    """
     from d4t.core.algo import template as algo_template
 
     img = tiles()
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
-    assert win.notes.toPlainText().strip(), "沒有 note 的時候也要講一句"
+    win._on_done(algo_template.measure_period(img), None, "")
+    assert not win.warn.isVisibleTo(win), "乾淨的量測不該有警告條"
+    assert win.warn.text() == ""
 
 
 def test_every_axis_chip_is_one_of_the_known_values(win, ph):
@@ -337,7 +349,7 @@ def test_typing_a_period_redraws_the_grid_at_once(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_done(algo_template.measure_period(img), None, "")
     before = win.view.overlay_count()
 
     win.spin_px.setValue(120.0)          # 一格變兩倍寬 → 格子數要變少
@@ -351,7 +363,7 @@ def test_the_double_button_doubles_both_axes(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_done(algo_template.measure_period(img), None, "")
     win._on_double()
     assert [r[1] for r in win.rows()] == ["120", "88"]
 
@@ -361,7 +373,7 @@ def test_reset_puts_the_measured_period_back(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_done(algo_template.measure_period(img), None, "")
     win._on_double()
     win._on_reset()
     assert [r[1] for r in win.rows()] == ["60", "44"]
@@ -369,18 +381,19 @@ def test_reset_puts_the_measured_period_back(win, ph):
 
 
 def test_the_screen_says_when_the_number_is_not_the_measured_one(win, ph):
-    """**改過了一定要看得到。** 少了這一行，換一張圖之後還掛著上一次打的 80，
-    而畫面上沒有任何東西說那個 80 是他自己打的。"""
+    """**改過了一定要看得到。** 少了這一句，換一張圖之後還掛著上一次打的 120，
+    而畫面上沒有任何東西說那是他自己打的。"""
     from d4t.core.algo import template as algo_template
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
-    assert win.lab_typed.text() == "", "沒改過就不該有這一行"
+    win._on_done(algo_template.measure_period(img), None, "")
+    assert win.warn.text() == "", "沒改過就不該有這一條"
 
     win.spin_px.setValue(120.0)
-    said = win.lab_typed.text()
+    said = win.warn.text()
     assert "120" in said and "60" in said, "要同時講你打的與它量的：%r" % said
+    assert win.warn.isVisibleTo(win)
 
 
 def test_the_table_the_notes_and_the_grid_all_ask_the_same_question(win, ph):
@@ -390,7 +403,7 @@ def test_the_table_the_notes_and_the_grid_all_ask_the_same_question(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), (0.0, 0.0), "")
+    win._on_done(algo_template.measure_period(img), None, "")
     win.chips_axis.set_text(ph.AXIS_Y)
     win._on_axis(ph.AXIS_Y)
 
@@ -400,3 +413,148 @@ def test_the_table_the_notes_and_the_grid_all_ask_the_same_question(win, ph):
     # **畫出來的格子數要跟表格說的那一軸對得上** —— 兩邊各算各的那天，
     # 畫面會同時說兩件事。
     assert win.view.overlay_count() == 480 // 44
+
+
+# --------------------------------------------------------------------------- #
+# 6. 疊起來看（使用者 2026-09-21 指定的證明方式）＋ 綠黃紅的橫條
+# --------------------------------------------------------------------------- #
+def test_the_confidence_bar_is_green_amber_red(ph):
+    """實測刻度：純雜訊 ≈ 20、真的有週期 ≈ 87–98，而 40 以下引擎自己就不採用。"""
+    assert ph.conf_tone(92) == ph.TONE_GOOD
+    assert ph.conf_tone(60) == ph.TONE_WARN
+    assert ph.conf_tone(20) == ph.TONE_BAD
+
+
+def test_the_agreement_bar_uses_the_same_threshold_as_the_template_path(ph):
+    """⚠ **同一個門檻，同一個家。** 模板那條路說「低於 `BLURRED_BELOW` 就是
+    糊的」，helper 沒有理由對同一件事說另一個數字。"""
+    from d4t.ui.template_dialog import BLURRED_BELOW
+
+    assert ph.agree_tone(0.93) == ph.TONE_GOOD
+    assert ph.agree_tone(BLURRED_BELOW) == ph.TONE_WARN
+    assert ph.agree_tone(BLURRED_BELOW - 0.01) == ph.TONE_BAD
+
+
+def test_the_bar_always_carries_the_number_too(app, ph):
+    """U13：**顏色不是唯一的通道** —— 紅綠色覺缺陷者看不出顏色差別，而這一條
+    是「這個答案可不可信」唯一的一眼答案。"""
+    bar = ph.Bar()
+    try:
+        bar.set_value(0.92, ph.TONE_GOOD, "92")
+        assert bar.value_text() == "92"
+        assert bar.tone() == ph.TONE_GOOD
+    finally:
+        bar.deleteLater()
+
+
+def test_a_right_period_stacks_into_a_cell_the_cells_agree_on(win, ph):
+    """**這是這個視窗最有說服力的一塊。** 對的週期疊起來，那幾格彼此對得齊。"""
+    img = tiles(px=60, py=44)
+    win.set_image(img, "synthetic.tif")
+    gc = stacked(img)
+    win._on_done(_measured_of(img), gc, "")
+
+    assert gc.cell.shape == (44, 60), "疊出來就是一個週期那麼大"
+    assert gc.agreement >= 0.75, "對的週期要拿到綠燈：%.3f" % gc.agreement
+    assert ph.agree_tone(gc.agreement) == ph.TONE_GOOD
+    assert win.bar_agree.tone() == ph.TONE_GOOD
+    assert not win.cell_view.pixmap().isNull(), "那一格要真的畫出來"
+
+
+def test_a_wrong_period_stacks_into_mush(win, ph):
+    """**反向**：週期錯掉，那幾格就對不起來 —— 一致性掉下去。
+
+    ⚠ 這一條是「疊起來看」這個做法**有沒有用**的證據。少了它，上面那一條
+    對一個永遠回 0.9 的實作也會是綠的。
+    """
+    img = tiles(px=60, py=44)
+    right = stacked(img, 60, 44)
+    wrong = stacked(img, 37, 29)          # 跟真實週期無關的一組
+    assert wrong.agreement < right.agreement
+    assert ph.agree_tone(wrong.agreement) != ph.TONE_GOOD
+
+
+def test_sharpness_is_not_the_metric_and_here_is_why(ph):
+    """⚠ **使用者問的「或是算 sharpness 這樣評估？」—— F40 量過，不行。**
+
+    `ghosting_score` 只看疊完那一張圖，**看不到疊進去的那幾格**，所以分不出
+    「因為對齊了所以銳利」與「因為兩個鬼影各帶一組邊所以銳利」。這一條把那件
+    事釘住：**純雜訊的 sharpness 高到荒謬，而 agreement 誠實地趨近 0。**
+    """
+    from d4t.core.algo import golden as algo_golden
+
+    rng = np.random.default_rng(0)
+    noise = np.clip(rng.normal(128, 60, (480, 600)), 0, 255).astype(np.uint8)
+    sharp, _lap, _edge = algo_golden.ghosting_score(
+        algo_golden.stack_cells(noise, 60, 44))
+    agree = algo_golden.stack_agreement(noise, 60, 44)
+
+    assert sharp > 50, "sharpness 會給雜訊一個很高的分數（這正是問題）"
+    assert agree < 0.1, "agreement 不會：%.3f" % agree
+    assert ph.agree_tone(agree) == ph.TONE_BAD
+
+
+def test_doubling_the_period_still_stacks_cleanly(win, ph):
+    """使用者的 ×2 情境：兩個重複構成他要的單元 —— 疊起來**照樣**是齊的
+    （2×2 個重複疊在一起，只是一格裝了四份圖案）。所以一致性分不出這一種，
+    **而人眼在那張圖上分得出來** —— 那正是兩個都要在畫面上的理由。"""
+    img = tiles(px=60, py=44)
+    twice = stacked(img, 120, 88)
+    assert twice.cell.shape == (88, 120)
+    assert twice.agreement >= 0.75
+
+
+def _measured_of(img):
+    from d4t.core.algo import template as algo_template
+    return algo_template.measure_period(img)
+
+
+def test_the_bar_fills_to_the_fraction_of_the_score(app, ph):
+    """使用者 2026-09-21：「一個橫向的長條（示意 0–100），80 分是綠的、
+    填滿到 80%；60 分黃的、填滿到 60 分。」
+
+    ⚠ **軌道要夠長才讀得出「填到幾成」。** 第一版 92 px：92 分填出來 85 px，
+    跟填滿的 100 分在畫面上分不出來 —— 而那個差別正是它存在的理由。
+    """
+    assert ph.BAR_W >= 140, "軌道太短，92 分與 100 分看起來一樣"
+    bar = ph.Bar()
+    try:
+        bar.set_value(0.8, ph.TONE_GOOD, "80")
+        assert bar.value_text() == "80" and bar.tone() == ph.TONE_GOOD
+        bar.set_value(0.6, ph.TONE_WARN, "60")
+        assert bar.tone() == ph.TONE_WARN
+    finally:
+        bar.deleteLater()
+
+
+def test_a_typed_period_gets_no_track_at_all(app, ph):
+    """**沒有分數可言 ≠ 拿了 0 分。** 畫一條空軌道是在說後者。"""
+    bar = ph.Bar()
+    try:
+        bar.set_text_only(ph.CONF_TYPED)
+        assert bar.value_text() == ph.CONF_TYPED
+        assert bar._track is False
+    finally:
+        bar.deleteLater()
+
+
+def test_the_typed_label_is_short_enough_not_to_be_clipped(ph):
+    """量到過：「you typed it」在那一格被切成「you typ…」。完整那句話在警告條上。"""
+    assert len(ph.CONF_TYPED) <= 8, ph.CONF_TYPED
+
+
+def test_a_flat_image_says_so_once_not_twice(win, ph):
+    """⚠ **一句話講一次。** 引擎的 note 裡已經有一句
+    "no periodic structure detected"（寫給開發者看的，F118），而我自己也想
+    講一句 —— 兩句並排出現時使用者會去找「它們是不是在講兩件事」。
+    """
+    from d4t.core.algo import template as algo_template
+
+    flat = np.full((400, 500), 128, np.uint8)
+    win.set_image(flat, "flat.png")
+    win._on_done(algo_template.measure_period(flat), None, "")
+    said = win.warn.text()
+    assert said.lower().count("no repeating period") == 1, said
+    assert "no periodic structure detected" not in said, (
+        "引擎那句開發者的話不該出現在使用者面前：%r" % said)
+    assert "Crop" in said, "答不出來的時候要給下一步"
