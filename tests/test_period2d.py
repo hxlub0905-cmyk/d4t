@@ -1,5 +1,5 @@
 """F104：二維自相關找峰（`algo/period2d.py`）＋ 它跟投影法怎麼分工
-（`template._measure_period`）＋ `GoldenCell.origin`（格線檢視靠它）。
+（`template.measure_period`）＋ `GoldenCell.origin`（格線檢視靠它）。
 
 使用者 2026-09-17：「你上面說的交錯圖形還沒解 —— 請幫忙做二維自相關找峰」。
 交錯 layout 上投影法的 X 軸互相抵消（實測回 None），Y 軸回一列的高度而不是兩列；
@@ -117,7 +117,7 @@ def test_the_stack_is_unchanged_where_the_two_methods_agree():
 
 def test_the_measure_step_only_takes_over_for_integer_multiples():
     """投影 30、二維 45（不是整數倍）→ 照投影；投影 30、二維 60 → 接手。"""
-    m = template._measure_period(np.asarray(squares(), np.uint8))
+    m = template.measure_period(np.asarray(squares(), np.uint8))
     assert (m.px, m.py) == (32, 24) and m.notes == []
     assert m.doubled == (False, False)
 

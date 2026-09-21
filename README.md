@@ -98,6 +98,15 @@ pip install -e .[dev]                              # pytest / ruff / pyright
 python -m d4t gui                                  # 開啟 Studio
 ```
 
+單獨一件事的小工具（不必先開 Studio、不必先有 recipe）：
+
+```bash
+python -m d4t pitch                                # Pitch helper：丟一張圖進去，
+                                                   #   算 repeating pattern 的 cell
+                                                   #   period（px；填了 nm/px 多一欄 nm）
+python -m d4t simgen                               # 從一張 Golden Cell 產一整批擬真資料
+```
+
 CLI（下列流程不需真實廠內資料）：
 
 ```bash

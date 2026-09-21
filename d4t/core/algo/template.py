@@ -67,7 +67,8 @@ from . import period as algo_period
 from . import period2d as algo_period2d
 
 __all__ = [
-    "GoldenCell", "MatchResult", "MeasuredPeriod", "build_golden_cell", "anchor_cell",
+    "GoldenCell", "MatchResult", "MeasuredPeriod", "measure_period",
+    "build_golden_cell", "anchor_cell",
     "encode_cell", "decode_cell", "tile_cell", "match_patch",
     "patch_structure", "period_text", "MIN_PERIOD_CONFIDENCE", "SNAP_DRIFT_PX",
     "CELL_ENCODING",
@@ -252,7 +253,7 @@ def anchor_cell(cell: np.ndarray,
 # --------------------------------------------------------------------------- #
 @dataclass
 class MeasuredPeriod:
-    """`_measure_period` 的答案：兩軸的週期（可以是小數）、信心、講給人聽的決定。"""
+    """`measure_period` 的答案：兩軸的週期（可以是小數）、信心、講給人聽的決定。"""
 
     px: float = 0.0
     py: float = 0.0
@@ -278,9 +279,16 @@ def _snap(p: float, span: int) -> float:
     return r if abs(p - r) * cells <= SNAP_DRIFT_PX else p
 
 
-def _measure_period(gray: np.ndarray,
-                    given: Tuple[bool, bool] = (False, False)) -> MeasuredPeriod:
+def measure_period(gray: np.ndarray,
+                   given: Tuple[bool, bool] = (False, False)) -> MeasuredPeriod:
     """三種量法對一次 → :class:`MeasuredPeriod`（0 ＝ 那一軸量不到）。
+
+    ⚠ **這一支是「這張圖的 cell period 是多少」的唯一出處**，所以它是公開的
+    （F120，2026-09-21 從 ``_measure_period`` 改名）。`build_golden_cell` 疊模板
+    之前問它，`ui/pitch_helper.py`（丟一張圖進去只問那個數字）也問它 —— 第二個
+    呼叫者出現的那一天，選擇只有「開放這一支」與「抄一份三票制出去」，
+    而後者一定會漂（`CLAUDE.md` §0）。改名**沒有留舊名字的別名**：一件事兩個
+    名字正是那一節在擋的東西。
 
     投影法（`period.estimate_period`）是主：四個月的實測與諧波修正都在它身上。
     二維自相關（`period2d.estimate_period_2d`，F104）在兩種情況接手，
@@ -301,7 +309,17 @@ def _measure_period(gray: np.ndarray,
     * **交錯分數**進答案（一個可以畫分布的數字），加倍與否也進答案。
 
     每一次接手或加倍都在 notes 講一句：換了量法、改了數字是使用者該知道的事。
+
+    ⚠ **空的／小到沒有意義的影像回一個空答案，不丟例外**（F120）。它私有的
+    時候這一關不必在這裡 —— 唯一的呼叫者 `build_golden_cell` 更早就擋掉了。
+    公開之後呼叫端是「使用者剛剛丟進來的那個東西」，而 `cv2.Sobel` 對 0×0
+    的陣列是 `cv2.error`。**開放一支函式就要讓它自己站得住**，不是要求每一個
+    新呼叫者都記得先擋一次。這一關擋掉的路 `build_golden_cell` 走不到，
+    所以任何一份跑得動的 recipe 算出來的數字**一個 byte 都沒有變**。
     """
+    g = np.asarray(gray)
+    if g.ndim != 2 or g.size == 0 or min(g.shape) < 4:
+        return MeasuredPeriod(notes=["the image is too small to look for a repeat"])
     est = algo_period.estimate_period(gray)
     two = algo_period2d.estimate_period_2d(gray)
     notes: List[str] = list(est.warnings or [])
@@ -357,7 +375,7 @@ def build_golden_cell(image: Any, px: Optional[float] = None,
     """從大圖疊出一個 Golden Cell。
 
     ``px`` / ``py`` 留空就從影像自己量（``period.estimate_period`` 投影法，再拿
-    ``period2d.estimate_period_2d`` 二維自相關對一次 —— 見 :func:`_measure_period`）。
+    ``period2d.estimate_period_2d`` 二維自相關對一次 —— 見 :func:`measure_period`）。
     量不到週期時回一個空的 cell 並在 ``warnings`` 說明 —— 不猜。
 
     小數週期（F105）
@@ -404,7 +422,7 @@ def build_golden_cell(image: Any, px: Optional[float] = None,
     if not (given_x and given_y):
         if not _say("Measuring the period\u2026", 0, 1):
             return cancelled
-        m = _measure_period(gray, given=(given_x, given_y))
+        m = measure_period(gray, given=(given_x, given_y))
         if not given_x:
             px, conf_x = m.px, m.conf_x
         if not given_y:

@@ -274,7 +274,7 @@ Path 行都建在它上面。
 
 ```
 d4t/
-├── __main__.py               # CLI：run / steps / validate / runs / rescore / export / gui / simgen
+├── __main__.py               # CLI：run / steps / validate / runs / rescore / export / gui / simgen / pitch
 ├── core/                     # 純運算，**禁止任何 Qt import**（`tests/test_no_qt.py` 守門）
 │   ├── ingest/               # 讀進來：KLARF、TIFF、影像檔、掛在 lot 上的第二份資料
 │   │   ├── klarf_core.py     #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
@@ -404,6 +404,11 @@ d4t/
     │                         #     （F61 —— 畫一個週期＝畫每一個重複）
     │                         #     `python -m d4t simgen`；只做介面，邏輯在
     │                         #     `tools/make_lot_from_gc.py`
+    ├── pitch_helper.py       #   **Pitch helper**（F120）：丟一張圖進去，回答它的
+    │                         #     cell period（px，填了 nm/px 就多一欄 nm）。
+    │                         #     `python -m d4t pitch`；量週期不抄第二份 ——
+    │                         #     叫 `algo/template.measure_period`（三票制），
+    │                         #     裁切用 `crop_dialog`、格線用 `lattice_dialog`
     ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口各一個旗標，
     │                         #     開關狀態的唯一出處是 `ui/scope.py`）
     ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒
