@@ -514,6 +514,15 @@ class ImageView(QWidget):
         """現在疊了幾個框（測試與狀態列讀這個，不去讀畫素）。"""
         return len(self._overlay)
 
+    def overlay_rects(self) -> List[Tuple[float, float, float, float]]:
+        """現在疊的那幾個框本身（正規化 ``(x, y, w, h)``）。
+
+        為什麼不只給 :meth:`overlay_count`：**數量不是不變量，形狀才是。**
+        「只切橫線」這種事只能從框的寬高看出來 —— 一個會把外圈修掉的呼叫者
+        （F120 的格線）數量會變，而「每一格都是整張寬」不會變。
+        """
+        return list(self._overlay)
+
     def set_measure(self, axis: str, start: float, end: float) -> None:
         """曲線面板上的量測尺按著時，在影像上標出**同一段**（F8 量測尺）。
 

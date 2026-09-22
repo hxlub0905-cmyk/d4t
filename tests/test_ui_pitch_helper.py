@@ -211,7 +211,11 @@ def test_switching_the_axis_redraws_the_grid_at_once(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), None, "")
+    # ⚠ **要給一個真的 GoldenCell。** `gc=None` 是「週期量到了、相位還沒」
+    # 那個中間狀態（F120 第十七輪：答案先上畫面、證據隨後），而那一刻**格線
+    # 是不畫的** —— 畫在相位 0 上再跳掉是最糟的一種。這一條要測的是「改了軸向
+    # 之後格線當場重畫」，走的是既有相位那條路，所以它需要一個相位。
+    win._on_done(*_run(win, img), "")
     both = win.view.overlay_count()
 
     win.chips_axis.set_text(ph.AXIS_X)
@@ -388,7 +392,11 @@ def test_typing_a_period_redraws_the_grid_at_once(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), None, "")
+    # ⚠ **要給一個真的 GoldenCell。** `gc=None` 是「週期量到了、相位還沒」
+    # 那個中間狀態（F120 第十七輪：答案先上畫面、證據隨後），而那一刻**格線
+    # 是不畫的** —— 畫在相位 0 上再跳掉是最糟的一種。這一條要測的是「改了軸向
+    # 之後格線當場重畫」，走的是既有相位那條路，所以它需要一個相位。
+    win._on_done(*_run(win, img), "")
     before = win.view.overlay_count()
 
     win.spin_px.setValue(120.0)          # 一格變兩倍寬 → 格子數要變少
@@ -442,16 +450,28 @@ def test_the_table_the_notes_and_the_grid_all_ask_the_same_question(win, ph):
 
     img = tiles(px=60, py=44)
     win.set_image(img, "synthetic.tif")
-    win._on_done(algo_template.measure_period(img), None, "")
+    # ⚠ **要給一個真的 GoldenCell。** `gc=None` 是「週期量到了、相位還沒」
+    # 那個中間狀態（F120 第十七輪：答案先上畫面、證據隨後），而那一刻**格線
+    # 是不畫的** —— 畫在相位 0 上再跳掉是最糟的一種。這一條要測的是「改了軸向
+    # 之後格線當場重畫」，走的是既有相位那條路，所以它需要一個相位。
+    win._on_done(*_run(win, img), "")
     win.chips_axis.set_text(ph.AXIS_Y)
     win._on_axis(ph.AXIS_Y)
 
     assert win._flags() == (False, True)
     assert win.rows()[0][1] == ph.PITCH_NOT_USED
-    # 只切橫線 ⇒ 一格 = 整張寬 × 44 ⇒ 格子數 = 480 // 44 = 10。
-    # **畫出來的格子數要跟表格說的那一軸對得上** —— 兩邊各算各的那天，
-    # 畫面會同時說兩件事。
-    assert win.view.overlay_count() == 480 // 44
+    # **畫出來的格線要跟表格說的那一軸對得上** —— 兩邊各算各的那天，畫面
+    # 會同時說兩件事。X 沒在用 ⇒ 一格 = 整張寬，只切橫線。
+    #
+    # ⚠ 這裡**不數格子**：`Skip edge cells` 會把外圈修掉（`_draw` 只畫真的
+    # 疊進去的那一批），所以 `480 // 44` 那個沒有修邊的舊算式會紅，而紅的是
+    # 算式不是行為。數量不是不變量，**格子的形狀才是**。
+    boxes = win.view.overlay_rects()
+    assert len(boxes) > 1, "Y 在用，卻沒切出橫線"
+    assert all(abs(b[0]) < 1e-6 and abs(b[2] - 1.0) < 1e-6 for b in boxes), \
+        "X 說沒在用，格線卻切了直線：%r" % (boxes[:3],)
+    assert all(abs(b[3] * 480 - 44) < 1.0 for b in boxes), \
+        "橫線的間距不是量到的 Y 週期：%r" % (boxes[:3],)
 
 
 # --------------------------------------------------------------------------- #
@@ -1617,3 +1637,131 @@ def test_the_empty_canvas_says_what_to_do_and_says_it_once(win, ph):
     img = tiles(px=60, py=44)
     win.set_image(img, "a.tif")
     assert "a.tif" in win.lab_source.text(), "載入之後它的工作是講檔名與尺寸"
+
+
+# --------------------------------------------------------------------------- #
+# 17. **答案先上畫面，證據隨後**（F120 第十七輪，使用者：「先做 1」）
+# --------------------------------------------------------------------------- #
+def test_the_answer_goes_out_before_the_evidence(app, ph):
+    """⚠ **兩段，不是一段。**
+
+    實測 4096²：量週期 2.14 s，疊圖找相位再 2.67 s —— 原本 `done` 是唯一的
+    出口，所以一個 2.14 s 就算好的數字要在背景躺到 4.81 s 才上畫面。急著要
+    period 的人等的是**週期**，不是「憑什麼相信它」。
+    """
+    img = tiles(px=60, py=44)
+    w = ph._PitchWorker(img, ph.AXIS_BOTH)
+    seen = []
+    w.answer.connect(lambda m: seen.append(("answer", m)))
+    w.done.connect(lambda m, gc, e: seen.append(("done", m, gc)))
+    w.run()                                  # 同步跑（測試不開執行緒）
+    assert [k[0] for k in seen] == ["answer", "done"], seen
+    # **同一個量測，不是量兩次** —— 量兩次的話兩段可能給不一樣的數字。
+    assert seen[0][1] is seen[1][1]
+    assert seen[1][2] is not None, "證據那一段還是要回來"
+
+
+def test_the_number_shows_before_the_grid_can_be_drawn(win, ph):
+    """答案那一刻**格線不畫**：相位還不知道，畫在 0 上再跳掉是最糟的一種。"""
+    from d4t.core.algo import template as algo_template
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_answer(algo_template.measure_period(img))
+    assert win.answer_text(), "量到了，右邊卻還是空的"
+    assert win.lab_big.text() != ph.PITCH_UNSET
+    assert win.view.overlay_count() == 0, "相位還不知道，不准先畫一組"
+    # **不是留白** —— 留白會讓使用者以為格線壞了。
+    assert win.caption.text() == ph.PHASE_PENDING
+
+
+def test_a_cancelled_run_never_publishes_a_half_answer(app, ph):
+    """停掉的那一次連**答案**也不出去（原本只有 `done` 那一段擋著）。"""
+    img = tiles(px=60, py=44)
+    w = ph._PitchWorker(img, ph.AXIS_BOTH)
+    w.stop()
+    seen = []
+    w.answer.connect(lambda m: seen.append(m))
+    w.done.connect(lambda m, gc, e: seen.append(("done", m, gc, e)))
+    w.run()
+    assert seen == [("done", None, None, "")], seen
+
+
+# --------------------------------------------------------------------------- #
+# 18. 鍵盤（F120 第十七輪，使用者：「先做 3」）
+# --------------------------------------------------------------------------- #
+def test_every_shortcut_is_bound_to_something_that_exists(win):
+    """表上寫的每一條都真的綁上去了，而且不多綁。"""
+    from PySide6.QtGui import QKeySequence
+
+    for seq, name in win.SHORTCUTS:
+        assert callable(getattr(win, name, None)), (seq, name)
+    assert sorted(s.key().toString() for s in win._shortcuts) == sorted(
+        QKeySequence(seq).toString() for seq, _ in win.SHORTCUTS)
+    # ⚠ **Ctrl+C 一定要在裡面**：拿到一個數字之後的第一個反射動作就是它，
+    # 而這個視窗的產出就是那個數字。
+    assert win.key_for("copy_focused_or_answer") == "Ctrl+C"
+
+
+def test_the_shortcuts_say_so_on_screen(win, ph):
+    """⚠ **看不到的快捷鍵等於沒有。**
+
+    這個視窗的使用者一分鐘內就走了 —— 沒有人會去翻說明找鍵。每一條都要在
+    它那顆鈕的提示上。
+    """
+    from PySide6.QtWidgets import QWidget
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    tips = " ".join(w.toolTip() for w in win.findChildren(QWidget))
+    for seq, name in win.SHORTCUTS:
+        assert seq in tips, ("沒有人在畫面上講這一顆鍵", seq, name)
+
+
+def test_ctrl_c_does_not_steal_copy_from_an_input_box(app, win, ph):
+    """⚠ `QShortcut` 比 `QLineEdit` 自己的標準鍵動作**先**處理。
+
+    少了 `copy_focused_or_answer` 那道分支，使用者在 pixel size 那一格裡選了
+    `45` 按 Ctrl+C，剪貼簿上會是**週期** —— 一個到處都能用的快捷鍵偷走了一個
+    更小、更明確的動作。
+    """
+    from PySide6.QtGui import QGuiApplication
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    # ⚠ **要 `show()`** —— 沒開出來的視窗上 `setFocus()` 不會產生
+    # `focusWidget()`，於是這一條會兩邊都走到「複製答案」那一支而假綠。
+    win.show()
+    app.processEvents()
+    clip = QGuiApplication.clipboard()
+
+    clip.setText("")
+    win.view.setFocus()
+    app.processEvents()
+    assert app.focusWidget() is win.view, "focus 沒進去，這一條會假綠"
+    win.copy_focused_or_answer()
+    assert clip.text() == win.axis_number(0), "焦點不在輸入框 ⇒ 複製答案"
+
+    clip.setText("")
+    win.spin_nm.setValue(4.5)
+    win.spin_nm.setFocus()
+    app.processEvents()
+    win.spin_nm.lineEdit().selectAll()
+    win.copy_focused_or_answer()
+    assert clip.text() == win.spin_nm.lineEdit().selectedText(), (
+        "選著字還是被搶走了", clip.text())
+
+
+def test_ctrl_shift_c_copies_the_other_axis(win, ph):
+    """兩軸兩顆鈕 ⇒ 兩個鍵（一個鍵配兩個輸入框是回到「複製一個貼不進去的字串」）。"""
+    from PySide6.QtGui import QGuiApplication
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    clip = QGuiApplication.clipboard()
+    clip.setText("")
+    win.copy_y()
+    assert clip.text() == win.axis_number(1) != win.axis_number(0)

@@ -1,9 +1,9 @@
 # F120 — Pitch helper（丟一張圖進去，回答它的 cell period）
 
-狀態：**第十五版，等使用者看過（2026-09-21）** —— `python -m d4t pitch` 開得
+狀態：**第十六版，等使用者看過（2026-09-22）** —— `python -m d4t pitch` 開得
 起來，四點追加的需求都在（§5／§5.1／§5.2），使用者七輪回饋都做完（§18），
 第八輪是「截其他狀態的圖」而那幾張圖抓出三個 bug（§19），
-第九輪三顆膠囊／按鈕圖示／畫布量尺（§20），第十輪注意力的分配（§21），第十一輪指路那一句與拖得動的版面（§22），第十二輪信心條搬家與兩色格線（§23），第十三輪青色色標／扁按鈕的真相／一軸一顆複製鍵（§24），第十四輪按鈕高度 30 → 34（§25），第十五輪重看 UI／空狀態的四個問題（§26）。⚠ **不寫「已收斂」**：使用者還沒
+第九輪三顆膠囊／按鈕圖示／畫布量尺（§20），第十輪注意力的分配（§21），第十一輪指路那一句與拖得動的版面（§22），第十二輪信心條搬家與兩色格線（§23），第十三輪青色色標／扁按鈕的真相／一軸一顆複製鍵（§24），第十四輪按鈕高度 30 → 34（§25），第十五輪重看 UI／空狀態的四個問題（§26），第十六輪答案先上畫面＋鍵盤（§27）。使用者已經說了下一步是**完全獨立成一個應用程式**（§28 記著要剪哪幾條線）。⚠ **不寫「已收斂」**：使用者還沒
 在真實影像上用過，而這種工具的驗收只有那一件事算數。⚠ §5 那顆「格線」按鈕
 **做的時候從「一顆鈕」改成「預設開著」**，理由與它揪出來的那個 bug 在 §10。
 
@@ -1285,3 +1285,114 @@ app 一致的高度，不是這一支的問題。要整個 app 的按鈕變高�
 | `test_the_empty_canvas_says_what_to_do_and_says_it_once` | 26.4，包含「不要講兩次」|
 
 五條都驗過：把修正 stash 掉，**五條全紅**。
+
+## 27. 第十六輪：**站在一個急著要答案的工程師那一側**（2026-09-22）
+
+使用者：「假設你是一個急於想知道 period 的工程師」，然後指定**先做 1 跟 3**。
+
+### 27.1 答案先上畫面，證據隨後（第 1 點）
+
+量一次分成兩段，而那不是效能調校，是**次序**的問題：
+
+| 在 4096² 上 | 花多久 | 回答的是 |
+|---|---|---|
+| `measure_period` | 2.14 s | **period 是多少**（使用者要的那個數字）|
+| `build_golden_cell`＋相位搜尋 | 2.67 s | **憑什麼相信它**（疊起來漂不漂亮）|
+
+原本 `done` 是唯一的出口，所以一個 **2.14 s 就算好的數字要躺到 4.81 s**
+才上畫面 —— 背景在做的是「證據」，而畫面卻連答案都不給。
+
+`_PitchWorker` 因此多一個 `answer` signal（`MeasuredPeriod`），量完立刻發；
+`done` 照舊（`m, gc, err`）。窗口的 `_on_answer` 把 `self._gc` 設成 `None`
+再 `_refresh()`。
+
+⚠ **那一刻不准畫格線。** 格子的位置要等相位搜尋回來才知道，先畫在相位 0 上
+再跳掉是最糟的一種 —— 使用者盯著的正是那張圖。`_draw` 遇到「有週期、還沒有
+相位」就只說 `PHASE_PENDING`（"Finding where the cells start…"）。
+**不是留白**：留白會讓使用者以為格線壞了。
+
+⚠ **被停掉的那一次連答案也不出去**（鐵則 11 的同一個形狀）：`answer.emit`
+前面也要看 `_stop`，不然「改一個設定就換掉」的那一次會先推一個舊答案上去。
+
+### 27.2 鍵盤（第 3 點）
+
+之前這個視窗上只有 `Ctrl+V` 一個鍵，而且是寫在 `keyPressEvent` 裡的。
+
+| 鍵 | 做什麼 |
+|---|---|
+| `Ctrl+O` | Open image |
+| `Ctrl+V` | Paste（原本就有，改走 `QShortcut`）|
+| `Ctrl+C` | **複製 X** —— 拿到數字之後的第一個反射動作 |
+| `Ctrl+Shift+C` | 複製 Y |
+
+三件做對了才算做完：
+
+1. **`QShortcut` 不是 `keyPressEvent`。** 後者只在**沒有子元件吃掉那顆鍵**的
+   時候才跑得到，而這個視窗上半部全是輸入框與按鈕 —— 使用者剛打完 pixel
+   size，焦點就在 spin box 裡，那一刻 Ctrl+C 永遠到不了視窗。`QShortcut`
+   （預設 `WindowShortcut`）比 key event **先**處理。原本 `keyPressEvent`
+   那段 Ctrl+V 因此是死碼，刪掉。
+2. ⚠ **Ctrl+C 不能直接接 Copy X。** 同一個「先處理」讓它從輸入框手上把複製
+   搶走了：使用者在 pixel size 那一格裡選了 `45` 按 Ctrl+C，剪貼簿上會是
+   **週期**。`copy_focused_or_answer` 因此先看焦點 —— 輸入框裡選著字就複製
+   那段字，其餘時間複製答案。一個到處都能用的快捷鍵不該偷走一個更小、更明確
+   的動作。
+3. **看不到的快捷鍵等於沒有。** 這個視窗的使用者一分鐘內就走了，不會去翻說明。
+   每一顆鈕的提示都要講它的鍵，而那串字**從 `SHORTCUTS` 查**
+   （`key_for`）—— 抄一份出來的那天，畫面會教使用者按一顆沒有綁的鍵。
+
+`SHORTCUTS` 是 `(鍵, 方法名)` 的表：綁定、提示文字、守門的測試都讀它，
+所以一個鍵不會出現「綁了但沒人講」或「講了但沒綁」。`copy_y` 是一支方法不是
+lambda —— 表要能被測試逐條 `getattr` 走過去。
+
+### 27.3 一條測試被修好了，而紅的是算式不是行為
+
+`test_the_table_the_notes_and_the_grid_all_ask_the_same_question` 裡寫著
+`overlay_count() == 480 // 44`，而那個算式**沒有把 `Skip edge cells` 算進去**
+（`_draw` 只畫真的疊進去的那一批，外圈修掉之後是 8 不是 10）。它之前綠是因為
+那條測試拿 `gc=None` 當捷徑 —— 而 `gc=None` 現在是 27.1 那個中間狀態。
+
+改成問**形狀**而不是數量：每一格都是整張寬（X 沒在用 ⇒ 不切直線）、間距等於
+量到的 Y 週期。**數量不是不變量，格子的形狀才是。** 為此
+`ImageView.overlay_rects()`（新）把框本身給出來 —— 「只切橫線」這件事只能從
+框的寬高看出來。
+
+### 27.4 守門（112 → 119 條）
+
+| 測試 | 守什麼 |
+|---|---|
+| `test_the_answer_goes_out_before_the_evidence` | 兩段的**次序**，而且是同一個量測（不是量兩次）|
+| `test_the_number_shows_before_the_grid_can_be_drawn` | 那一刻數字在、格線不在、那一行說了話 |
+| `test_a_cancelled_run_never_publishes_a_half_answer` | 停掉的那一次連答案也不出去 |
+| `test_every_shortcut_is_bound_to_something_that_exists` | 表上每一條都綁了、不多綁、`Ctrl+C` 一定在 |
+| `test_the_shortcuts_say_so_on_screen` | 每一顆鍵都在某個提示上 |
+| `test_ctrl_c_does_not_steal_copy_from_an_input_box` | 27.2 的第 2 點（**要 `show()` ＋ `processEvents()`**，不然 `focusWidget()` 是 None，兩邊都走「複製答案」那一支而假綠）|
+| `test_ctrl_shift_c_copies_the_other_axis` | 兩軸兩個鍵 |
+
+⚠ 最後那一條驗過會紅：把 `hasSelectedText()` 那道分支拿掉就紅。
+
+### 27.5 還沒做的（使用者只點了 1 跟 3）
+
+第十六輪的清單裡另外那幾條還在：一顆把兩個數字一起帶走／直接填進 Studio 的鈕、
+pixel size 跨 session 記住、Studio 的入口。
+
+## 28. 使用者的下一步：**完全獨立成一個應用程式**（2026-09-22）
+
+使用者：「因為我之後會把這個應用獨立出來，直接完全獨立成一個應用程式」。
+
+**現在不做**，但從這一輪起**不准再加新的耦合** —— 拆的時候要剪的線就是下面
+這幾條，每多一條就多一次「搬過去之後為什麼跑不起來」。
+
+| 現在靠誰 | 拆的時候怎麼辦 |
+|---|---|
+| `d4t.core.algo.{template, period, period2d, golden}` | **一起帶走**（這是引擎本人，不是相依）|
+| `d4t.core.log.swallowed` | 帶走或換成一支十行的同名工具（鐵則 7 的形狀要留著）|
+| `d4t.core.ingest.imageio` | 帶走（CJK-safe 讀檔在 Windows 廠內是必要的，不是方便）|
+| `d4t.ui.{theme, icons, chips, image_view, splitters, fit_screen, widgets}` | 帶走 —— 它們沒有一支認得 recipe 或 Studio |
+| `d4t.ui.{crop_dialog, lattice_dialog}` | 帶走（`crop_array`／`lattice_boxes` 是純函式那一半）|
+| `d4t.ui.template_dialog` 的 `BLURRED_BELOW` | ⚠ **這是唯一一條真的該剪的線**：為一個常數 import 一整支 1,300 行的對話框。正確的做法早就寫在 `pitch_helper.py` 的 import 註解裡 —— 把它搬去 `algo/golden.py`（它是 `stack_agreement` 的門檻，本來就該住在那支旁邊），**不是**在這裡抄一份 |
+| `d4t.ui.branding` | 換成獨立 app 自己的名字（那是**它**的招牌，不是 d4t 的）|
+| `NEXT_STEP` 那一句指路 | ⚠ 它指的是 **Studio 的** `Template & regions → Cell W / Cell H`。獨立出去之後那個地方**不存在** —— 要嘛換一句、要嘛拿掉。`test_the_next_step_names_something_that_exists` 反查 `template_dialog` 的原始碼，所以那條測試會跟著一起搬或一起刪 |
+
+⚠ **`d4t/core` 不得 import Qt**（鐵則 1）在拆完之後仍然成立，而且更重要：
+那條線就是「引擎可以被兩個前端共用」的那條線。

@@ -73,10 +73,13 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPixmap
+from PySide6.QtGui import (
+    QColor, QGuiApplication, QImage, QKeySequence, QPainter, QPixmap, QShortcut,
+)
 from PySide6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QMainWindow, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QAbstractSpinBox, QApplication, QCheckBox, QDoubleSpinBox, QFileDialog,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
 from d4t.core.algo import period as algo_period
@@ -177,6 +180,12 @@ NEXT_STEP = "Next: paste it into Template & regions → Cell W / Cell H"
 #: 還沒有答案的那一格寫什麼。**一個破折號，不是 0** —— 0 在那一格看起來像一個
 #: 量出來的答案（同 `gc_generator.PERIOD_UNSET`，F117 G5 定的）。
 PITCH_UNSET = "—"
+
+#: **答案已經上去了，證據還在跑**時圖底下那一行寫什麼（F120 第十七輪）。
+#: 這一刻格線是**不畫**的：格子的位置要等相位搜尋回來才知道，先畫在相位 0 上
+#: 再跳掉是最糟的一種。所以那一行的工作是說「還在找位置」，不是留白 ——
+#: 留白會讓使用者以為格線壞了。
+PHASE_PENDING = "Finding where the cells start…"
 
 #: 這一軸被使用者的選擇排除掉時寫什麼。**不是空白、不是消失** —— 那一軸的數字
 #: 其實量到了，藏起來的話使用者會以為它量不到，然後回頭去查一個不存在的問題。
@@ -660,6 +669,10 @@ class _PitchWorker(QThread):
     """
 
     stage = Signal(str)
+    #: **週期量完了，證據還沒。** 急著要數字的人等的是這一刻，不是 `done`。
+    #: 實測 4096² 上：量週期 2.14 s，而疊圖找相位還要 2.67 s —— 多等的那一半
+    #: 等的是**證據**，不是答案。
+    answer = Signal(object)              # MeasuredPeriod
     done = Signal(object, object, str)   # (MeasuredPeriod, GoldenCell, 錯誤)
 
     def __init__(self, image: np.ndarray, axis: str,
@@ -684,6 +697,11 @@ class _PitchWorker(QThread):
             if m is None:
                 self.stage.emit("Measuring the period…")
                 m = algo_template.measure_period(self._image)
+                if not self._stop:
+                    # ⚠ **先把答案送出去。** 底下的疊圖／相位搜尋是為了「憑什麼
+                    # 相信它」，而那一段在 4096² 上要 2.67 s —— 讓一個已經算好
+                    # 的數字在背景多躺兩秒半，是這個視窗最貴的一件事。
+                    self.answer.emit(m)
             if self._stop:
                 self.done.emit(None, None, "")
                 return
@@ -854,9 +872,71 @@ class PitchHelperWindow(QMainWindow):
         outer.addWidget(self.warn)
 
         self.setAcceptDrops(True)
+        self._bind_keys()
         fit_screen.fit(self, 1180, 780)
         apply_button_cursors(self)
         self._refresh()
+
+    # -- 鍵盤 ---------------------------------------------------------------
+    #: 快捷鍵 → 做什麼。**改這裡就好** —— 綁定、提示文字、守門的測試都讀它，
+    #: 所以一個鍵不會出現「綁了但沒人講」或「講了但沒綁」。
+    SHORTCUTS = (
+        ("Ctrl+O", "open_image"),
+        ("Ctrl+V", "paste_image"),
+        # ⚠ Ctrl+C 走 `copy_focused_or_answer`，不直接接 X 那一顆 —— 見那一支。
+        ("Ctrl+C", "copy_focused_or_answer"),
+        ("Ctrl+Shift+C", "copy_y"),
+    )
+
+    def _bind_keys(self) -> None:
+        """把 :data:`SHORTCUTS` 綁上去。
+
+        為什麼是 `QShortcut` 而不是 `keyPressEvent`
+        ------------------------------------------------------------------
+        `keyPressEvent` 只在**沒有子元件吃掉那顆鍵**的時候才會跑到，而這個
+        視窗上半部全是輸入框與按鈕 —— 使用者剛剛打完 pixel size，焦點就在
+        spin box 裡，那一刻 Ctrl+C 永遠到不了視窗。`QShortcut`（預設
+        ``WindowShortcut``）比 key event **先**處理，所以「我看到數字了，
+        Ctrl+C」在畫面任何地方都成立。
+
+        ⚠ 這也是為什麼 Ctrl+C 不能直接接 Copy X：見
+        :meth:`copy_focused_or_answer`。
+        """
+        self._shortcuts: List[QShortcut] = []
+        for seq, name in self.SHORTCUTS:
+            sc = QShortcut(QKeySequence(seq), self)
+            sc.activated.connect(getattr(self, name))
+            self._shortcuts.append(sc)
+
+    @classmethod
+    def key_for(cls, action: str) -> str:
+        """那個動作綁在哪一顆鍵上。**提示文字讀這個，不自己抄一份字** ——
+        抄出來的那一份哪天沒跟上，畫面會教使用者按一顆沒有綁的鍵。"""
+        for seq, name in cls.SHORTCUTS:
+            if name == action:
+                return seq
+        return ""
+
+    def copy_y(self) -> None:
+        """Ctrl+Shift+C。**是一支方法不是 lambda** —— :data:`SHORTCUTS` 要能
+        被測試逐條走過去，而一個名字查得到、一個 lambda 查不到。"""
+        self.copy_axis(1)
+
+    def copy_focused_or_answer(self) -> None:
+        """Ctrl+C：**輸入框裡選著字的時候複製那段字**，其餘時間複製答案。
+
+        ⚠ 少了這道分支，Ctrl+C 就從輸入框手上被搶走了：`QShortcut` 比
+        `QLineEdit` 自己的標準鍵動作先處理，所以使用者在 pixel size 那一格裡
+        選了 `45` 按 Ctrl+C，剪貼簿上會是**週期**。一個到處都能用的快捷鍵
+        不該偷走一個更小、更明確的動作。
+        """
+        w = QApplication.focusWidget()
+        le = w.lineEdit() if isinstance(w, QAbstractSpinBox) else (
+            w if isinstance(w, QLineEdit) else None)
+        if le is not None and le.hasSelectedText():
+            le.copy()
+            return
+        self.copy_axis(0)
 
     # -- 版面 ---------------------------------------------------------------
     def _toolbar(self) -> QHBoxLayout:
@@ -866,11 +946,15 @@ class PitchHelperWindow(QMainWindow):
         # 而 Segoe UI 蓋不到那些符號 —— 退字型之後同一排每顆的大小與 baseline
         # 都不一樣，最壞是豆腐框，而我們在開發機上看不到
         # （`draw_glyph_icon` 的檔頭逐字說明了這件事）。
-        self.btn_open = GlyphButton("image", "Open image…", parent=self)
+        self.btn_open = GlyphButton(
+            "image", "Open image…",
+            "Open an image file (%s)." % PitchHelperWindow.key_for("open_image"),
+            self)
         self.btn_open.clicked.connect(self.open_image)
         self.btn_paste = GlyphButton(
             "paste", "Paste",
-            "Paste an image from the clipboard (Ctrl+V).", self)
+            "Paste an image from the clipboard (%s)."
+            % PitchHelperWindow.key_for("paste_image"), self)
         self.btn_paste.clicked.connect(self.paste_image)
         # ⚠ **就叫 `Crop`，沒有刪節號**（使用者 2026-09-22 指定）。
         # 這個 app 其他會開對話框的鈕都帶 `…`（`Open image…`、`Templates…`、
@@ -1414,11 +1498,25 @@ class PitchHelperWindow(QMainWindow):
                                     self.override(), self.stack_method(),
                                     self.skip_edges(), self)
         self._worker.stage.connect(self._say)
+        self._worker.answer.connect(self._on_answer)
         self._worker.done.connect(self._on_done)
         self._worker.finished.connect(self._on_finished)
         self.progress.setVisible(True)
         self._busy(True)
         self._worker.start()
+
+    def _on_answer(self, m: Any) -> None:
+        """週期量完了 —— **先把數字放上去**，證據等疊完再補。
+
+        ⚠ 這一刻**還不能畫格線**：格子的位置要等相位搜尋（`choose_origin`）
+        回來才知道。畫在相位 0 上再跳掉是最糟的一種 —— 使用者盯著的正是那張
+        圖，而它會先給一個錯的位置。所以 `_draw` 遇到「有週期、還沒有相位」
+        就只說一句「正在找位置」。
+        """
+        if m is None:
+            return
+        self._m, self._gc = m, None
+        self._refresh()
 
     def _on_done(self, m: Any, gc: Any, err: str) -> None:
         if err:
@@ -1618,7 +1716,10 @@ class PitchHelperWindow(QMainWindow):
             b.setVisible(flags[i] if self._m is not None else True)
             b.setEnabled(bool(num))
             b.setToolTip(("Puts %s on the clipboard — just the number, "
-                          "ready for Cell %s." % (num, "W" if i == 0 else "H"))
+                          "ready for Cell %s.  (%s)"
+                          % (num, "W" if i == 0 else "H",
+                             self.key_for("copy_focused_or_answer" if i == 0
+                                          else "copy_y")))
                          if num else "Nothing measured yet.")
         for i, (bar, tag) in enumerate(zip(self._bars, self._tags)):
             show = flags[i] if self._m is not None else True
@@ -1887,6 +1988,11 @@ class PitchHelperWindow(QMainWindow):
             self.view.set_overlay(None)
             self._say_caption("")
             return
+        if self._gc is None:
+            # 有週期、還沒有相位（答案已經在上面了，疊圖還在跑）。
+            self.view.set_overlay(None)
+            self._say_caption(PHASE_PENDING)
+            return
         flags = self._flags()
         if not flags[0] and not flags[1]:
             self.view.set_overlay(None)
@@ -1922,13 +2028,6 @@ class PitchHelperWindow(QMainWindow):
         self.statusBar().showMessage(str(text), 8000)
 
     # -- 手勢 ---------------------------------------------------------------
-    def keyPressEvent(self, e) -> None:  # Qt hook
-        if e.matches(getattr(e, "Paste", None) or 0) or (
-                e.key() == Qt.Key_V and e.modifiers() & Qt.ControlModifier):
-            self.paste_image()
-            return
-        super().keyPressEvent(e)
-
     def dragEnterEvent(self, e) -> None:  # Qt hook
         if e.mimeData() is not None and e.mimeData().hasUrls():
             e.acceptProposedAction()
