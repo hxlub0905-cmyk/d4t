@@ -1556,7 +1556,7 @@ def test_the_helper_turns_the_two_tone_line_on_and_studio_does_not(win, ph):
 def test_nothing_on_the_empty_screen_invites_a_press_it_cannot_answer(win, ph):
     """⚠ **鐵則 7「不 raise 不等於不記」的 UI 版。**
 
-    空狀態下這些控制項全部按得動，而按下去：`Crop…` 回 False **狀態列一個字
+    空狀態下這些控制項全部按得動，而按下去：`Crop` 回 False **狀態列一個字
     都沒有**（按了像壞掉）；`Ruler` 真的打開量尺模式、還說「Drag across the
     image」—— 而沒有 image；週期欄收下 60、答案仍然是 `—`；`×2` 靜靜地沒反應。
 

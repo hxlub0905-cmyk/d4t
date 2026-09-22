@@ -872,8 +872,12 @@ class PitchHelperWindow(QMainWindow):
             "paste", "Paste",
             "Paste an image from the clipboard (Ctrl+V).", self)
         self.btn_paste.clicked.connect(self.paste_image)
+        # ⚠ **就叫 `Crop`，沒有刪節號**（使用者 2026-09-22 指定）。
+        # 這個 app 其他會開對話框的鈕都帶 `…`（`Open image…`、`Templates…`、
+        # `Browse…`）—— 那是一個慣例，而使用者在這一顆上把它關掉了。
+        # 留這段註解是為了不要有人「順手修回來」。
         self.btn_crop = GlyphButton(
-            "crop", "Crop…",
+            "crop", "Crop",
             "Measure from one part only — leave out the defect, scribe lines "
             "and the scale bar. They are not the repeating layout.", self)
         self.btn_crop.clicked.connect(self.ask_crop)
@@ -1449,7 +1453,7 @@ class PitchHelperWindow(QMainWindow):
     def _sync_enabled(self) -> None:
         """**沒有圖的時候，按不出結果的東西要看起來按不出結果。**
 
-        空狀態下這些控制項全部是「按得動」的，而按下去：`Crop…` 回 False
+        空狀態下這些控制項全部是「按得動」的，而按下去：`Crop` 回 False
         **狀態列一個字都沒有**（按了像壞掉）；`Ruler` 真的打開量尺模式、還說
         「Drag across the image」—— 而沒有 image；週期欄收下 60、答案仍然是
         `—`；`×2` 靜靜地沒反應。
@@ -1817,7 +1821,7 @@ class PitchHelperWindow(QMainWindow):
                 # （F118：使用者面的字不准講開發者的話）。兩句並排出現的時候
                 # 使用者會去找「它們是不是在講兩件事」—— 而那是找不到答案的。
                 lines.append("No repeating period could be measured in this "
-                             "image. Try Crop… to leave out anything that is "
+                             "image. Try Crop to leave out anything that is "
                              "not the repeating layout.")
             else:
                 lines.extend(getattr(self._m, "notes", None) or [])
