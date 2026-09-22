@@ -1765,3 +1765,14 @@ def test_ctrl_shift_c_copies_the_other_axis(win, ph):
     clip.setText("")
     win.copy_y()
     assert clip.text() == win.axis_number(1) != win.axis_number(0)
+
+
+def test_the_window_is_called_only_by_its_own_name(win, ph):
+    """⚠ **標題後面不掛主程式的名字**（使用者 2026-09-22 指定）。
+
+    Studio 的標題帶著 `d4t` 是因為它**是** d4t；這一個不是。而它的下一步是
+    完全獨立成自己的應用程式（`docs/plans/F120-pitch-helper.md` §28），那一天
+    標題裡的 `d4t` 會變成一句假話 —— 現在就不要先寫上去。
+    """
+    assert win.windowTitle() == ph.WINDOW_TITLE == "Pitch helper"
+    assert "d4t" not in win.windowTitle()

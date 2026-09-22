@@ -109,7 +109,8 @@ __all__ = [
     "PitchHelperWindow", "Bar", "AXES", "AXIS_X", "AXIS_Y",
     "AXIS_BOTH", "axis_flags", "lattice_periods", "px_text", "nm_text",
     "pitch_rows", "effective_period", "conf_tone", "agree_tone", "Override",
-    "PITCH_UNSET", "PITCH_NOT_USED", "CONF_TYPED", "TONE_GOOD", "TONE_WARN",
+    "PITCH_UNSET", "PITCH_NOT_USED", "WINDOW_TITLE",
+    "CONF_TYPED", "TONE_GOOD", "TONE_WARN",
     "TONE_BAD", "CONF_GOOD_FROM", "AGREE_GOOD_FROM", "CELL_BOX",
     "BAR_W", "BAR_H", "candidate_periods", "candidate_label",
     "detail_rows", "trust_note", "MIN_CELLS_TO_TRUST",
@@ -180,6 +181,9 @@ NEXT_STEP = "Next: paste it into Template & regions → Cell W / Cell H"
 #: 還沒有答案的那一格寫什麼。**一個破折號，不是 0** —— 0 在那一格看起來像一個
 #: 量出來的答案（同 `gc_generator.PERIOD_UNSET`，F117 G5 定的）。
 PITCH_UNSET = "—"
+
+#: 這個視窗叫什麼。**只有它自己的名字**，不掛主程式 —— 見 `__init__` 的說明。
+WINDOW_TITLE = "Pitch helper"
 
 #: **答案已經上去了，證據還在跑**時圖底下那一行寫什麼（F120 第十七輪）。
 #: 這一刻格線是**不畫**的：格子的位置要等相位搜尋回來才知道，先畫在相位 0 上
@@ -822,7 +826,11 @@ class PitchHelperWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Pitch helper — d4t")
+        # ⚠ **就叫 `Pitch helper`，後面不掛 d4t**（使用者 2026-09-22 指定）。
+        # Studio 的標題帶著主程式的名字是因為它**是**主程式；這一個不是 ——
+        # 它的下一步是完全獨立成自己的應用程式（`docs/plans/F120-…` §28），
+        # 那一天標題裡的 `d4t` 會變成一句假話。現在就不要先寫上去。
+        self.setWindowTitle(WINDOW_TITLE)
         # **自己的圖示**（F120）：工作列上要分得出這不是 Studio。
         self.setWindowIcon(branding.pitch_icon())
 
