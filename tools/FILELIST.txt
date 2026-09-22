@@ -179,7 +179,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 934c5ac7cecab2b250c431fdbd5a273d57c88b0b d4t/ui/wording.py
 133bc87c427642bfce9f4c9c533d589b8e597efe d4t/ui/workbench.py
 82acc13a4004df7770d7ade4ae3e10468ad094ff d4t/ui/workers.py
-d13ef6b2c181f4b4bebcfa9bf1c566194480c3aa docs/ARCHITECTURE.md
+7f335e9099fef248b7dd1f66e40015a0085fa29c docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md

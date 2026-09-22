@@ -412,9 +412,20 @@ d4t/
     │                         #     （三票制）、疊 Golden Cell 是
     │                         #     `build_golden_cell` 本人、裁切 `crop_dialog`、
     │                         #     格線 `lattice_dialog`、糊不糊的門檻沿用
-    │                         #     `template_dialog.BLURRED_BELOW`。
+    │                         #     `algo/golden.BLURRED_BELOW`。
     │                         #     畫面上是**兩張圖**：原圖＋切點格線、疊起來那
-    │                         #     一格（清楚＝週期對），配 0–100 的綠黃紅橫條
+    │                         #     一格（清楚＝週期對），配 0–100 的綠黃紅橫條。
+    │                         #     右欄由上而下：**看圖 → 數字 → 設定**（使用者
+    │                         #     2026-09-22 定的順序）
+    ├── pitch_core.py         #   ↑ 的**不碰 widget 的那一半**：常數、判準、
+    │                         #     數字 → 字（`axis_flags` / `nm_text` /
+    │                         #     `pitch_rows` / `trim_to_inner` …）。
+    │                         #     ⚠ **不 import Qt** —— 兩個理由：`pitch_helper`
+    │                         #     撞到 2,200 行的上限，以及**這一半是獨立出去的
+    │                         #     那個 app 要帶走的東西**（`docs/plans/
+    │                         #     F120-pitch-helper.md` §28）。`pitch_helper`
+    │                         #     把每一個名字轉出去，所以 `ph.axis_flags`
+    │                         #     那些既有的叫法一個都沒有換家
     ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口各一個旗標，
     │                         #     開關狀態的唯一出處是 `ui/scope.py`）
     ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒
