@@ -18,7 +18,7 @@ ee35d3a74a03161fd795cb83d72d5aca0622273a d4t/core/algo/curve.py
 17e03ca94f0dd599c67258b0aff775147b9a10f2 d4t/core/algo/edge.py
 d2f7e50ff4920fefc608e7d83117c771276104b7 d4t/core/algo/enhance.py
 d6c3a5eb32faee125931bc684025d20ddf773c71 d4t/core/algo/glv.py
-b288ebe7f0d127ed0b08634ef314c7102e4accea d4t/core/algo/golden.py
+0c1fee067bced11d69341ca8492b8fa6fddf93b9 d4t/core/algo/golden.py
 abc681b0dfd485d0526dfa930ac9b3cf22b89ccf d4t/core/algo/grid.py
 b1a09a48d4ae47dde5c94cafc4304e91e9c8dd60 d4t/core/algo/histmatch.py
 8b8ce6eb11a947f6c7a5b4139731a002ceb73e30 d4t/core/algo/iqi.py
@@ -144,7 +144,8 @@ f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 220193920f4f5d001becf74566eb6abc1983a8a4 d4t/ui/open_dialogs.py
 7be8a6f82dc5572324c987829bf172622c4a0e63 d4t/ui/param_form.py
-d21f1ce4a48922d9afa73ec26771a84ba429e5d9 d4t/ui/pitch_helper.py
+77d1b0e1cdf7f24611d524dbc449bbba8e225cfd d4t/ui/pitch_core.py
+1b8a7aa71a66bad5fe88f6ab5d18b55cf0127a73 d4t/ui/pitch_helper.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 11e712fbfa283208b454e41b6d73d3855038d231 d4t/ui/region_check.py
@@ -161,8 +162,8 @@ bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 dc3964569d44161c7d910f0c4dea86feebc6e6d7 d4t/ui/strings.py
 bd8beca73261bb84333e00499ae91ccf651bd917 d4t/ui/studio.py
 ac0f36b1bd8280b6c0c7aa4dfe3598ef4ce698a9 d4t/ui/studio_layout.py
-70e7e925f09f87e1c32031c235ae8998c2070512 d4t/ui/template_dialog.py
-03a23fab41d2a472b924c6912934fb16df200440 d4t/ui/theme.py
+0aefa071c0491d7bb257cf26a396bb9a9fe95947 d4t/ui/template_dialog.py
+fe053e9fc8a058fe6e0c689633d636896bca28c5 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 248b4e3610970b808637724d288f1751f20775bf d4t/ui/tree_panel.py
 2d5368b4f0a8a6b1d7aa76a045ca1787b240b39e d4t/ui/tree_scene.py
@@ -185,7 +186,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 726dece56f0c958d72a98c2571c431ee0df5bbb6 docs/LICENSING.md
 7132326e294b605b1553659156b5f6a62df12543 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-c5f2884af2db0aa389b496c4ebec6cb2962e745a docs/PITFALLS.md
+7cf9d408020cdf92b1c55c5aa693300a67a53c04 docs/PITFALLS.md
 287706716be9adf01ba5a678d4159afadb6fe90d docs/ROADMAP.md
 7d6e3d3a6e7ca55d6c61bd7d218efe51f9d4fa38 docs/USING-CD.md
 1918f5a20d1daa6dbad197ceda0c2518be8d88bb docs/USING-CHARACTERIZATION.md
@@ -193,7 +194,7 @@ c5f2884af2db0aa389b496c4ebec6cb2962e745a docs/PITFALLS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
 4a56b0ed65886c59f4282f7e67cbc1ac0a64c140 docs/plans/F117-ui-review.md
-3354f53657251d52b0770a4cbb205866e77cefae docs/plans/F120-pitch-helper.md
+316b05034e8495f495a1dfabedba6b8e41e8e2b6 docs/plans/F120-pitch-helper.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -448,7 +449,7 @@ ee2409f03b5bdad686549ea5d9639d5653151350 tests/test_ui_number_picker.py
 d7fc1d0894914f00950a97cc3314e6c9b870d6fb tests/test_ui_outcome_chips.py
 517c38a66c0973adcc445eaae1b50d4f1748e0cf tests/test_ui_panel_truth.py
 d346560d0285c87606673279e3417ad6109e7c38 tests/test_ui_panels_pr2.py
-ae7dafbabc6316b9cecc9a1aa0a8872d31a11301 tests/test_ui_pitch_helper.py
+6a728a8a64dc78edd9f2f4907116a8563efe38f8 tests/test_ui_pitch_helper.py
 6a3f59e4edeb47dc32395c89d7ebf0fc702a8eea tests/test_ui_preview_why.py
 a34f4bc35c3ba61865120a2f96deb5c815dbd95a tests/test_ui_problems_bar.py
 04e532ab8cfc38320756feddf90eb03161597fcb tests/test_ui_quiet_canvas.py

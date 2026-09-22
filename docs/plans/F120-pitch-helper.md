@@ -3,7 +3,7 @@
 狀態：**第十六版，等使用者看過（2026-09-22）** —— `python -m d4t pitch` 開得
 起來，四點追加的需求都在（§5／§5.1／§5.2），使用者七輪回饋都做完（§18），
 第八輪是「截其他狀態的圖」而那幾張圖抓出三個 bug（§19），
-第九輪三顆膠囊／按鈕圖示／畫布量尺（§20），第十輪注意力的分配（§21），第十一輪指路那一句與拖得動的版面（§22），第十二輪信心條搬家與兩色格線（§23），第十三輪青色色標／扁按鈕的真相／一軸一顆複製鍵（§24），第十四輪按鈕高度 30 → 34（§25），第十五輪重看 UI／空狀態的四個問題（§26），第十六輪答案先上畫面＋鍵盤（§27）。使用者已經說了下一步是**完全獨立成一個應用程式**（§28 記著要剪哪幾條線）。⚠ **不寫「已收斂」**：使用者還沒
+第九輪三顆膠囊／按鈕圖示／畫布量尺（§20），第十輪注意力的分配（§21），第十一輪指路那一句與拖得動的版面（§22），第十二輪信心條搬家與兩色格線（§23），第十三輪青色色標／扁按鈕的真相／一軸一顆複製鍵（§24），第十四輪按鈕高度 30 → 34（§25），第十五輪重看 UI／空狀態的四個問題（§26），第十六輪答案先上畫面＋鍵盤（§27）、右欄整個重排成「先看圖→中間是答案→下面才是設定」＋拆出 `pitch_core`（§27.7）。使用者已經說了下一步是**完全獨立成一個應用程式**（§28 記著要剪哪幾條線）。⚠ **不寫「已收斂」**：使用者還沒
 在真實影像上用過，而這種工具的驗收只有那一件事算數。⚠ §5 那顆「格線」按鈕
 **做的時候從「一顆鈕」改成「預設開著」**，理由與它揪出來的那個 bug 在 §10。
 
@@ -1384,6 +1384,96 @@ Studio 的標題帶著主程式的名字是因為它**是**主程式；這一個
 就是 §28 那件事 —— 那一天標題裡的 `d4t` 會變成一句假話，所以現在就不要先寫
 上去。守門：`test_the_window_is_called_only_by_its_own_name`。
 
+## 27.7 右欄整個重排（使用者 2026-09-22：「排版我還是覺得很奇怪」）
+
+先量再改。右欄 411 × 722，每個元件的位置印出來之後，「奇怪」是四件事：
+
+| 量到的 | 問題 |
+|---|---|
+| y=0…158 **置中**，y=164 以下**靠左** | 一欄兩套對齊，眼睛找不到一條穩定的垂直線 |
+| 證據卡裡塞著 `Ignore defects` / `Skip edge cells`（y=372/390）| 它們**不是證據，是設定**，而且被擠在右下角 |
+| 卡片右半塞滿到底，左半那張圖下面空著 | 左右高度沒對齊 |
+| `Details` 之後 y=655…722 **整片 67 px 空白** | 上面擠、下面空 |
+
+外加三種容器語言混在一起：答案裸的、證據是卡片、設定又裸的。
+
+### 27.7.1 順序是使用者定的，而高度是量出來的
+
+使用者：「理想上應該要先有圖（因為你要確認 GC 跟 pitch 是不是正確的），
+然後中間才是答案」。三個版本都做出來實際跑過：
+
+| 版本 | 右欄 sizeHint | 1366×768 的筆電（約 700 px）|
+|---|---|---|
+| A 圖與數字並排 | 595 | ✓ |
+| B 圖獨佔最上面 | **742** | ✗ 最底下那張卡要捲 —— 而那正是「發現不對、要改」的地方 |
+| **B 瘦身**（做的是這個）| **632** | ✓ |
+
+B 瘦身省下來的 110 px：圖 260 → 200（仍照長寬比）、`Cells agree` 與那行說明
+**移到圖的右邊**不再往下疊一層、`Details` 收進第三張卡跟兩個 checkbox 同一列。
+
+現在是 **header ＋ 三張帶標題的卡**，每張內部一律靠左，**只有那個大數字置中**
+（它是結論，該獨佔中軸）。
+
+### 27.7.2 ⚠ 圖要收在一個 `CELL_BOX` 見方的框裡，不是只縮寬度
+
+第一版只按長寬比算高度。純 X 的 layout（直條）一格是 **48 × 480** ——
+那一格算出來 1650 px 高，把整張卡撐爛，而圖根本畫不出來。實拍才看到。
+`_pixmap` 的 `KeepAspectRatio` 早就在做對的事，是**框**沒跟上。
+
+### 27.7.3 header：名字 ｜ 狀態，**同一排**
+
+使用者喜歡「名字＋圖示」，也同意加狀態行，問能不能疊在名字下面。量出來
+疊兩行是 682、同一排是 664，而可用只有約 700 —— 再碰上廠內常見的 125%
+縮放就會被切。所以擠成同一排，代價是句子要短到 220 px 以內
+（`The cells do not agree — try another period` 要 300，砍成 `Cells do not
+agree`；「然後怎麼辦」本來就在證據卡的說明行與底下那條警告裡，不講第二次）。
+
+⚠ **`good` 的判準是「一個警告都沒有」，不是「分數夠高」。** 一個錯的週期
+（真正週期的一半）每一格都是半個 cell，彼此照樣對得很齊 —— `Cells agree`
+會很高。那一刻給綠勾等於替一個可能錯的答案背書。而那一份「有沒有警告」
+**直接讀 `_fill_warning` 算出來的結果**，不另外算第二份。
+
+⚠ **疊不起來的時候先說疊不起來，就算那個數字是使用者自己打的。** 實拍過：
+打了 37、`Cells agree` 紅成 0.44，而最上面那一行還是灰色的「Using your
+period」—— 一句不表態的話配一條紅色的 bar，是那一行在它唯一的工作上失職。
+
+### 27.7.4 ⚠ 拆檔：`pitch_core.py`（**這一步是 §28 的第一步**）
+
+改完是 **2,199 行**，而一般上限 2,200 —— 下一筆修改不管多小都會撞上去。
+不碰 widget 的那一半（常數、判準、數字 → 字）搬進 `d4t/ui/pitch_core.py`，
+`pitch_helper` 把每一個名字轉出去（`ph.axis_flags` 一個都沒有換家）。
+
+**2,199 → 1,749**，而 `pitch_core` 不 import Qt。
+
+順手把 §28 清單裡**唯一一條真的該剪的線**剪了：`BLURRED_BELOW` 從
+`ui/template_dialog.py`（1,300 行的 Qt 對話框）搬到 `core/algo/golden.py`
+—— 它是 `stack_agreement` 的門檻，本來就該住在那支旁邊，而
+`pitch_helper.py` 的 import 註解逐字寫著這件事。`template_dialog` 現在從
+那裡轉出去，所以 `template_dialog.BLURRED_BELOW` 這個名字照樣在。
+
+### 27.7.5 守門（120 → 129 條）
+
+| 測試 | 守什麼 |
+|---|---|
+| `test_the_column_reads_picture_then_answer_then_settings` | 使用者的順序，而且每張卡都有名字 |
+| `test_the_stacking_settings_are_not_evidence` | 兩個 checkbox 不在證據卡裡 |
+| `test_only_the_answer_is_centred` | 一欄一種對齊 |
+| `test_the_cell_picture_keeps_the_cell_shape` | 長寬比 ＋ **收在 `CELL_BOX` 見方的框裡**（直條那一格） |
+| `test_the_right_column_fits_a_768_laptop` | ≤ 700 px |
+| `test_the_header_says_the_name_and_how_it_is_going` | 名字 ｜ 狀態，同一排，名字在最上面 |
+| `test_a_high_agreement_alone_does_not_earn_the_tick` | 27.7.3 的那條判準 |
+| `test_the_state_line_covers_every_stage` | 五種狀態都有話說，含「疊不起來贏過自己打的」|
+| `test_the_state_line_never_uses_colour_alone` | 七句各自不同，而且短到排得下 |
+
+三條改寫的（`copy_button_sits_with`、`evidence_sits_with_the_answer`、
+`stacked_picture_does_not_overlap`）**守的事一次都沒變，換的是寫法** ——
+現在問的是「在同一張卡裡嗎」，比兩個 y 座標的大小關係強，因為它不會因為
+誰上誰下而失效。
+
+⚠ 反向驗證這一輪踩到一個新坑，記在 `docs/PITFALLS.md`：**同一秒內改回去、
+而且檔案大小一樣，Python 會繼續跑舊的 `.pyc`** —— 而 `inspect.getsource`
+讀的是檔案不是 bytecode，所以它會替那個假象背書。查了四輪。
+
 ## 28. 使用者的下一步：**完全獨立成一個應用程式**（2026-09-22）
 
 使用者：「因為我之後會把這個應用獨立出來，直接完全獨立成一個應用程式」。
@@ -1398,7 +1488,7 @@ Studio 的標題帶著主程式的名字是因為它**是**主程式；這一個
 | `d4t.core.ingest.imageio` | 帶走（CJK-safe 讀檔在 Windows 廠內是必要的，不是方便）|
 | `d4t.ui.{theme, icons, chips, image_view, splitters, fit_screen, widgets}` | 帶走 —— 它們沒有一支認得 recipe 或 Studio |
 | `d4t.ui.{crop_dialog, lattice_dialog}` | 帶走（`crop_array`／`lattice_boxes` 是純函式那一半）|
-| `d4t.ui.template_dialog` 的 `BLURRED_BELOW` | ⚠ **這是唯一一條真的該剪的線**：為一個常數 import 一整支 1,300 行的對話框。正確的做法早就寫在 `pitch_helper.py` 的 import 註解裡 —— 把它搬去 `algo/golden.py`（它是 `stack_agreement` 的門檻，本來就該住在那支旁邊），**不是**在這裡抄一份 |
+| ~~`d4t.ui.template_dialog` 的 `BLURRED_BELOW`~~ | ✅ **2026-09-22 剪掉了**（§27.7.4）：那個常數搬去 `core/algo/golden.py` 了（它是 `stack_agreement` 的門檻，本來就該住在那支旁邊），`template_dialog` 從那裡轉出去。helper 不再為了一個 float import 一支 1,300 行的對話框 |
 | `d4t.ui.branding` | 換成獨立 app 自己的名字（那是**它**的招牌，不是 d4t 的）|
 | `NEXT_STEP` 那一句指路 | ⚠ 它指的是 **Studio 的** `Template & regions → Cell W / Cell H`。獨立出去之後那個地方**不存在** —— 要嘛換一句、要嘛拿掉。`test_the_next_step_names_something_that_exists` 反查 `template_dialog` 的原始碼，所以那條測試會跟著一起搬或一起刪 |
 

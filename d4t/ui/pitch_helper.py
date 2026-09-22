@@ -94,14 +94,6 @@ from .icons import GlyphButton
 from .splitters import HairlineSplitter
 from .image_view import ImageView
 from .lattice_dialog import lattice_boxes
-# ⚠ **為了一個常數 import 一整支 1,300 行的對話框**，而那是刻意的：
-# `BLURRED_BELOW`（疊出來算不算糊）在模板那條路上已經有一個家，而**同一件事
-# 不准有兩個門檻** —— 抄一個 0.5 過來，兩邊哪天分岔了沒有人會發現。
-# 代價量過：`import pitch_helper` 408 ms，而其中絕大部分是 Qt／numpy／cv2；
-# `template_dialog` 拉進來的 `crop_dialog`／`lattice_dialog` 這一支本來就要用。
-# 真要拆的話，正確的做法是把那個常數搬去 `algo/golden.py`（它是
-# `stack_agreement` 的門檻，本來就該住在那支旁邊），**不是**在這裡抄一份。
-from .template_dialog import BLURRED_BELOW
 from .theme import TOKENS
 from .widgets import apply_button_cursors, to_uint8
 
@@ -109,7 +101,10 @@ __all__ = [
     "PitchHelperWindow", "Bar", "AXES", "AXIS_X", "AXIS_Y",
     "AXIS_BOTH", "axis_flags", "lattice_periods", "px_text", "nm_text",
     "pitch_rows", "effective_period", "conf_tone", "agree_tone", "Override",
-    "PITCH_UNSET", "PITCH_NOT_USED", "WINDOW_TITLE",
+    "PITCH_UNSET", "PITCH_NOT_USED", "WINDOW_TITLE", "PHASE_PENDING",
+    "BLURRED_BELOW",
+    "VERDICT_OK", "VERDICT_BLURRED", "VERDICT_NONE", "VERDICT_TYPED",
+    "VERDICT_CHECK", "VERDICT_BUSY_PERIOD", "VERDICT_BUSY_STACK",
     "CONF_TYPED", "TONE_GOOD", "TONE_WARN",
     "TONE_BAD", "CONF_GOOD_FROM", "AGREE_GOOD_FROM", "CELL_BOX",
     "BAR_W", "BAR_H", "candidate_periods", "candidate_label",
@@ -118,454 +113,32 @@ __all__ = [
     "MIN_CELLS_AFTER_TRIM", "run",
 ]
 
-# --------------------------------------------------------------------------- #
-# 軸向：使用者說了算（F120，使用者 2026-09-21「也能支援純 X 純 Y」）
-# --------------------------------------------------------------------------- #
-AXIS_X = "x"
-AXIS_Y = "y"
-AXIS_BOTH = "both"
+# ⚠ **不碰 widget 的那一半住在 `pitch_core`**（2026-09-22 拆的，F120 第十七
+# 輪）：常數、判準、數字 → 字。兩個理由，而第二個比較重要 ——（1）這一支
+# 2,199 行而上限 2,200；（2）**那一半是獨立出去的那個 app 要帶走的東西**
+# （`docs/plans/F120-pitch-helper.md` §28）。
+#
+# ⚠ 這是一道**轉出口**：`ph.axis_flags` / `ph.PITCH_UNSET` 這些名字在測試與
+# 其他模組裡到處都有人叫，而搬家不該連名字一起換 —— 那會把一次版面調整變成
+# 一次全域改名。`__all__` 裡有它們，所以 ruff 認得這是轉出口，不必 noqa。
+from .pitch_core import (
+    AGREE_GOOD_FROM, AXES, AXIS_BOTH, AXIS_HELP, AXIS_ICONS, AXIS_LABELS,
+    AXIS_X, AXIS_Y, BLURRED_BELOW, CONF_GOOD_FROM, CONF_TYPED,
+    GRID_HEX, MAX_CANDIDATES, MIN_CELLS_AFTER_TRIM, MIN_CELLS_TO_TRUST,
+    MIN_PERIOD_PX, NEXT_STEP, Override, PHASE_PENDING, PITCH_NOT_USED,
+    PITCH_UNSET,
+    TONE_BAD, TONE_GOOD, TONE_WARN, VERDICT_BLURRED, VERDICT_BUSY_PERIOD,
+    VERDICT_BUSY_STACK, VERDICT_CHECK, VERDICT_NONE, VERDICT_OK,
+    VERDICT_TYPED, WINDOW_TITLE, agree_tone, axis_flags, candidate_label,
+    candidate_periods, cells_along, conf_tone, detail_rows, effective_period,
+    lattice_periods, nm_text, pitch_rows, px_text, trim_to_inner, trust_note,
+)
 
-#: 三選一，順序就是畫面上膠囊的順序。**預設是兩軸都切。**
-#:
-#: ⚠ **這裡本來有第四顆 `Auto`，2026-09-21 使用者拿掉了**（「我覺得就分 X+Y
-#: 跟 X 跟 Y 就好」）。它上一輪才剛因為「Auto 跟 X+Y 差在哪裡？」被改名成
-#: `Force both` —— 而一個要靠改名才講得清楚的差別，多半是那個差別不該存在。
-#:
-#: ⚠ **而那個差別實測上根本不存在。** Auto 做的唯一一件事是把信心
-#: < `MIN_PERIOD_CONFIDENCE`（40）的軸丟掉，但 `estimate_period` 自己的
-#: `strength_threshold`（0.18 ≈ 信心 18）在那之前就已經回 `px=None` 了。
-#: 實測掃過訊號強度（900×700、σ=30 的雜訊上疊一條週期 60 的線）：
-#:
-#:   振幅 1 → px=0（引擎自己就擋了）  ·  振幅 2 → px=60、信心 41.3
-#:
-#: **中間沒有東西。** 那兩道門之間的 18–40 那一段，在這些圖上是空的 ——
-#: 所以 Auto 從來沒有丟掉過任何東西，它只是一顆看不出跟隔壁差在哪的鈕。
-#: 萬一真的有圖落在那一段，現在的處置是**講出來而不是默默丟掉**
-#: （見 `_fill_warning` 的低信心那一句）—— 那比較誠實：使用者看得到那個數字
-#: 跟它的紅色長條，而不是一片空白。
-AXES = (AXIS_BOTH, AXIS_X, AXIS_Y)
-AXIS_ICONS = ("place_crossing", "axis_x", "axis_y")
-#: ⚠ ``Force both`` 改回 ``X + Y``：``Force`` 那個字是上一輪拿來講
-#: 「跟 Auto 差在哪」的，而 Auto 已經不在了 —— 沒有對照組的時候，
-#: ``Force`` 只是一個多出來的字。
-AXIS_LABELS = {
-    AXIS_X: "X only",
-    AXIS_Y: "Y only",
-    AXIS_BOTH: "X + Y",
-}
-#: ⚠ 每一句只留**「什麼時候按它」**。第一版四句話加起來 60 個字掛在四顆膠囊
-#: 底下，而使用者同一輪說了「UI 內字太多」——  說明的長度跟它被讀到的機率成
-#: 反比。
-AXIS_HELP = {
-    AXIS_X: "It only repeats across. One cell is the full height.",
-    AXIS_Y: "It only repeats down. One cell is the full width.",
-    AXIS_BOTH: "It repeats both ways. One cell is a tile.",
-}
-
-#: 一軸要至少這麼多像素才算得上一個週期（同 `build_golden_cell` 的判準）。
-MIN_PERIOD_PX = 2.0
-
-#: 格線的顏色（亮芯；襯底在 `image_view._CASING`）。
-GRID_HEX = "#00e5ff"
-
-#: 拿到答案之後**下一步去哪**（只在有答案時出現）。
-#:
-#: ⚠ **名字要是真的那個名字，而我第一版寫錯了。** 我原本寫 "Cell size" ——
-#: 那四個字只活在 `template_dialog` 的**檔頭註解**裡，畫面上那兩格的標籤是
-#: `Cell W` / `Cell H`。一句指路的話寫了一個找不到的名字，比不寫還糟：使用者
-#: 會去找一個不存在的東西，然後開始懷疑其他每一句。
-#: `tests/test_ui_pitch_helper.py::test_the_next_step_names_something_that_exists`
-#: 從 `template_dialog` 的原始碼反查，所以那邊改名這裡就會紅。
-NEXT_STEP = "Next: paste it into Template & regions → Cell W / Cell H"
-
-#: 還沒有答案的那一格寫什麼。**一個破折號，不是 0** —— 0 在那一格看起來像一個
-#: 量出來的答案（同 `gc_generator.PERIOD_UNSET`，F117 G5 定的）。
-PITCH_UNSET = "—"
-
-#: 這個視窗叫什麼。**只有它自己的名字**，不掛主程式 —— 見 `__init__` 的說明。
-WINDOW_TITLE = "Pitch helper"
-
-#: **答案已經上去了，證據還在跑**時圖底下那一行寫什麼（F120 第十七輪）。
-#: 這一刻格線是**不畫**的：格子的位置要等相位搜尋回來才知道，先畫在相位 0 上
-#: 再跳掉是最糟的一種。所以那一行的工作是說「還在找位置」，不是留白 ——
-#: 留白會讓使用者以為格線壞了。
-PHASE_PENDING = "Finding where the cells start…"
-
-#: 這一軸被使用者的選擇排除掉時寫什麼。**不是空白、不是消失** —— 那一軸的數字
-#: 其實量到了，藏起來的話使用者會以為它量不到，然後回頭去查一個不存在的問題。
-PITCH_NOT_USED = "not used"
-
-
-def axis_flags(axis: str, px: float, py: float,
-               conf_x: float = 100.0, conf_y: float = 100.0
-               ) -> Tuple[bool, bool]:
-    """``(用不用 X, 用不用 Y)`` —— **使用者選的那一顆說了算**。
-
-    三顆膠囊（X + Y／X only／Y only）**都跳過信心那一關**：使用者明講的
-    一律相信，同 `build_golden_cell` 的 ``given`` 規則。但它變不出一個沒有量到
-    的數字 —— ``p < 2`` 仍然是沒有（而純雜訊實測就是 ``px=0``，因為
-    `estimate_period` 自己的 ``strength_threshold`` 在那之前就擋下來了）。
-
-    ``conf_x``／``conf_y`` 留著是為了呼叫端的簽名不要跟著 `AXES` 變 ——
-    這一支不再看它們（見 :data:`AXES` 的說明：使用者 2026-09-21 拿掉了
-    `Auto`，而那是唯一看信心的那一顆）。低信心現在是**警告**，不是否決權。
-
-    不認得的軸向當成 ``X + Y``（預設那一顆）。
-    """
-    has_x = float(px or 0.0) >= MIN_PERIOD_PX
-    has_y = float(py or 0.0) >= MIN_PERIOD_PX
-    a = str(axis or AXIS_BOTH)
-    if a == AXIS_X:
-        return (has_x, False)
-    if a == AXIS_Y:
-        return (False, has_y)
-    return (has_x, has_y)
-
-
-def lattice_periods(shape: Tuple[int, int], px: float, py: float,
-                    flags: Tuple[bool, bool]) -> Tuple[float, float]:
-    """畫格線／找相位時那兩個週期 —— **沒有週期的軸取整張影像的長度**。
-
-    這是 `build_golden_cell` 對一維 layout 的做法（「那一軸就取整張影像的長度
-    當一格 —— 反正它上面沒有相位可言」）。自己再發明一套的話，畫面上的格線
-    跟引擎用的格子會差一個量，而那種 bug 極難發現。
-    """
-    h, w = int(shape[0]), int(shape[1])
-    ux = float(px) if flags[0] and float(px or 0) >= MIN_PERIOD_PX else float(w)
-    uy = float(py) if flags[1] and float(py or 0) >= MIN_PERIOD_PX else float(h)
-    return ux, uy
-
-
-# --------------------------------------------------------------------------- #
-# 數字 → 給人看的字
-# --------------------------------------------------------------------------- #
-def px_text(value: float, used: bool) -> str:
-    """``"40"`` / ``"79.5"`` / ``"not used"`` / ``"—"``。
-
-    小數要留著（``%d`` 會安靜截斷，而 79.5 對 79 在 4000 px 上差 25 px）——
-    所以走 `period2d.fmt_px`，跟模板那條路印的是同一個字。
-    """
-    v = float(value or 0.0)
-    if v < MIN_PERIOD_PX:
-        return PITCH_UNSET
-    return algo_period2d.fmt_px(v) if used else PITCH_NOT_USED
-
-
-def nm_text(value: float, used: bool, nm_per_px: float) -> str:
-    """px × nm/px → ``"0.150 µm"``；**不知道 nm/px 就回空字串**。
-
-    ⚠ **輸入是 nm/px，輸出是 µm**（使用者 2026-09-21 指定）。那不是不一致：
-    機台設定裡的像素大小就是以 nm 講的，而 pitch 這種尺度在廠內是以 µm 報的。
-    換算住在畫面這一層，core 仍然只有 pixel（`docs/FAB-VALIDATION.md` 假設 #2）。
-
-    ⚠ 回空字串而不是 ``"0 µm"``／``"—"``：呼叫端拿到空字串就整欄不放
-    （見模組說明的「單位」那一段）。一個 `0 µm` 看起來像一個量出來的答案。
-    """
-    s = float(nm_per_px or 0.0)
-    v = float(value or 0.0)
-    if s <= 0 or v < MIN_PERIOD_PX or not used:
-        return ""
-    return "%.3f µm" % (v * s / 1000.0)
-
-
-#: 一張圖裡至少要放得下這麼多格，`agreement` 才讀得出「差一點點」。
-#:
-#: ⚠ **這個數字是量出來的，而且它推翻了一個我原本以為成立的假設**（F120，
-#: 2026-09-21）。漂移 ＝ 誤差 × 格數，所以同一個相對誤差在小圖上根本累積不起來：
-#: 真實 pitch 60、故意用 65（差 8.3%）去疊 ——
-#:
-#: =========  ======  ================
-#: 影像        格數    cells agree
-#: =========  ======  ================
-#: 900 px 寬   15      **0.39**（紅，對）
-#: 300 px 寬   5       **0.76**（綠，錯）
-#: =========  ======  ================
-#:
-#: 也就是說**裁太小的時候那個綠燈是假的**。分數本身沒有錯（那幾格在那張小圖上
-#: 真的對得起來），錯的是拿它回答「週期對不對」。所以格數太少要講出來。
-MIN_CELLS_TO_TRUST = 8
-
-#: 最多提幾個候選（畫面上一排，多了就變成一張表）。
-MAX_CANDIDATES = 4
-
-
-def cells_along(shape: Tuple[int, int], px: float, py: float,
-                flags: Tuple[bool, bool]) -> int:
-    """**在用的那幾軸裡，格數最少的那一軸有幾格。**
-
-    ⚠ **不是總格數。** 第一版拿 `GoldenCell.n_cells`（= nx × ny）去判斷，而
-    那答的是另一個問題：300×240 的圖用 65×44 去切是 4×5 ＝ **20 格**，看起來
-    很多 —— 但沿 X 只有 **4** 格，而漂移 ＝ 誤差 × **那一軸的**格數。
-    拿 20 去比門檻的話，最該警告的那張圖不會被警告到。
-    """
-    h, w = int(shape[0]), int(shape[1])
-    counts = []
-    if flags[0] and float(px or 0) >= MIN_PERIOD_PX:
-        counts.append(int(w // float(px)))
-    if flags[1] and float(py or 0) >= MIN_PERIOD_PX:
-        counts.append(int(h // float(py)))
-    return min(counts) if counts else 0
-
-
-def trust_note(n_along: int) -> str:
-    """格數夠不夠讓 `agreement` 說得上話；夠的話回空字串。
-
-    ``n_along`` 是 :func:`cells_along` 的答案（**單軸**，不是總格數）。
-    """
-    n = int(n_along or 0)
-    if n >= MIN_CELLS_TO_TRUST:
-        return ""
-    return ("only %d cells fit along one direction — “cells agree” cannot tell "
-            "a slightly wrong period from a right one at this size. Judge by "
-            "the stacked picture, or measure from a larger area." % n)
-
-
-def candidate_periods(measured: Any, flags: Tuple[bool, bool],
-                      current: Tuple[float, float],
-                      cap: int = MAX_CANDIDATES
-                      ) -> List[Tuple[float, float]]:
-    """「取錯怎麼辦」的答案：**諧波上的其他可能**，點一下就套用。
-
-    取錯幾乎永遠是取到諧波裡的另一個（半週期、兩倍、只有一軸是倍數），而
-    `estimate_period` **本來就把那份清單算出來了**（`MeasuredPeriod.candidates`）
-    —— 它以前算完就被丟掉。分數回答「它為什麼選這個」，這份清單回答
-    「**那我現在該怎麼辦**」，而使用者問的是後者。
-
-    規則：現在用的那一組不列（它已經在畫面上了）、沒在用的軸不列
-    （純 X 的時候提 `60×88` 是沒有意義的）、同一個值只列一次。
-    """
-    cur_x, cur_y = float(current[0] or 0.0), float(current[1] or 0.0)
-    out: List[Tuple[float, float]] = []
-    seen = set()
-    for cx, cy in (getattr(measured, "candidates", None) or []):
-        x = float(cx or 0.0) if flags[0] else cur_x
-        y = float(cy or 0.0) if flags[1] else cur_y
-        if flags[0] and x < MIN_PERIOD_PX:
-            continue
-        if flags[1] and y < MIN_PERIOD_PX:
-            continue
-        if (abs(x - cur_x) < 0.5 and abs(y - cur_y) < 0.5) or (x, y) in seen:
-            continue
-        seen.add((x, y))
-        out.append((x, y))
-        if len(out) >= cap:
-            break
-    return out
-
-
-def candidate_label(px: float, py: float, flags: Tuple[bool, bool]) -> str:
-    """候選鈕上的字 —— **沒在用的軸不寫**（純 X 的時候 `60 × 88` 是噪音）。"""
-    fx = algo_period2d.fmt_px(px)
-    fy = algo_period2d.fmt_px(py)
-    if flags[0] and flags[1]:
-        return "%s × %s" % (fx, fy)
-    return fx if flags[0] else fy
-
-
-def detail_rows(measured: Any, flags: Tuple[bool, bool]
-                ) -> List[Tuple[str, str, str]]:
-    """三票各自的答案 → ``[(方法, X, Y), …]``（Details 那一塊的唯一算法）。
-
-    ⚠ **三票不一致不是錯誤，是關於這張圖的事實。** 投影法看到 30、二維看到
-    60、答案是 60 —— 那句「投影法看到 30」講的是這個 layout 相鄰列交錯，
-    而使用者看得懂那件事。
-    """
-    def cell(v, conf, used):
-        if not used:
-            return "—"
-        if v is None or float(v) < MIN_PERIOD_PX:
-            return "not found"
-        return "%s  (%.0f)" % (algo_period2d.fmt_px(float(v)), float(conf or 0))
-
-    m = measured
-    rows = [
-        ("Projection", cell(getattr(m, "proj_px", None),
-                            getattr(m, "proj_conf_x", 0), flags[0]),
-                       cell(getattr(m, "proj_py", None),
-                            getattr(m, "proj_conf_y", 0), flags[1])),
-        ("2-D autocorr", cell(getattr(m, "ac_px", None),
-                              getattr(m, "ac_conf_x", 0), flags[0]),
-                         cell(getattr(m, "ac_py", None),
-                              getattr(m, "ac_conf_y", 0), flags[1])),
-    ]
-    gx = float(getattr(m, "half_gain_x", 0.0) or 0.0)
-    gy = float(getattr(m, "half_gain_y", 0.0) or 0.0)
-    dx, dy = getattr(m, "doubled", (False, False))
-    rows.append(("Half-period",
-                 ("doubled (+%.2f)" % gx) if dx else
-                 ("no (%+.2f)" % gx if flags[0] else "—"),
-                 ("doubled (+%.2f)" % gy) if dy else
-                 ("no (%+.2f)" % gy if flags[1] else "—")))
-    rows.append(("Used",
-                 algo_period2d.fmt_px(float(getattr(m, "px", 0) or 0))
-                 if flags[0] else "—",
-                 algo_period2d.fmt_px(float(getattr(m, "py", 0) or 0))
-                 if flags[1] else "—"))
-    return rows
-
-
-#: 去掉最外一圈之後，每一軸至少要留下這麼多格才值得去。
-#:
-#: 少於它就不去了 —— 拿掉邊界是為了讓 GC 乾淨，而把 3×3 疊成 1×1 換不到乾淨，
-#: 只換到一個「其實沒有在疊」的 stack。
-MIN_CELLS_AFTER_TRIM = 3
-
-
-def trim_to_inner(shape: Tuple[int, int], px: float, py: float,
-                  origin: Tuple[float, float], flags: Tuple[bool, bool]
-                  ) -> Optional[Tuple[int, int, int, int]]:
-    """**把最外一圈格子切掉**的那一塊（``(x0, y0, x1, y1)``；不值得去回 None）。
-
-    使用者 2026-09-21：「邊界其實我有點不太想放。」而那是量得出來的 ——
-    帶真實掃描邊緣效應（最外 40 px 偏亮／偏暗 ＋ 額外雜訊）的合成圖上：
-    整張疊 `agreement` **0.872**（210 格），去掉最外一圈 **0.980**（156 格）；
-    乾淨影像上兩者都是 0.980，也就是**它在不需要的時候不花任何成本**。
-
-    切的是**沿著格線**的一整圈，不是隨便一圈像素 —— 切完之後相位不變
-    （``origin`` 相對新的左上角變成 0），所以疊出來的還是同一組格子，只是少了
-    貼邊的那些。不在用的軸不切（那一軸一格就是整張影像，切了就什麼都不剩）。
-    """
-    h, w = int(shape[0]), int(shape[1])
-    # ⚠ **沒在用的那一軸，原點是 0。** 這一行跟 `lattice_boxes` 裡的
-    # ``oy = float(origin[1]) if periodic[1] else 0.0`` 是**同一個規則**，而這裡
-    # 本來沒有 —— 於是 X only 模式整個壞掉：相位搜尋在一個「一格就是
-    # 整張高」的軸上也會回一個 `oy`（實測 129），這裡拿它當上邊界，
-    # 而格子是從 y=0 開始、700 高—— **一格都塞不進去**。畫面上看到的是
-    # 格線消失、「0 cells」、一條紅的 `Cells agree 0.00` 跟一句
-    # 「this period is wrong」—— 而那個週期是對的（信心 92）。
-    #
-    # 這是這一輪**第四次**踩到同一種形狀（`_on_axis`、`_draw` 的週期、
-    # 畫的格子跟疊的格子、這裡）：**同一件事在畫面上有兩個算法**。
-    ox = float(origin[0] or 0.0) if flags[0] else 0.0
-    oy = float(origin[1] or 0.0) if flags[1] else 0.0
-    x0, y0, x1, y1 = int(ox), int(oy), w, h
-    if flags[0] and float(px or 0) >= MIN_PERIOD_PX:
-        nx = int((w - int(ox)) // float(px))
-        if nx - 2 < MIN_CELLS_AFTER_TRIM:
-            return None
-        x0 = int(ox + px)
-        x1 = int(ox + px * (nx - 1))
-    if flags[1] and float(py or 0) >= MIN_PERIOD_PX:
-        ny = int((h - int(oy)) // float(py))
-        if ny - 2 < MIN_CELLS_AFTER_TRIM:
-            return None
-        y0 = int(oy + py)
-        y1 = int(oy + py * (ny - 1))
-    if x1 - x0 < 2 or y1 - y0 < 2:
-        return None
-    return (x0, y0, x1, y1)
-
-
-Override = Tuple[Optional[float], Optional[float]]
-
-#: 使用者自己打了一個週期、而且**這張圖沒辦法替它打分**時，那一欄寫什麼。
-#:
-#: ⚠ **不准沿用量出來的那個分數。** 信心量的是「把圖平移這個週期之後跟自己
-#: 有多像」，而那是對**量出來的那個數字**做的。使用者把 40 改成 80 之後還
-#: 掛著 92/100，等於用一個他沒有問過的問題的答案，去背書他剛打進去的數字。
-#:
-#: ⚠ **但「不能沿用」不等於「沒有分數」**（使用者 2026-09-21：「自定義 period
-#: 右上可否也能算 confidence？」）。同一個問題可以**對他打的那個數字重問一次**
-#: —— 那正是 :func:`d4t.core.algo.period.confidence_at`：一樣的投影、一樣的
-#: 自相關，只是在他指定的 lag 上取值，所以兩個數字同尺度、可以直接比。實測
-#: 量到 60 得 92.4，打 59 得 86.6、打 45 得 0.0 —— 打錯的那一刻長條就變紅，
-#: 這比任何一句警告都快。
-#: 這一格因此只剩**打不出分數**的退路（還沒載圖、lag 大過半張圖）。
-#: 字要短：那一格旁邊就是橫條，長句子會被切成「you typ…」（量到過）。
-CONF_TYPED = "yours"
-
-
-def effective_period(measured: Any, override: Override = (None, None)
-                     ) -> Tuple[float, float]:
-    """真正要用的那一組週期：**使用者打的優先，沒打就用量到的**。
-
-    量出來的週期是**預設值不是結論** —— 這句話是 `template_dialog` 定的
-    （使用者原話：有時候他要一個 2× 的大 cell，「例如兩根 MG 才構成他要比的
-    那個單元」）。helper 這邊一字不差地適用，而且更需要：這個視窗的**唯一**
-    輸出就是那個數字，改不動它等於「算錯了只能關掉視窗」。
-    """
-    px = float(getattr(measured, "px", 0.0) or 0.0)
-    py = float(getattr(measured, "py", 0.0) or 0.0)
-    ox, oy = override
-    return (float(ox) if ox else px, float(oy) if oy else py)
-
-
-def pitch_rows(measured: Any, axis: str, nm_per_px: float = 0.0,
-               override: Override = (None, None),
-               typed_conf: Override = (None, None)
-               ) -> List[Tuple[str, str, str, str]]:
-    """``[(方向, px, nm, 信心), …]`` —— 畫面上那張表的**唯一**算法。
-
-    做成純函式（不碰任何 widget）是為了測得動：軸向 × 有沒有 nm × 量不量得到
-    × 有沒有被改過的排列組合各斷言一次，不必為了讀一行字開一次視窗。
-    """
-    px, py = effective_period(measured, override)
-    cx = float(getattr(measured, "conf_x", 0.0) or 0.0)
-    cy = float(getattr(measured, "conf_y", 0.0) or 0.0)
-    # 打進去的那一軸**跳過信心那一關**（使用者明講的一律相信，同
-    # `build_golden_cell` 的 ``given``）—— 拿一個他沒問過的分數去否決他打的
-    # 數字，畫面上會變成「我改了，但它不理我」。
-    typed_x, typed_y = bool(override[0]), bool(override[1])
-    use_x, use_y = axis_flags(axis, px, py,
-                              100.0 if typed_x else cx,
-                              100.0 if typed_y else cy)
-    rows = []
-    for label, value, used, conf, typed in (
-            ("Across (X)", px, use_x, cx, typed_x),
-            ("Down (Y)", py, use_y, cy, typed_y)):
-        got = float(value or 0.0) >= MIN_PERIOD_PX
-        if typed:
-            tc = typed_conf[0 if label.startswith("Across") else 1]
-            conf_text = CONF_TYPED if tc is None else "%.0f / 100" % float(tc)
-        elif got:
-            conf_text = "%.0f / 100" % conf
-        else:
-            conf_text = PITCH_UNSET
-        rows.append((label, px_text(value, used),
-                     nm_text(value, used, nm_per_px), conf_text))
-    return rows
-
-
-# --------------------------------------------------------------------------- #
-# 「這個分數是好是壞」—— 一個橫條的顏色（使用者 2026-09-21：「除了數字外也要
-# 有視覺 UI（橫向長條／綠黃紅）」）
-# --------------------------------------------------------------------------- #
-TONE_GOOD, TONE_WARN, TONE_BAD = "good", "warn", "bad"
 
 #: 那條長條的軌道有多長／多高（像素）。**長度是可讀性，不是裝飾**：
 #: 92 px 的時候 92 分與 100 分在畫面上分不出來（見 :class:`Bar`）。
 BAR_W = 150
 BAR_H = 11
-
-#: 信心的三段。**綠那一段不是 100**：真的有週期的實測落在 87–98，而
-#: 40 以下 `build_golden_cell` 自己就不採用了（`MIN_PERIOD_CONFIDENCE`）。
-#: 中間那一段的意思是「**一定要看下面那張疊出來的 cell**」，不是「壞掉了」。
-CONF_GOOD_FROM = 85.0
-
-#: 疊出來的那幾格彼此對得齊不齊（`golden.stack_agreement`，0–1）。
-#: 綠那一段從 `template_dialog.BLURRED_BELOW` 來 —— **同一個門檻，同一個家**：
-#: 模板那條路說「低於它就是糊的」，helper 沒有理由說另一個數字。
-AGREE_GOOD_FROM = 0.75
-
-
-def conf_tone(value: float) -> str:
-    """信心 0–100 → 綠／黃／紅。"""
-    v = float(value or 0.0)
-    if v >= CONF_GOOD_FROM:
-        return TONE_GOOD
-    if v >= algo_template.MIN_PERIOD_CONFIDENCE:
-        return TONE_WARN
-    return TONE_BAD
-
-
-def agree_tone(value: float) -> str:
-    """一致性 0–1 → 綠／黃／紅（黃紅的界線就是模板那條路的 `BLURRED_BELOW`）。"""
-    v = float(value or 0.0)
-    if v >= AGREE_GOOD_FROM:
-        return TONE_GOOD
-    if v >= BLURRED_BELOW:
-        return TONE_WARN
-    return TONE_BAD
 
 
 class Bar(QWidget):
@@ -843,6 +416,8 @@ class PitchHelperWindow(QMainWindow):
         self._worker: Optional[_PitchWorker] = None
         #: 量尺量到的 ``(axis, 長度 px)``；沒量就 None。
         self._measured: Optional[Tuple[str, float]] = None
+        #: `_fill_warning` 這一輪有沒有話要說 —— 狀態行的判準（見 `verdict`）。
+        self._has_warning = False
 
         root = QWidget(self)
         self.setCentralWidget(root)
@@ -1093,75 +668,177 @@ class PitchHelperWindow(QMainWindow):
         self._clear_ruler()
         self.btn_ruler.setChecked(False)
 
-    @staticmethod
-    def _section(parent: QWidget, text: str) -> QLabel:
-        """一條分段標題（次要色 ＋ 底線）。
-
-        用的是這個 app 自己的 ``paramSection`` 樣式，**不發明第二種分段長相**
-        —— 設定區已經是這個樣子，使用者不必學兩次。它買到的是**節奏**：
-        第一版右欄是五塊東西用 6 px 疊在一起，而「排版很怪」多半就是這個。
-        """
-        lab = QLabel(str(text), parent)
-        lab.setObjectName("paramSection")
-        return lab
-
     def _answer_side(self) -> QWidget:
+        """右欄：**一條 header ＋ 三張卡**（F120 第十七輪）。
+
+        順序是使用者定的：「理想上應該要先有圖（因為你要確認 GC 跟 pitch 是不是
+        正確的），然後中間才是答案」。所以
+
+            header  圖示＋名字  |  現在的狀態
+            卡 1    這看起來像一個 cell 嗎     ← 疊出來的那一格＋它的分數
+            卡 2    The period                ← 答案
+            卡 3    不是這個 cell？            ← 軸向、覆寫、怎麼疊、細節
+
+        ⚠ **一欄只有一種對齊。** 上一版是上半置中、下半靠左，而「排版很奇怪」
+        量出來就是這件事：y=0…158 置中、y=164 以下靠左，眼睛找不到一條穩定的
+        垂直線。現在每張卡內部一律靠左，**只有那個大數字置中** —— 它是結論，
+        該獨佔中軸。
+
+        ⚠ **設定不准住在證據裡。** `Ignore defects` / `Skip edge cells` 本來擠在
+        證據卡的右下角，而它們改的是「下一次怎麼疊」不是「這次疊得怎麼樣」。
+
+        高度是量出來的：這個排法 664 px，而 1366×768 的筆電上右欄約 700。
+        圖獨佔一塊的原版是 742（會被切），並排版是 595。
+        """
         box = QWidget(self)
         # ⚠ **這個寬度是量出來的，不是挑的。** 340 的時候：四顆膠囊擠成兩排、
         # 疊出來那一格跟旁邊的說明**畫在一起**（Qt 在空間不夠時就是會重疊，
-        # 不會報錯 —— 那是版面 bug 最常見的長相）。380 是四顆膠囊排得下、
-        # 150 的 cell ＋ 一致性那一欄也排得下的寬度。
-        # ⚠ 380 現在是**最小**寬不是固定寬（見上面那個 splitter）。原本的量測
-        # 沒有變：340 的時候四顆膠囊擠成兩排、疊出來那一格跟旁邊的說明**畫在
-        # 一起**（Qt 在空間不夠時就是會重疊，不會報錯 —— 那是版面 bug 最常見
-        # 的長相）。
+        # 不會報錯 —— 那是版面 bug 最常見的長相）。380 是膠囊排得下、cell ＋
+        # 一致性那一欄也排得下的寬度，現在是**最小**寬不是固定寬。
         box.setMinimumWidth(380)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setSpacing(8)
+        lay.addWidget(self._header_row(box))
+        lay.addWidget(self._proof_card(box))
+        lay.addWidget(self._period_card(box))
+        lay.addWidget(self._fix_card(box))
+        lay.addStretch(1)
+        return box
 
-        # ---- 答案 ----------------------------------------------------------
-        # **這個視窗只回答一件事**，所以畫面上只有一個東西可以是最大的字。
-        # 這一塊就是那件事：一行 `60 × 44 px`、底下換算成 µm、再底下是兩條
-        # 信心長條。使用者的話：「顯示的 period（結果）要大一點放中間，
-        # 因為是重點」。
-        #
-        # ⚠ 字級走 **QSS 的 objectName**（`pitchAnswer`），不是 `setFont()`
-        # —— theme 的 ``* { font-size }`` 會蓋掉 per-widget 的 QFont，而 Qt
-        # 不會抱怨。F120 連三輪「把答案放大」就是這樣安靜地沒有生效
-        # （量出來一直是 13px，跟旁邊的說明一樣大）。
-        self.grid_answer = QGridLayout()
-        self.grid_answer.setHorizontalSpacing(8)
-        self.grid_answer.setVerticalSpacing(2)
+    def _header_row(self, parent: QWidget) -> QWidget:
+        """圖示＋名字 ｜ 現在的狀態。
+
+        ⚠ **右邊那半不是裝飾。** 畫面上有三條 bar、一張圖、一堆數字，卻沒有
+        任何一個地方用一句話說「所以這次到底成不成立」—— 那就是這一行。而它
+        也是「答案先到、疊圖後到」那兩秒半唯一有話說的地方。
+
+        ⚠ 文字 ＋ 色調**兩個通道**（F117 U13）：顏色是第二個通道，不是唯一的。
+        """
+        row = QWidget(parent)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(2, 0, 2, 0)
+        h.setSpacing(8)
+        icon = QLabel(row)
+        icon.setPixmap(branding.pitch_icon().pixmap(20, 20))
+        self.lab_name = QLabel(WINDOW_TITLE, row)
+        self.lab_name.setObjectName("pitchName")
+        h.addWidget(icon)
+        h.addWidget(self.lab_name)
+        h.addStretch(1)
+        self.lab_state_mark = QLabel("", row)
+        self.lab_state = QLabel("", row)
+        for w in (self.lab_state_mark, self.lab_state):
+            w.setObjectName("pitchState")
+            h.addWidget(w)
+        return row
+
+    def _proof_card(self, parent: QWidget) -> QWidget:
+        """**疊起來的那一格** —— 這個視窗最有說服力的一塊，而它在最上面。
+
+        使用者 2026-09-21：「仿照 AMAT 的 golden cell，將 period 週期用格線切完
+        後，將所有的每個 cell 放在一起，如果取的 period 是完美的，他會有疊加
+        Frame 的效果，GC 影像會很漂亮；如果 period 錯，格線切的差，疊起來就會
+        糊糊的。」2026-09-22：「理想上應該要先有圖。」
+
+        ⚠ **旁邊那個數字是 `agreement` 不是 sharpness**，而那個選擇是量出來的
+        （F40）：`ghosting_score`（銳利度）只看疊完那一張圖，**看不到疊進去的
+        那幾格**，所以分不出「因為對齊了所以銳利」與「因為兩個鬼影各帶一組邊
+        所以銳利」—— 相位錯掉的 stack 會拿到**更高**的分數（實測：錯的 76.1
+        比正確的 68.4 高），而純雜訊在 σ=60 拿 99.4。`stack_agreement` 問的是
+        那幾格**彼此**對得多齊，無量綱、跨影像可比，所以它才是那個可以配門檻
+        的數字。**人眼看那張圖 ＋ 這個數字**，兩個一起才完整。
+        """
+        card = QGroupBox("Does this look like one cell?", parent)
+        lay = QHBoxLayout(card)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(12)
+        self.cell_view = QLabel(card)
+        self.cell_view.setFixedSize(CELL_BOX, CELL_BOX)
+        self.cell_view.setAlignment(Qt.AlignCenter)
+        # ⚠ 線粗與圓角**吃 token**（`hairline` / `radius_sm`），不寫 1px / 4px
+        # —— 同 U12 那條「字級、線粗、圓角只有一個家」（`tests/test_ui_design_
+        # tokens.py` 會擋）。螢幕變了要一起改，而「一起」的前提是只有一個地方。
+        self.cell_view.setStyleSheet(
+            "background:%s;border:%s solid %s;border-radius:%s;color:%s;"
+            % (TOKENS["bg_page"], TOKENS["hairline"], TOKENS["border_default"],
+               TOKENS["radius_sm"], TOKENS["text_hint"]))
+        self.cell_view.setText(PITCH_UNSET)
+        self.cell_view.setToolTip(
+            "Every cell the grid cut, averaged on top of each other. Crisp "
+            "means they landed on each other, so the period is right. Blurred "
+            "or doubled means it is not. Click to see it bigger.")
+        self.cell_view.setCursor(Qt.PointingHandCursor)
+        self.cell_view.mouseReleaseEvent = lambda _e: self.show_cell_big()
+        lay.addWidget(self.cell_view, 0, Qt.AlignTop)
+        side = QVBoxLayout()
+        side.setSpacing(2)
+        cap = QLabel("Cells agree", card)
+        cap.setObjectName("paramHint")
+        side.addWidget(cap)
+        self.bar_agree = Bar(card, width=118)
+        side.addWidget(self.bar_agree)
+        self.lab_stack = QLabel("", card)
+        self.lab_stack.setObjectName("paramHint")
+        self.lab_stack.setWordWrap(True)
+        side.addWidget(self.lab_stack)
+        side.addStretch(1)
+        lay.addLayout(side, 1)
+        return card
+
+    def _period_card(self, parent: QWidget) -> QWidget:
+        """答案本人。
+
+        ⚠ 字級走 **QSS 的 objectName**（`pitchAnswer`），不是 `setFont()`
+        —— theme 的 ``* { font-size }`` 會蓋掉 per-widget 的 QFont，而 Qt
+        不會抱怨。F120 連三輪「把答案放大」就是這樣安靜地沒有生效
+        （量出來一直是 13px，跟旁邊的說明一樣大）。
+        """
+        card = QGroupBox("The period", parent)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(6)
         self._cells: List[List[QLabel]] = []
         self._bars: List[Bar] = []
         self._tags: List[QLabel] = []
-        self.lab_big = QLabel(PITCH_UNSET, box)
+        self.lab_big = QLabel(PITCH_UNSET, card)
         self.lab_big.setObjectName("pitchAnswer")
         self.lab_big.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
-        self.grid_answer.addWidget(self.lab_big, 0, 0, 1, 4)
-        self.lab_um = QLabel("", box)
+        lay.addWidget(self.lab_big)
+        self.lab_um = QLabel("", card)
         self.lab_um.setObjectName("pitchAnswerSub")
         self.lab_um.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
-        self.grid_answer.addWidget(self.lab_um, 1, 0, 1, 4)
-        for _i, axis_name in enumerate(("X", "Y")):
-            tag = QLabel(axis_name, box)
-            tag.setObjectName("pitchAnswerUnit")
-            tag.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        lay.addWidget(self.lab_um)
+        # 兩軸的信心**跟著數字**，而一致性跟著上面那張圖 —— 每一條 bar 跟它
+        # 評的東西在一起。上一版三條擠在證據卡裡，於是「數字的信心」看起來
+        # 像是在評那張圖。
+        self.grid_answer = QGridLayout()
+        self.grid_answer.setHorizontalSpacing(8)
+        self.grid_answer.setVerticalSpacing(2)
+        for i, nm in enumerate(("Repeat along X", "Repeat along Y")):
+            # 那個軸向標籤本人就是這一行標題：`_fill_answer` 靠
+            # `self._tags[i]` 的顯示／隱藏決定「這一軸算不算數」（X only 時
+            # Y 整列要消失）。另外做一個的話那個邏輯只管到一半，而沒被加進
+            # 任何 layout 的那一個會浮在 (0,0) —— 實拍就是一個 `x` 飄在最大
+            # 的那個答案旁邊。
+            tag = QLabel(nm, card)
+            tag.setObjectName("paramHint")
+            tag.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            bar = Bar(card, width=100)
             self._tags.append(tag)
-            bar = Bar(box, width=100)
             self._bars.append(bar)
-            self._cells.append([QLabel(box), QLabel(box)])   # 舊介面的殘留
+            self._cells.append([QLabel(card), QLabel(card)])   # 舊介面的殘留
+            self.grid_answer.addWidget(tag, i, 0)
+            self.grid_answer.addWidget(bar, i, 1)
+        self.grid_answer.setColumnStretch(1, 1)
         lay.addLayout(self.grid_answer)
-
-        # ---- pixel size：**緊貼著它換算出來的那一行** ----------------------
-        # ⚠ 它本來有自己的 `Units` 區段，排在整個面板的最下面 —— 而它產生的
-        # `0.150 µm` 在最上面。量出來是 **552 px**：一個輸入跟它的效果能隔多遠
-        # 就隔多遠，而那個區段標題還跟「疊起來那一格」一樣大聲。
-        # 現在它是 µm 那一行底下一個安靜的小框，沒有標題。
-        unit = QHBoxLayout()
-        unit.addStretch(1)
-        self.spin_nm = QDoubleSpinBox(box)
+        # ---- pixel size ＋ 把答案帶走 ---------------------------------------
+        # ⚠ pixel size **緊貼著它換算出來的那一行**。它本來有自己的 `Units`
+        # 區段，排在整個面板的最下面 —— 而它產生的 `0.150 µm` 在最上面。
+        # 量出來是 **552 px**：一個輸入跟它的效果能隔多遠就隔多遠。
+        tools = QHBoxLayout()
+        tools.setSpacing(6)
+        self.spin_nm = QDoubleSpinBox(card)
         self.spin_nm.setRange(0.0, 1e6)
         self.spin_nm.setDecimals(3)
         self.spin_nm.setSingleStep(0.1)
@@ -1169,97 +846,76 @@ class PitchHelperWindow(QMainWindow):
         # ⚠ **這句話要塞得進那個框。** 原本寫 `pixel size not known`（132 px），
         # 而框裡真正留給字的只有 112 px —— 畫面上長出來的是
         # **`el size not known`**，一句看不懂又有點嚇人的話。
-        # 現在 `set pixel size` 是 84 px，而框加寬到 170（字有 136 px）——
-        # 順便讓最長的真實值 `1234.567 nm/px`（107 px）也排得下，它本來也只差
-        # 5 px 就要被切。
         self.spin_nm.setSpecialValueText("set pixel size")
         self.spin_nm.setKeyboardTracking(False)   # 打字中途不重算
         self.spin_nm.setToolTip(
             "How many nanometres one pixel is, from the tool's settings. Fill "
             "it in and the pitch also comes out in micrometres.")
         # ⚠ **不要跟 Copy 一樣重。** 它是答案的一個附註（「這是用什麼換算的」），
-        # 不是一個動作；滿框的輸入盒擺在信心長條跟 Copy 中間會把答案那一塊
-        # 切成兩半。
+        # 不是一個動作。
         self.spin_nm.setObjectName("pitchPixelSize")
         self.spin_nm.setMaximumWidth(170)
-        self.spin_nm.setAlignment(Qt.AlignCenter)
         self.spin_nm.valueChanged.connect(lambda _v: self._fill_answer())
-        unit.addWidget(self.spin_nm)
-        unit.addStretch(1)
-        lay.addLayout(unit)
-        # **把答案帶得走** —— 而且它要**貼著那個答案**。
-        # 第一版這顆鈕住在下面的 Units 那一段，於是使用者問「copy 是 copy 誰？」
-        # ——  一顆按鈕的意思是它旁邊那個東西，不是它自己的字。
+        tools.addWidget(self.spin_nm)
+        tools.addStretch(1)
         # ⚠ **一軸一顆，而且複製的是光禿禿的數字**（使用者 2026-09-21：
         # 「複製應該要能直接複製數字（不包含單位），X 跟 Y 都要有複製鍵」）。
         # 那一句指出了一件很具體的事：這個數字的去處是 `Cell W` / `Cell H`
         # **兩個各自的輸入框**，而原本那顆 Copy 給的是
         # `X 60 px (0.150 µm)  Y 44 px (0.110 µm)` —— **一個貼進任何一格都會
         # 被拒絕的字串**。能帶走答案跟能用答案是兩回事。
-        row_copy = QHBoxLayout()
-        row_copy.setSpacing(6)
-        row_copy.addStretch(1)
         self._copy_buttons: List[QPushButton] = []
         for i, axis_name in enumerate(("X", "Y")):
-            b = GlyphButton("copy", "Copy %s" % axis_name, parent=box)
+            b = GlyphButton("copy", "Copy %s" % axis_name, parent=card)
             b.setProperty("variant", "secondary")
             b.setMaximumWidth(108)
             b.clicked.connect(lambda _c=False, k=i: self.copy_axis(k))
-            row_copy.addWidget(b)
+            tools.addWidget(b)
             self._copy_buttons.append(b)
-        row_copy.addStretch(1)
-        lay.addLayout(row_copy)
+        lay.addLayout(tools)
         # 舊名字留著（測試與 `_fill_answer` 讀它），指向 X 那一顆。
         self.btn_copy = self._copy_buttons[0]
         # **「然後呢」要有人講。** 這個視窗的產出是一個**要拿去別處用**的數字，
-        # 而畫面上本來沒有任何一句說它要貼到哪 —— 使用者拿到答案之後還得自己
-        # 想起來 Studio 裡那一格叫什麼。
-        # ⚠ 這一句**只在有答案的時候出現**（同警告條那條規矩：一塊永遠在那裡、
-        # 內容通常沒用的東西，教會使用者不要看它）。名字是**真的那個名字**：
+        # 而畫面上本來沒有任何一句說它要貼到哪。名字是**真的那個名字**：
         # `template_dialog` 的視窗標題是 "Template & regions"，那兩格叫
         # `Cell W` / `Cell H` —— 見 `NEXT_STEP` 的說明（我第一版寫錯過）。
-        self.lab_next = QLabel(NEXT_STEP, box)
+        self.lab_next = QLabel(NEXT_STEP, card)
         self.lab_next.setObjectName("paramHint")
-        self.lab_next.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
         self.lab_next.setWordWrap(True)
         self.lab_next.setVisible(False)
         lay.addWidget(self.lab_next)
+        return card
 
-        # ---- 憑什麼相信它：疊出來的 Golden Cell -----------------------------
-        # ⚠ **它要緊貼著答案，因為它們回答的是同一個問題。**
-        # 本來上面是「60 × 44 px，信心 92/93」，而這一塊在 **377 px 之下**，
-        # 中間隔著兩個設定區 —— 使用者要判斷「這個數字對不對」得上看、下看、
-        # 再上看。信心長條跟這張疊出來的圖是一組證據，不是兩件事。
-        #
-        # ⚠ 標題走 `_section`（跟其他段同一種長相），卡片本身**不帶標題**。
-        # 第一版是 `QGroupBox` 自己的標題樣式，於是同一個畫面上有兩種分段長相
-        # —— 而「排版很怪」多半就是這種不一致累積出來的。
-        lay.addWidget(self._section(box, "Stacked cell — sharp means it is right"))
-        lay.addWidget(self._proof_box(box))
+    def _fix_card(self, parent: QWidget) -> QWidget:
+        """不對的話怎麼改 —— 軸向、覆寫、候選，以及**怎麼疊**。
 
-        # ---- 哪個方向 -----------------------------------------------------
-        lay.addWidget(self._section(box, "Which way it repeats"))
+        ⚠ `Ignore defects` / `Skip edge cells` 住在這裡而不是證據卡裡：它們改
+        的是「下一次怎麼疊」，是設定不是證據。它們本來擠在證據卡的右下角，
+        而那讓那張卡左右兩半高度對不起來。
+        """
+        card = QGroupBox("Not the cell you want?", parent)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(6)
         self.chips_axis = ChoiceChips(AXES, AXIS_ICONS, AXIS_BOTH,
                                       helps=AXIS_HELP, labels=AXIS_LABELS,
-                                      parent=box)
+                                      parent=card)
         self.chips_axis.changed.connect(self._on_axis)
         lay.addWidget(self.chips_axis)
 
-        # ---- 不對的話自己改 -----------------------------------------------
-        lay.addWidget(self._section(box, "Not the cell you want?"))
         fix = QHBoxLayout()
         fix.setSpacing(4)
-        self.spin_px = self._period_spin(box, "across")
-        self.spin_py = self._period_spin(box, "down")
+        self.spin_px = self._period_spin(card, "across")
+        self.spin_py = self._period_spin(card, "down")
         fix.addWidget(self.spin_px)
-        fix.addWidget(QLabel("×", box))
+        fix.addWidget(QLabel("×", card))
         fix.addWidget(self.spin_py)
-        self.btn_double = QPushButton("×2", box)
+        self.btn_double = QPushButton("×2", card)
         self.btn_double.setToolTip(
             "Double both — for when one cell of yours is two of the repeats it "
             "measured (two MG lines making the unit you compare).")
         self.btn_double.clicked.connect(self._on_double)
-        self.btn_reset = GlyphButton("undo", "Reset", parent=box)
+        self.btn_reset = GlyphButton("undo", "Reset", parent=card)
         self.btn_reset.setToolTip("Back to the measured period.")
         self.btn_reset.clicked.connect(self._on_reset)
         fix.addStretch(1)      # 兩格週期靠左成一對，×2／Reset 靠右
@@ -1274,109 +930,27 @@ class PitchHelperWindow(QMainWindow):
         # ---- 取錯了怎麼辦：諧波上的其他可能，點一下就套用 -------------------
         self.row_try = QHBoxLayout()
         self.row_try.setSpacing(4)
-        self.lab_try = QLabel("Or try", box)
+        self.lab_try = QLabel("Or try", card)
         self.lab_try.setObjectName("paramHint")
         self.row_try.addWidget(self.lab_try)
         self._try_buttons: List[QPushButton] = []
         self.row_try.addStretch(1)
         lay.addLayout(self.row_try)
 
-        # ---- 細節：**預設收起來** -------------------------------------------
-        # 使用者要得到「每個方法的分數」，但同一輪也說了「不要看一堆文字」。
-        # 兩件事只有一種解法：**要查的那天它在，平常不佔畫面。**
-        self.btn_details = QPushButton("▸  Details", box)
-        self.btn_details.setProperty("variant", "secondary")
-        # ⚠ **不要橫跨整欄。** 量出來它本來是 411 × 30 = **13.7 : 1** ——
-        # 而一個又寬又扁的盒子會讓裡面的字**看起來被拉長**（實際上沒有：
-        # 量過字型的 stretch 是 1.0000，QSS 裡也沒有 font-stretch）。
-        # 使用者回報「按鈕有點扁、文字有點被拉長」，病根是這個長寬比。
-        self.btn_details.setMaximumWidth(150)
-        self.btn_details.setCheckable(True)
-        self.btn_details.setStyleSheet("text-align:left;")
-        self.btn_details.toggled.connect(self._on_details)
-        lay.addWidget(self.btn_details)
-        self.details = QLabel("", box)
-        self.details.setObjectName("paramHint")
-        self.details.setTextFormat(Qt.RichText)
-        # ⚠ 沒有這一行的話那段說明會被右邊界切掉（"the number ir…"）。
-        self.details.setWordWrap(True)
-        self.details.setVisible(False)
-        lay.addWidget(self.details)
-        lay.addStretch(1)
-        return box
-
-    def _proof_box(self, parent: QWidget) -> QWidget:
-        """**疊起來的那一格** —— 這個視窗最有說服力的一塊。
-
-        使用者 2026-09-21：「仿照 AMAT 的 golden cell，將 period 週期用格線切完
-        後，將所有的每個 cell 放在一起，如果取的 period 是完美的，他會有疊加
-        Frame 的效果，GC 影像會很漂亮；如果 period 錯，格線切的差，疊起來就會
-        糊糊的。」
-
-        ⚠ **旁邊那個數字是 `agreement` 不是 sharpness**，而那個選擇是量出來的
-        （F40）：`ghosting_score`（銳利度）只看疊完那一張圖，**看不到疊進去的
-        那幾格**，所以分不出「因為對齊了所以銳利」與「因為兩個鬼影各帶一組邊
-        所以銳利」—— 相位錯掉的 stack 會拿到**更高**的分數（實測：錯的 76.1
-        比正確的 68.4 高），而純雜訊在 σ=60 拿 99.4。`stack_agreement` 問的是
-        那幾格**彼此**對得多齊，無量綱、跨影像可比，所以它才是那個可以配門檻
-        的數字。**人眼看那張圖 ＋ 這個數字**，兩個一起才完整。
-        """
-        box = QGroupBox(parent)            # 無標題：標題是上面那一條 `_section`
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(10)
-        self.cell_view = QLabel(box)
-        self.cell_view.setFixedSize(CELL_BOX, CELL_BOX)
-        self.cell_view.setAlignment(Qt.AlignCenter)
-        # ⚠ 線粗與圓角**吃 token**（`hairline` / `radius_sm`），不寫 1px / 4px
-        # —— 同 U12 那條「字級、線粗、圓角只有一個家」（`tests/test_ui_design_
-        # tokens.py` 會擋）。螢幕變了要一起改，而「一起」的前提是只有一個地方。
-        self.cell_view.setStyleSheet(
-            "background:%s;border:%s solid %s;border-radius:%s;color:%s;"
-            % (TOKENS["bg_page"], TOKENS["hairline"], TOKENS["border_default"],
-               TOKENS["radius_sm"], TOKENS["text_hint"]))
-        self.cell_view.setText("—")
-        self.cell_view.setToolTip(
-            "Every cell the grid cut, averaged on top of each other. Crisp "
-            "means they landed on each other, so the period is right. Blurred "
-            "or doubled means it is not. Click to see it bigger.")
-        self.cell_view.setCursor(Qt.PointingHandCursor)
-        self.cell_view.mouseReleaseEvent = lambda _e: self.show_cell_big()
-        lay.addWidget(self.cell_view)
-        side = QVBoxLayout()
-        side.setSpacing(2)
-        for i, nm in enumerate(("Repeat along X", "Repeat along Y")):
-            # 那個軸向標籤本人就是這一行標題：`_fill_answer` 靠
-            # `self._tags[i]` 的顯示／隱藏決定「這一軸算不算數」（X only 時
-            # Y 整列要消失）。另外做一個的話那個邏輯只管到一半，而沒被加進
-            # 任何 layout 的那一個會浮在 (0,0) —— 實拍就是一個 `x` 飄在最大
-            # 的那個答案旁邊。
-            self._tags[i].setText(nm)
-            self._tags[i].setObjectName("paramHint")
-            self._tags[i].setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            side.addWidget(self._tags[i])
-            side.addWidget(self._bars[i])
-        cap = QLabel("Cells agree", box)
-        cap.setObjectName("paramHint")
-        side.addWidget(cap)
-        self.bar_agree = Bar(box, width=118)
-        side.addWidget(self.bar_agree)
-        self.lab_stack = QLabel("", box)
-        self.lab_stack.setObjectName("paramHint")
-        self.lab_stack.setWordWrap(True)
-        side.addWidget(self.lab_stack)
+        # ---- 怎麼疊 ＋ 細節：同一排（那一排本來各佔一行，花掉 40 px）-------
+        last = QHBoxLayout()
+        last.setSpacing(14)
         # **大圖中間常常就是缺陷本體，而 mean 會把它抹進 GC。** median 對稀疏
         # 缺陷免疫（`golden.stack_cells` 的 `method`），所以那是一個勾選，
         # 不是一個要去別的地方改的設定。
-        self.chk_median = QCheckBox("Ignore defects", box)
+        self.chk_median = QCheckBox("Ignore defects", card)
         self.chk_median.setToolTip(
             "Stack with the median instead of the mean. A defect sitting in "
             "one cell then does not smear into the stacked picture.")
         self.chk_median.toggled.connect(lambda _on: self.remeasure(reuse=True))
-        side.addWidget(self.chk_median)
         # 邊界那一圈：**量出來的**（帶掃描邊緣效應的合成圖 0.872 → 0.980，
         # 乾淨影像 0.980 → 0.980），而使用者也說「不太想放」。所以預設打開。
-        self.chk_edges = QCheckBox("Skip edge cells", box)
+        self.chk_edges = QCheckBox("Skip edge cells", card)
         self.chk_edges.setChecked(True)
         self.chk_edges.setToolTip(
             "Leave out the ring of cells touching the image border. The scan "
@@ -1384,10 +958,32 @@ class PitchHelperWindow(QMainWindow):
             "those cells drag the stacked picture down. Costs nothing on a "
             "clean image.")
         self.chk_edges.toggled.connect(lambda _on: self.remeasure(reuse=True))
-        side.addWidget(self.chk_edges)
-        side.addStretch(1)
-        lay.addLayout(side, 1)
-        return box
+        last.addWidget(self.chk_median)
+        last.addWidget(self.chk_edges)
+        last.addStretch(1)
+        # ---- 細節：**預設收起來** -------------------------------------------
+        # 使用者要得到「每個方法的分數」，但同一輪也說了「不要看一堆文字」。
+        # 兩件事只有一種解法：**要查的那天它在，平常不佔畫面。**
+        self.btn_details = QPushButton("▸  Details", card)
+        self.btn_details.setProperty("variant", "secondary")
+        # ⚠ **不要橫跨整欄。** 量出來它本來是 411 × 30 = **13.7 : 1** ——
+        # 而一個又寬又扁的盒子會讓裡面的字**看起來被拉長**（實際上沒有：
+        # 量過字型的 stretch 是 1.0000，QSS 裡也沒有 font-stretch）。
+        # 使用者回報「按鈕有點扁、文字有點被拉長」，病根是這個長寬比。
+        self.btn_details.setMaximumWidth(124)
+        self.btn_details.setCheckable(True)
+        self.btn_details.setStyleSheet("text-align:left;")
+        self.btn_details.toggled.connect(self._on_details)
+        last.addWidget(self.btn_details)
+        lay.addLayout(last)
+        self.details = QLabel("", card)
+        self.details.setObjectName("paramHint")
+        self.details.setTextFormat(Qt.RichText)
+        # ⚠ 沒有這一行的話那段說明會被右邊界切掉（"the number ir…"）。
+        self.details.setWordWrap(True)
+        self.details.setVisible(False)
+        lay.addWidget(self.details)
+        return card
 
     def _period_spin(self, box: QWidget, axis: str) -> QDoubleSpinBox:
         """一格「我自己來」的週期。**0 ＝ 沒打，用量到的那個。**
@@ -1713,6 +1309,9 @@ class PitchHelperWindow(QMainWindow):
             rows[used[0]][1] != PITCH_UNSET else PITCH_UNSET)
         ums = [rows[i][2] for i in used if rows[i][2]]
         self.lab_um.setText(" × ".join(ums).replace(" µm ×", " ×") if ums else "")
+        # 沒填 pixel size 就沒有這一行 —— 一個空著的標籤照樣佔一行高，而那一行
+        # 在大數字底下看起來像「這裡本來該有東西」。
+        self.lab_um.setVisible(bool(ums))
         # **按鈕自己講它會複製什麼** —— 「copy 是 copy 誰？」的另一半答案。
         what = self.answer_text()
         self.lab_next.setVisible(bool(what))
@@ -1891,7 +1490,8 @@ class PitchHelperWindow(QMainWindow):
         cell = getattr(gc, "cell", None) if gc is not None else None
         if cell is None or np.asarray(cell).size == 0:
             self.cell_view.setPixmap(QPixmap())
-            self.cell_view.setText("—")
+            self.cell_view.setFixedSize(CELL_BOX, CELL_BOX)
+            self.cell_view.setText(PITCH_UNSET)
             # ⚠ **還沒疊過的時候不畫那條軌道**（`set_text_only`）。
             # 這一行本來是 `set_value(0.0, …)`，而自從 0 分改成畫一顆點之後，
             # 「沒有東西可疊」就跟「疊了，而它们完全對不起來」畫成同一個樣子 ——
@@ -1899,7 +1499,19 @@ class PitchHelperWindow(QMainWindow):
             self.bar_agree.set_text_only("")
             self.lab_stack.setText("")
             return
-        self.cell_view.setPixmap(_pixmap(np.asarray(cell), CELL_BOX))
+        # ⚠ **格子照 cell 的長寬比，不硬塞正方形。** 60×44 放進一個正方形，
+        # 上下各留一條白邊 —— 而那條白邊會被讀成「cell 比實際高」，也就是說謊。
+        #
+        # ⚠ **而那個比例要收在一個 `CELL_BOX` 見方的框裡，不是只縮寬度。**
+        # 純 X 的 layout（直條）一格是 48 × 480 —— 只算高度的話那一格會長到
+        # 1650 px，把整張卡撐爛，而圖根本畫不出來。這是 `_pixmap` 裡
+        # `KeepAspectRatio` 已經在做的同一件事，這裡只是讓**框**跟上它。
+        arr = np.asarray(cell)
+        h, w = arr.shape[:2]
+        scale = float(CELL_BOX) / float(max(h, w) or 1)
+        self.cell_view.setFixedSize(max(24, int(round(w * scale))),
+                                    max(24, int(round(h * scale))))
+        self.cell_view.setPixmap(_pixmap(arr, CELL_BOX))
         agree = float(getattr(gc, "agreement", 0.0) or 0.0)
         self.bar_agree.set_value(agree, agree_tone(agree), "%.2f" % agree)
         n = int(getattr(gc, "n_cells", 0) or 0)
@@ -1971,6 +1583,58 @@ class PitchHelperWindow(QMainWindow):
         text = "  ·  ".join(str(s) for s in lines if str(s).strip())
         self.warn.setText(("⚠  " + text) if text else "")
         self.warn.setVisible(bool(text))
+        # ⚠ **狀態行讀的就是這一份，不另外算第二份。** 這個 repo 為「同一件事
+        # 有兩個算法」付過太多次錢了；而且這一份剛好就是對的判準 —— 見
+        # `VERDICT_CHECK` 的說明（半週期疊起來照樣很齊）。
+        self._has_warning = bool(text)
+        self._fill_state()
+
+    def verdict(self) -> Tuple[str, str]:
+        """(色調, 那句話) —— **這一行說的是「所以這次到底成不成立」**。
+
+        ⚠ `good` 的條件是「**一個警告都沒有**」，不是「分數夠高」：一個錯的
+        週期（真正週期的一半）每一格都是半個 cell，彼此照樣對得很齊，
+        `Cells agree` 會很高。那一刻給綠勾等於替一個可能錯的答案背書。
+        """
+        if self._work is None:
+            return "", ""
+        if self._m is None:
+            return TONE_WARN if self._worker is None else "busy", (
+                "" if self._worker is None else VERDICT_BUSY_PERIOD)
+        if self._flags() == (False, False):
+            return TONE_BAD, VERDICT_NONE
+        if self._gc is None:
+            return "busy", VERDICT_BUSY_STACK
+        # ⚠ **疊不起來的時候先說疊不起來，就算那個數字是使用者自己打的。**
+        # 「Using your period」是真的，但它是一句中性的話 —— 實拍過：使用者
+        # 打了 37，`Cells agree` 紅成 0.44，而最上面那一行還是灰色的「在用你
+        # 的週期」。那一行的工作是**一眼的結論**，它不能在證據已經紅了的時候
+        # 說一句不表態的話。
+        agree = float(getattr(self._gc, "agreement", 0.0) or 0.0)
+        tone = agree_tone(agree)
+        if tone != TONE_GOOD:
+            return tone, VERDICT_BLURRED
+        if any(self.override()):
+            return "busy", VERDICT_TYPED
+        return (TONE_WARN, VERDICT_CHECK) if self._has_warning \
+            else (TONE_GOOD, VERDICT_OK)
+
+    #: 狀態行的符號。**文字 ＋ 色調是兩個通道**（F117 U13）—— 顏色是第二個，
+    #: 不是唯一的，所以這個符號也不能是唯一的差別。
+    STATE_MARKS = {TONE_GOOD: "✓", TONE_WARN: "⚠", TONE_BAD: "⚠", "busy": "◐"}
+
+    def _fill_state(self) -> None:
+        tone, text = self.verdict()
+        self.lab_state.setText(text)
+        self.lab_state_mark.setText(self.STATE_MARKS.get(tone, "") if text
+                                    else "")
+        hexs = {TONE_GOOD: TOKENS["success_text"],
+                TONE_WARN: TOKENS["warning"],
+                TONE_BAD: TOKENS["danger_text"]}.get(tone,
+                                                     TOKENS["text_secondary"])
+        for w in (self.lab_state, self.lab_state_mark):
+            w.setStyleSheet("color:%s;" % hexs)
+            w.setVisible(bool(text))
 
     def _say_caption(self, text: str) -> None:
         """圖底下那一行字 —— **只有這一支寫它**。

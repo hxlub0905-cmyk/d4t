@@ -1271,6 +1271,12 @@ QLabel#paramStepHelp { color: $text_secondary; font-size: $font_small; }
 /* -- the one answer on screen (F120 pitch helper) ----------------------- */
 /* Has to go through QSS, not setFont(): the `*` rule above sets font-size,
    and a stylesheet font-size beats a per-widget QFont. */
+/* The right column's header: the tool's own name on the left, how this run is
+   going on the right. One row, not two — stacking them costs 18px, and on a
+   1366x768 laptop (with the 125% scaling that is normal in a fab) the column
+   only has about 700px to give. */
+QLabel#pitchName { font-size: $font_title; font-weight: 700; }
+QLabel#pitchState { font-weight: 600; }
 QLabel#pitchAnswer { color: $text_primary; font-size: $font_answer; font-weight: 700; }
 QLabel#pitchAnswerSub { color: $text_secondary; font-size: $font_title; }
 QLabel#pitchAnswerUnit { color: $text_hint; font-size: $font_small; font-weight: 600; }

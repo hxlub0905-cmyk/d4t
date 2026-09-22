@@ -997,20 +997,15 @@ def test_the_copy_button_sits_with_the_thing_it_copies(win, ph, app):
     win.resize(1180, 780)
     win.show()
     app.processEvents()
-    # ⚠ 這一條本來寫的是 `answer < copy < units`，而 `units` 是「最底下那個
-    # 區段」的代名詞。第十輪把 pixel size 搬到答案裡面之後那個代名詞就不成立了
-    # —— **但這一條要守的事沒有變**：Copy 要待在答案那一塊裡，不是被推到某個
-    # 區段後面。所以改問「它在第一條區段標題之前嗎」，那才是「同一塊」的意思。
-    from PySide6.QtWidgets import QLabel
-
-    def top(w):
-        return w.mapTo(win, w.rect().topLeft()).y()
-
-    first_section = min(
-        top(lab) for lab in win.findChildren(QLabel)
-        if lab.objectName() == "paramSection" and not lab.isHidden())
-    assert top(win.lab_big) < top(win.btn_copy) < first_section, (
-        top(win.lab_big), top(win.btn_copy), first_section)
+    # ⚠ 這一條的**寫法**改過兩次，而它守的事一次都沒變。
+    # 第一版：`answer < copy < units`（`units` 是最底下那個區段）。
+    # 第二版：「它在第一條區段標題之前嗎」—— 第十輪把 pixel size 搬進答案之後。
+    # 現在：**同一張卡**。第十七輪把右欄改成三張帶標題的卡之後，`paramSection`
+    # 那種分段標題一條都不剩了，而「在同一張卡裡」本來就是「同一塊」最直接的
+    # 講法 —— 比兩個 y 座標的大小關係強，因為它不會因為誰上誰下而失效。
+    assert win.btn_copy.parentWidget() is win.lab_big.parentWidget(), (
+        "Copy 跟答案不在同一張卡裡",
+        win.btn_copy.parentWidget(), win.lab_big.parentWidget())
 
 
 def test_the_copy_button_says_what_it_will_copy(win, ph):
@@ -1417,29 +1412,37 @@ def test_the_evidence_sits_with_the_answer(win, ph):
     win._on_done(*_run(win, img), "")
     win.resize(1180, 780)
     win.show()
-    # ⚠ 量到**那張卡的上緣**，不是量到 `bar_agree`。第十二輪把兩條信心條搬
-    # 進卡裡之後，`Cells agree` 自然往下移了兩列 —— 那不是「證據變遠了」，
-    # 是「卡裡的證據變多了」。量一個會被卡片內容影響的點，守的就不是這件事。
-    card = win.cell_view.parentWidget()
-    gap = (card.mapTo(win, card.rect().topLeft()).y()
-           - win.lab_big.mapTo(win, win.lab_big.rect().center()).y())
-    assert 0 < gap < 300, ("答案跟證據離太遠", gap)
+    # ⚠ **方向不是不變量，相鄰才是。** 第十七輪之後圖在上、數字在下（使用者
+    # 2026-09-22：「理想上應該要先有圖，因為你要確認 GC 跟 pitch 是不是正確
+    # 的，然後中間才是答案」）。所以量的是「兩張卡之間夾了多少東西」——
+    # 相鄰的兩張卡之間只該有版面的間距。
+    proof = win.cell_view.parentWidget()
+    answer = win.lab_big.parentWidget()
+    assert proof is not answer, "證據跟答案是兩張卡"
+    gap = (answer.mapTo(win, answer.rect().topLeft()).y()
+           - proof.mapTo(win, proof.rect().bottomLeft()).y())
+    assert 0 <= gap < 40, ("證據跟答案中間夾了東西", gap)
 
 
 def test_the_pixel_size_sits_with_what_it_converts(win, ph):
     """⚠ 它本來有自己的 `Units` 區段排在最下面，而它產生的 µm 在最上面 ——
     量出來是 552 px。一個輸入跟它的效果能隔多遠就隔多遠。"""
-    from PySide6.QtWidgets import QLabel
-
     def top(w):
         return w.mapTo(win, w.rect().topLeft()).y()
 
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    # ⚠ **要先填 pixel size。** µm 那一行沒東西的時候是**隱藏**的（第十七輪：
+    # 一個空著的標籤照樣佔一行高，而那一行在大數字底下看起來像「這裡本來該
+    # 有東西」），而量一個隱藏元件的位置量不到任何東西。
+    win.spin_nm.setValue(2.5)
     win.resize(1180, 780)
     win.show()
+    assert win.lab_um.isVisible() and win.lab_um.text().strip()
     assert abs(top(win.spin_nm) - top(win.lab_um)) < 80, "要貼著 µm 那一行"
-    titles = [lab.text() for lab in win.findChildren(QLabel)
-              if lab.objectName() == "paramSection" and not lab.isHidden()]
-    assert "Units" not in titles, ("一個輸入框不值一條區段標題", titles)
+    # 「一個輸入框不值一條區段標題」現在有更強的講法：**它跟 µm 在同一張卡**。
+    assert win.spin_nm.parentWidget() is win.lab_um.parentWidget()
 
 
 def test_the_stacked_picture_does_not_overlap_the_column_beside_it(win, ph):
@@ -1455,7 +1458,10 @@ def test_the_stacked_picture_does_not_overlap_the_column_beside_it(win, ph):
     win.show()
     pic = win.cell_view
     right_edge = pic.mapTo(win, pic.rect().topRight()).x()
-    for w in (win.bar_agree, win.lab_stack, win.chk_median, win.chk_edges):
+    # ⚠ `chk_median` / `chk_edges` 第十七輪搬出這張卡了（它們改的是「下一次
+    # 怎麼疊」，是設定不是證據），所以不在這一份名單裡 —— 它們現在根本不在
+    # 圖的旁邊。守它們的是 `test_the_stacking_settings_are_not_evidence`。
+    for w in (win.bar_agree, win.lab_stack):
         x = w.mapTo(win, w.rect().topLeft()).x()
         assert x - right_edge >= 8, (w.objectName() or type(w).__name__,
                                      x, right_edge)
@@ -1776,3 +1782,197 @@ def test_the_window_is_called_only_by_its_own_name(win, ph):
     """
     assert win.windowTitle() == ph.WINDOW_TITLE == "Pitch helper"
     assert "d4t" not in win.windowTitle()
+
+
+# --------------------------------------------------------------------------- #
+# 19. 右欄重排：**先看圖、中間是答案、下面才是設定**（F120 第十七輪，
+#     使用者 2026-09-22：「理想上應該要先有圖…然後中間才是答案」）
+# --------------------------------------------------------------------------- #
+def _cards(win):
+    """右欄由上而下的那幾張卡。"""
+    from PySide6.QtWidgets import QGroupBox
+    side = win.split.widget(1)
+    got = [c for c in side.findChildren(QGroupBox) if not c.isHidden()]
+    return sorted(got, key=lambda c: c.mapTo(side, c.rect().topLeft()).y())
+
+
+def test_the_column_reads_picture_then_answer_then_settings(win, ph, app):
+    """使用者的順序，而理由是他給的：**要先確認 GC 跟 pitch 是不是正確的。**"""
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.resize(1180, 780)
+    win.show()
+    app.processEvents()
+    cards = _cards(win)
+    assert len(cards) == 3, [c.title() for c in cards]
+    assert cards[0] is win.cell_view.parentWidget(), "第一張要是那張圖"
+    assert cards[1] is win.lab_big.parentWidget(), "第二張要是答案"
+    assert cards[2] is win.chips_axis.parentWidget(), "第三張才是設定"
+    # 每一張都要有名字 —— 一張沒有標題的卡等於一個沒有人介紹的區塊。
+    assert all(c.title().strip() for c in cards), [c.title() for c in cards]
+
+
+def test_the_stacking_settings_are_not_evidence(win, ph):
+    """⚠ `Ignore defects` / `Skip edge cells` 改的是「**下一次**怎麼疊」。
+
+    它們本來擠在證據卡的右下角，於是那張卡左右兩半高度對不起來，而且一個
+    設定長得像一個結論。
+    """
+    proof = win.cell_view.parentWidget()
+    for chk in (win.chk_median, win.chk_edges):
+        assert chk.parentWidget() is not proof, chk.text()
+    assert win.chk_median.parentWidget() is win.chips_axis.parentWidget()
+
+
+def test_only_the_answer_is_centred(win, ph, app):
+    """⚠ **一欄只有一種對齊。**
+
+    上一版量出來是 y=0…158 置中、y=164 以下靠左 —— 眼睛找不到一條穩定的垂直
+    線，而使用者說的「排版很奇怪」有一半是這件事。現在每張卡內部一律靠左，
+    只有那個大數字（跟它底下的 µm）置中：它是結論，該獨佔中軸。
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QLabel
+
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.resize(1180, 780)
+    win.show()
+    app.processEvents()
+    side = win.split.widget(1)
+    centred = [lab for lab in side.findChildren(QLabel)
+               if not lab.isHidden() and int(lab.alignment()) & int(Qt.AlignHCenter)
+               and lab.text().strip()]
+    assert set(centred) <= {win.lab_big, win.lab_um, win.cell_view}, (
+        [lab.text()[:24] for lab in centred])
+
+
+def test_the_cell_picture_keeps_the_cell_shape(win, ph):
+    """⚠ **不硬塞正方形。** 60×44 放進一個正方形，上下各留一條白邊 ——
+    而那條白邊會被讀成「cell 比實際高」，也就是說謊。"""
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    cell = win._gc.cell
+    want = cell.shape[0] / cell.shape[1]
+    got = win.cell_view.height() / win.cell_view.width()
+    assert abs(got - want) < 0.05, (got, want, win.cell_view.size())
+    # ⚠ **而那個比例要收在一個 `CELL_BOX` 見方的框裡。** 純 X 的 layout
+    # （直條）一格是 48 × 480 —— 只算高度的話那一格會長到 1650 px，把整張卡
+    # 撐爛，而圖根本畫不出來。實拍過。
+    assert max(win.cell_view.width(), win.cell_view.height()) <= ph.CELL_BOX
+    strips = np.clip(60 + 80 * ((np.mgrid[0:480, 0:600][1] % 48) < 22), 0,
+                     255).astype(np.uint8)
+    win.set_image(strips, "stripes.tif")
+    win.chips_axis.set_text(ph.AXIS_X)
+    win._on_axis(ph.AXIS_X)
+    win._on_done(*_run(win, strips), "")
+    assert win._gc.cell.shape[0] > win._gc.cell.shape[1], "這一格是直的"
+    assert max(win.cell_view.width(), win.cell_view.height()) <= ph.CELL_BOX, (
+        "直條的那一格把卡片撐爛了", win.cell_view.size())
+    # 沒有東西可疊的時候回到方的（不然上一張圖的高度會留著）。
+    win.set_image(tiles(px=60, py=44), "b.tif")
+    win._on_done(None, None, "")
+    win._gc = None
+    win._fill_stack()
+    assert win.cell_view.width() == win.cell_view.height() == ph.CELL_BOX
+
+
+def test_the_right_column_fits_a_768_laptop(win, ph, app):
+    """⚠ **量，不要猜。** 圖獨佔一塊的原版是 742 px，而 1366×768 的筆電上
+    右欄只有約 700 —— 最底下那張卡會被切掉，而那正是「發現不對、要改」的
+    地方。先看圖、然後得捲下去才能改，那條路等於斷了。"""
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.resize(1180, 780)
+    win.show()
+    app.processEvents()
+    want = win.split.widget(1).sizeHint().height()
+    assert want <= 700, ("右欄長太高了，768 的筆電上要捲", want)
+
+
+# --------------------------------------------------------------------------- #
+# 20. 狀態行（使用者 2026-09-22：「要有個標題或一個東西在右側最上面」）
+# --------------------------------------------------------------------------- #
+def test_the_header_says_the_name_and_how_it_is_going(win, ph, app):
+    """左邊圖示＋名字（使用者喜歡的那個），右邊狀態（我加的那個）。**同一排**
+    —— 疊成兩行要 682 px，而右欄只有約 700。"""
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    win.resize(1180, 780)
+    win.show()
+    app.processEvents()
+    assert win.lab_name.text() == ph.WINDOW_TITLE
+    assert win.lab_state.text() == ph.VERDICT_OK
+    def mid(w):
+        return w.mapTo(win, w.rect().center()).y()
+    assert abs(mid(win.lab_name) - mid(win.lab_state)) <= 4, "不是同一排"
+    assert (win.lab_name.mapTo(win, win.lab_name.rect().topRight()).x()
+            < win.lab_state.mapTo(win, win.lab_state.rect().topLeft()).x())
+    # 名字在整欄的最上面。
+    top = min(c.mapTo(win, c.rect().topLeft()).y() for c in _cards(win))
+    assert win.lab_name.mapTo(win, win.lab_name.rect().topLeft()).y() < top
+
+
+def test_a_high_agreement_alone_does_not_earn_the_tick(win, ph):
+    """⚠ **這一條是那個設計決定的證據。**
+
+    一個**錯的**週期（真正週期的一半）每一格都是半個 cell，彼此照樣對得很齊
+    —— `Cells agree` 會很高。那一刻給綠勾等於替一個可能錯的答案背書。所以
+    判準是「一個警告都沒有」，而那一份直接讀 `_fill_warning` 算出來的結果，
+    **不另外算第二份**。
+    """
+    img = tiles(px=60, py=44)
+    win.set_image(img, "a.tif")
+    win._on_done(*_run(win, img), "")
+    assert win.verdict() == (ph.TONE_GOOD, ph.VERDICT_OK)
+    assert float(win._gc.agreement) >= ph.AGREE_GOOD_FROM
+    # 同一個高分 + 一句警告 ⇒ 降級，而不是繼續打勾。
+    win._has_warning = True
+    assert win.verdict() == (ph.TONE_WARN, ph.VERDICT_CHECK)
+    assert float(win._gc.agreement) >= ph.AGREE_GOOD_FROM, "分數沒有變，變的是判準"
+
+
+def test_the_state_line_covers_every_stage(win, ph):
+    """空的／量週期中／疊圖中／打了自己的數字／疊不起來 —— 每一個都有話說。"""
+    img = tiles(px=60, py=44)
+    assert win.verdict() == ("", ""), "沒有圖就空著"
+    win.set_image(img, "a.tif")
+    win._m = win._gc = None
+    win._worker = object()                       # 假裝正在跑
+    assert win.verdict()[1] == ph.VERDICT_BUSY_PERIOD
+    win._worker = None
+    m, gc = _run(win, img)
+    win._on_answer(m)                            # 數字到了、疊圖還沒
+    assert win.verdict()[1] == ph.VERDICT_BUSY_STACK
+    win._on_done(m, gc, "")
+    assert win.verdict()[1] == ph.VERDICT_OK
+    # 自己打一個**疊得起來**的（×2 是合法的 cell，使用者要得到）。
+    win.spin_px.setValue(120.0)
+    win.spin_py.setValue(88.0)
+    win._on_done(*_run(win, img), "")
+    assert win.verdict()[1] == ph.VERDICT_TYPED, win.verdict()
+    # ⚠ **疊不起來的時候先說疊不起來**，就算那個數字是使用者自己打的 ——
+    # 一行不表態的話配一條紅色的 bar，是那一行在它唯一的工作上失職。
+    win.spin_px.setValue(37.0)
+    win.spin_py.setValue(0.0)
+    win._on_done(*_run(win, img), "")
+    assert win.verdict()[1] == ph.VERDICT_BLURRED, win.verdict()
+
+
+def test_the_state_line_never_uses_colour_alone(win, ph):
+    """F117 U13：顏色是第二個通道，不是唯一的。每一種狀態都有自己的字。"""
+    words = {ph.VERDICT_OK, ph.VERDICT_BLURRED, ph.VERDICT_NONE,
+             ph.VERDICT_TYPED, ph.VERDICT_CHECK, ph.VERDICT_BUSY_PERIOD,
+             ph.VERDICT_BUSY_STACK}
+    assert len(words) == 7, "兩種狀態共用同一句話"
+    # 而且短到跟名字排得下（411 px 扣掉圖示與名字剩約 290）。
+    from PySide6.QtGui import QFontMetrics
+    win.lab_state.ensurePolished()
+    fm = QFontMetrics(win.lab_state.font())
+    for w in words:
+        assert fm.horizontalAdvance(w) <= 220, (w, fm.horizontalAdvance(w))
