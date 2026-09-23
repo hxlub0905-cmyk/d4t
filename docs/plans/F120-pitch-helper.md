@@ -1591,3 +1591,45 @@ period」—— 一句不表態的話配一條紅色的 bar，是那一行在它
 4. `python tools/release.py`（bundle 會縮回去，`apps/` 讓它從 4.6 漲到 5.0 MB）
 
 ⚠ **`simgen` 沒有被要求移除**，只是一起抽了一份。它要不要走是另一個決定。
+
+### 29.5 一致性：d4t 自己算的 pitch ＝ helper 算的 pitch（使用者 2026-09-23）
+
+使用者：「雖然 pitch helper 要搬家，但請幫我確保 d4t 自己算 pitch 的演算法與
+pitch helper 一致」。**先量再答。** 同一張圖，兩條路的數字：
+
+| 圖 | `measure_period` | 模板那條路（`period_x/y`）| |
+|---|---|---|---|
+| 格子 60×44 / 30×30 / 79×51 / 120×88 | 一樣 | 一樣 | ✓ |
+| 直條 48 / 33（只有 X 有週期）| `48 × 0` | `48 × 480`（另一軸取整張高）| ✓ |
+| 橫條 44 | `0 × 44` | `600 × 44` | ✓ |
+| 純雜訊 / 全平 | `0 × 0` | `0 × 0` | ✓（helper 這時根本不畫格線）|
+
+**結構上本來就一致**：d4t 裡所有算週期的路最後都走
+`algo/template.measure_period` —— `build_golden_cell` 叫它、helper 叫它，
+`template_dialog` / `roi_reference` 走 `build_golden_cell`。沒有第二份三票制。
+
+但「現在一致」跟「不會漂」是兩件事，所以補三條守門
+（`tests/test_measure_period_is_public.py`，兩條驗過會紅）：
+
+| 測試 | 守什麼 |
+|---|---|
+| `test_the_raw_estimators_have_exactly_one_caller` | ⚠ **擋的是「再寫一份」不是「算錯」**：`estimate_period`／`estimate_period_2d`／`half_period_check` 是原料，把它們仲裁成一個答案的三票制只准住在 `template.py`。用 `ast` 掃 `d4t/`，別處叫了就紅 |
+| `test_the_helper_and_the_template_path_give_the_same_number` | helper 底下那句「貼進 Cell W / Cell H」的前提。判準是 `period_x/period_y`（Cell W/H 讀的那一組），**不是** `px`／`py`（那是 cell 陣列的尺寸 = round）|
+| `test_a_one_dimensional_layout_agrees_too` | ⚠ **一維是常態不是邊角**：兩邊對「沒有週期的那一軸」的處置也要一樣（都取整張影像的長度），各寫一次的那天格線會跟疊進去的格子差一整格 |
+| `test_the_taken_away_copy_is_the_same_algorithm` | 搬家期間 `apps/pitch` 底下那一份必須**一字不差**（只准差在 package 名）。多一個字就是漂移的第一天，而那天沒有人會發現 —— 兩邊都跑得起來，只是答案不一樣。⚠ `apps/` 搬走之後這一條跟著刪 |
+
+### 29.6 之後要怎麼跟 agent 說
+
+兩段可以直接貼的話寫在 [`apps/README.md`](../../apps/README.md) 最下面 ——
+**A 在新 repo 裡繼續開發**、**B 在 d4t 裡移除**。
+
+⚠ 三件在那兩段話裡特別標出來的：
+
+1. `algo/period.confidence_at`、`period2d`、`golden`、`template.measure_period`
+   **不要刪** —— 模板那條路也在用。
+2. `core/export/ramps.py` 與 `widgets` 轉出口的解耦**留著** —— 它們是為了抽取才
+   做的，但 d4t 自己也受益（一個 widget 不再 import 報表產生器）。
+3. **`docs/plans/F120-pitch-helper.md` 要一起帶去新 repo** —— 抽取工具不帶文件，
+   而沒有它，下一個人會把已經試過而且被否決的東西再做一次。
+
+⚠ **A 做完再做 B。** 反過來的話，萬一新 repo 少帶了什麼，來源已經沒了。
