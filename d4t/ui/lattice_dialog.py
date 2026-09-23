@@ -31,7 +31,7 @@ from d4t.core.algo import period2d as algo_period2d
 
 from . import fit_screen
 from .image_view import ImageView
-from .widgets import apply_button_cursors
+from .icons import apply_button_cursors   # 不走 `widgets` 轉出口（見 docs/history/plans/F120-pitch-helper.md）
 
 __all__ = ["LatticeDialog", "lattice_boxes", "MAX_BOXES"]
 

@@ -25,7 +25,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from ..core.export.uniformity_charts import heat_hex as uc_heat_hex
+# ⚠ 顏色從 `export.ramps` 拿，**不要**從 `uniformity_charts`（報表產生器）——
+# 後者底下掛著 boxplot／chart_draw／report／klarf_out，而這裡只要一個顏色。
+from ..core.export.ramps import heat_hex as uc_heat_hex
 from .numbers import format_feature_value_short
 from . import theme
 from .theme import TOKENS, region_hex
@@ -143,6 +145,12 @@ def _focus_set(focus: Any) -> frozenset:
         return frozenset()
 
 
+#: 兩色格線的襯底色（見 `ImageView.set_overlay_look`）。**不是純黑**：純黑在
+#: 暗區會跟影像內容混在一起，而這是一個記號不是內容。帶一點藍的深色跟 SEM 的
+#: 中性灰分得開。
+_CASING = "#0d1015"
+
+
 class ImageView(QWidget):
     """ndarray 檢視器：滾輪對游標縮放、拖曳平移、雙擊 fit。
 
@@ -156,9 +164,13 @@ class ImageView(QWidget):
     #: 並排比對兩張圖時，兩邊靠這個訊號互相跟隨 —— 沒有連動的並排沒有意義，
     #: 使用者得手動把兩邊拖到同一個位置才比得起來。
     view_changed = Signal(float, QPointF)
+    #: 量尺拖曳中／拖完：``(axis, start, end)``，影像像素座標。
+    #: 放開之後**不會**自動清掉（見 :meth:`set_measure_mode`）。
+    measured = Signal(str, float, float)
 
     _MIN_SCALE = 0.02
     _MAX_SCALE = 60.0
+    #: 沒有影像時畫在正中間的字。**可以換** —— 見 :meth:`set_empty_text`。
     _EMPTY_TEXT = "(no image)"
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -176,6 +188,12 @@ class ImageView(QWidget):
         self._panning = False
         self._pan_start = QPointF()
         self._pan_offset = QPointF()
+        #: 疊框的外觀（F120）：``None`` = 這個 app 一直以來的樣子（accent 細線）。
+        #: 見 :meth:`set_overlay_look`。
+        self._overlay_look = None
+        #: 量尺模式（F120）：左鍵拖曳改成量，不是平移。見 `set_measure_mode`。
+        self._measure_mode = False
+        self._measuring: Optional[QPointF] = None
         #: 疊在影像上的 ROI 框（正規化座標）。見 :meth:`set_overlay`。
         self._overlay: List[Tuple[float, float, float, float]] = []
         self._overlay_focus = -1
@@ -498,6 +516,15 @@ class ImageView(QWidget):
         """現在疊了幾個框（測試與狀態列讀這個，不去讀畫素）。"""
         return len(self._overlay)
 
+    def overlay_rects(self) -> List[Tuple[float, float, float, float]]:
+        """現在疊的那幾個框本身（正規化 ``(x, y, w, h)``）。
+
+        為什麼不只給 :meth:`overlay_count`：**數量不是不變量，形狀才是。**
+        「只切橫線」這種事只能從框的寬高看出來 —— 一個會把外圈修掉的呼叫者
+        （F120 的格線）數量會變，而「每一格都是整張寬」不會變。
+        """
+        return list(self._overlay)
+
     def set_measure(self, axis: str, start: float, end: float) -> None:
         """曲線面板上的量測尺按著時，在影像上標出**同一段**（F8 量測尺）。
 
@@ -518,6 +545,80 @@ class ImageView(QWidget):
         a, b = float(start), float(end)
         self._measure = (axis, min(a, b), max(a, b))
         self.update()
+
+    def set_overlay_look(self, colour: str = "", cased: bool = False) -> None:
+        """疊框換個顏色、外加一圈深色襯底（F120，**選配**）。
+
+        為什麼需要襯底
+        --------------
+        ⚠ **一張灰階影像上沒有任何單一顏色是到處都看得見的** —— 這是量出來的，
+        不是美感。在一張 SEM 合成圖上（灰階 1/25/50/75/99 百分位 =
+        100/115/156/169/217），各候選對**最糟**那一格的 WCAG 對比是：
+
+            accent 藍 1.04 · stage_measure 1.26 · 綠 1.22
+            magenta 1.16 · cyan 1.09 · yellow 1.07   （圖形的門檻是 3.0）
+
+        也就是說**目前這條 accent 藍的線在中灰上等於不存在**。換一個更好的顏色
+        救不了：亮色輸在亮區、暗色輸在暗區，而一張 SEM 影像兩種都有。
+
+        兩色線（深色襯底 ＋ 亮芯）就沒有這個問題 —— 每一格取兩者較好的那一個：
+
+            黑襯＋黃芯 最糟 3.92 · 黑襯＋青芯 3.85 · 黑襯＋白芯 4.74
+
+        > **一條在某些地方看不見的格線，比沒有格線更糟** —— 使用者會以為那裡
+        > 沒有被切到。
+
+        ⚠ **預設不開**：Studio 的區域框走同一支 `_paint_overlay`，而它們的顏色
+        是有意義的（`region_hex` 一區一色）。這是 pitch helper 自己打開的。
+        """
+        self._overlay_look = (str(colour), bool(cased)) if colour else None
+        self.update()
+
+    def overlay_look(self):
+        """現在的疊框外觀（``(colour, cased)``；沒設就 None）。測試讀這個。"""
+        return self._overlay_look
+
+    def set_empty_text(self, text: str) -> None:
+        """沒有影像時，中間那句話要寫什麼（F120）。
+
+        預設的 `(no image)` **只描述現況，沒有告訴人下一步**。在一個空畫布
+        佔了 700×700、而唯一要做的事寫在工具列 11px 灰字裡的視窗上，那句話
+        待在錯的地方：**指令要在空間裡，不是在角落。**
+        """
+        self._EMPTY_TEXT = str(text) or "(no image)"
+        self.update()
+
+    def set_measure_mode(self, on: bool) -> None:
+        """量尺模式：左鍵拖曳**改成量長度**，不再平移（F120）。
+
+        為什麼是一個模式而不是一個修飾鍵
+        --------------------------------
+        這張圖上左鍵本來就是平移，而平移是這個視窗最常用的手勢。搶走它要讓
+        使用者**看得見自己搶走了** —— 一顆按下去會亮的鈕做得到，
+        ``Shift`` 做不到（按鍵在畫面上沒有形狀，而一個「為什麼拖不動了」的
+        使用者不會想到去放開一個他沒有按下的鍵）。
+
+        ⚠ **放開之後那條帶留著。** 這一點跟 F8 曲線上那把尺**刻意相反**：
+        那一把是「現在正在量」的回饋，量完就沒事了；這一把量出來的數字
+        **使用者下一步要拿去用**（按一下就填進週期欄），所以它得活到那一下。
+        離開模式、換圖、重裁就清掉 —— 那三件事都表示「剛剛量的不算了」。
+
+        量的是**沿著主要拖曳方向的那一段**（|dx| > |dy| 就是 X）：pitch 問的
+        是「隔多遠重複一次」，而那是一個軸上的距離，不是一條斜線的長度。
+        """
+        on = bool(on)
+        if on == self._measure_mode:
+            return
+        self._measure_mode = on
+        self._measuring = None
+        if not on:
+            self.clear_measure()
+        self.setCursor(Qt.CrossCursor if on else Qt.ArrowCursor)
+        if not on:
+            self.unsetCursor()
+
+    def measure_mode(self) -> bool:
+        return self._measure_mode
 
     def clear_measure(self) -> None:
         """放開量測尺 —— 標記跟著消失（它是「現在正在量」的回饋，不是註記）。"""
@@ -635,7 +736,8 @@ class ImageView(QWidget):
         iw, ih = self._pixmap.width(), self._pixmap.height()
         s = self._scale or 1.0
         index_of = {n: i for i, n in enumerate(self._overlay_order)}
-        plain = QColor(TOKENS["accent"])
+        look = self._overlay_look
+        plain = QColor(look[0] if look else TOKENS["accent"])
         p.setBrush(Qt.NoBrush)
         for i, (nx, ny, nw, nh) in enumerate(self._overlay):
             name = self._overlay_labels[i] if i < len(self._overlay_labels) else ""
@@ -649,8 +751,21 @@ class ImageView(QWidget):
             focused = (i == self._overlay_focus)
             # 框在小 patch 上會很細，所以線寬不隨縮放變薄（**框是給人看的標記，
             # 不是影像內容**）；但也不要粗到把 5px 的框整個蓋掉。
-            pen = QPen(col, 1.9 if focused else 1.0)
+            # 兩色線的芯要比平常的框**粗一點**（1.3 而不是 1.0）：襯底畫在
+            # 它兩側，芯太細的話看到的幾乎全是襯底，亮色只剩一絲 —— 實拍的
+            # 黃色格線就被襯底吃成橄欖綠。
+            width = (1.9 if focused else 1.0)
+            if look is not None and look[1] and not focused:
+                width = 1.3
+            pen = QPen(col, width)
             pen.setCosmetic(True)
+            if look is not None and look[1]:
+                # 先畫一條粗一點的深色線當襯底，亮芯再蓋上去。兩條都 cosmetic，
+                # 所以縮放的時候襯底不會比芯厚得不成比例。
+                casing = QPen(QColor(_CASING), pen.widthF() + 1.6)
+                casing.setCosmetic(True)
+                p.setPen(casing)
+                p.drawRect(r)
             p.setPen(pen)
             p.drawRect(r)
             if focused:
@@ -875,6 +990,10 @@ class ImageView(QWidget):
     def mousePressEvent(self, e) -> None:
         if self._pixmap is None:
             return
+        if self._measure_mode and e.button() == Qt.LeftButton:
+            self._measuring = self._to_image(QPointF(e.position()))
+            self._auto_fit = False
+            return
         if e.button() in (Qt.LeftButton, Qt.MiddleButton, Qt.RightButton):
             self._panning = True
             self._pan_start = QPointF(e.position())
@@ -884,6 +1003,9 @@ class ImageView(QWidget):
 
     def mouseMoveEvent(self, e) -> None:
         pos = QPointF(e.position())
+        if self._measuring is not None:
+            self._drag_measure(pos)
+            return
         if self._panning:
             self._offset = self._pan_offset + (pos - self._pan_start)
             self.update()
@@ -892,9 +1014,31 @@ class ImageView(QWidget):
         self._emit_cursor(pos)
 
     def mouseReleaseEvent(self, _e) -> None:
+        if self._measuring is not None:
+            self._measuring = None
+            return
         if self._panning:
             self._panning = False
             self.unsetCursor()
+
+    def _drag_measure(self, pos: QPointF) -> None:
+        """拖曳中：沿**主要方向**那一軸標出來，並把讀數發出去。"""
+        if self._measuring is None or self._image is None:
+            return
+        now = self._to_image(pos)
+        dx = abs(now.x() - self._measuring.x())
+        dy = abs(now.y() - self._measuring.y())
+        h, w = self._image.shape[:2]
+        if dx >= dy:
+            a, b = self._measuring.x(), now.x()
+            axis, hi = "x", float(w)
+        else:
+            a, b = self._measuring.y(), now.y()
+            axis, hi = "y", float(h)
+        a = min(max(float(a), 0.0), hi)
+        b = min(max(float(b), 0.0), hi)
+        self.set_measure(axis, a, b)
+        self.measured.emit(axis, min(a, b), max(a, b))
 
     def mouseDoubleClickEvent(self, e) -> None:
         if e.button() == Qt.LeftButton:

@@ -288,6 +288,7 @@ _LIGHT: Dict[str, Any] = {
     #: 鄰居小一號。現在 QSS 吃這一格（`$font_body`），數字對齊真相。
     "font_body": "13px",     #: 面板上正常的一行字（``*`` 那條規則就是它）
     "font_title": "15px",    #: 標題：設定區的卡名、空白狀態、導覽
+    #: **一個畫面只有一個答案的時候，那個答案的字級**（F120）。
     #: 一條線的粗細。`1px` 在 QSS 裡出現十幾次，而它跟字級是同一個問題：
     #: 螢幕變了要一起改，而「一起」的前提是只有一個地方。
     "hairline": "1px",
@@ -654,17 +655,30 @@ QToolBar {
  * a row reads as “File Edit View…”, and a menu bar is something you pull down,
  * not something you press — so the whole strip stopped looking clickable. */
 /* One vertical rhythm for every button in the app (F7-23 round 2):
- * 1px border + 5px padding + 18px min-height = 30px, full stop. Importance is
+ * 1px border + 7px padding + 18px min-height = 34px, full stop. Importance is
  * expressed horizontally - primary is wider, never taller. It used to be
  * taller too, so in the empty state "Open KLARF..." stood 2px above the
  * "Try it with sample data" next to it, and the toolbar had no min-height at
- * all, which left its row depending on the font's text height. */
+ * all, which left its row depending on the font's text height.
+ *
+ * 30 -> 34 (F120, 2026-09-21, the user asked for it). At 30 the 13px text
+ * (15px of line) filled exactly half the button, 7px of air above and below,
+ * and the user read that as "flat, and the text looks stretched". The text is
+ * NOT stretched - measured 1.0000 against an explicit normal-stretch font, and
+ * there is no font-stretch anywhere in this sheet - but a short box does read
+ * that way, most of all a wide one.
+ *
+ * The number lives here TWICE on purpose (QToolButton here, QPushButton
+ * below), and the inputs further down follow it as well. That is what "one
+ * rhythm" means: change one copy without the others and a row of a button
+ * beside a spin box goes ragged - the exact thing this comment exists to
+ * stop. */
 QToolBar QToolButton {
     background: $bg_surface;
     color: $text_primary;
     border: $hairline solid $border_input;
     border-radius: $radius_md;
-    padding: 5px 12px;
+    padding: 7px 12px;
     min-height: 18px;
     font-weight: 500;
 }
@@ -690,9 +704,13 @@ QWidget#toolbarSpacer { background: transparent; border: 0; }
 QToolBar QToolButton:checked {
     background: $accent_bg; color: $accent_active; border: $hairline solid $accent_border;
 }
+/* ⚠ #primary declares its own padding, and an id selector beats the type
+   selector per property - so it does NOT inherit the rhythm change above.
+   Both copies have to move together or the primary button sits 4px shorter
+   than the plain ones right beside it (measured: 30 vs 34). */
 QToolBar QToolButton#primary {
     background: $accent; color: #ffffff; border: $hairline solid $accent;
-    padding: 5px 16px; font-weight: 600;
+    padding: 7px 16px; font-weight: 600;
 }
 /* Icon-only buttons carry no label, so the horizontal padding that sizes a
  * text button would leave them enormous; and a button that draws its own glyph
@@ -816,10 +834,18 @@ QPushButton {
     color: $text_primary;
     border: $hairline solid $border_input;
     border-radius: $radius_md;
-    padding: 5px 12px;
+    /* The toolbar copy above carries the reasoning; keep the two in step. */
+    padding: 7px 12px;
     min-height: 18px;
     font-weight: 500;
 }
+/* A push button that draws its own glyph has to be told to leave room for it,
+   exactly like the toolbar rule above (F7-23 round 4). Without this the glyph
+   lands on top of the first letter - "Open image..." renders as a picture with
+   an O under it. The toolbar rule only matches `QToolBar QToolButton`, so a
+   plain QPushButton with a glyph (icons.GlyphButton, F120) got nothing.
+   The glyph is drawn at x = 7..21, so 26 clears it with room to spare. */
+QPushButton[hasGlyph="true"] { padding-left: 26px; }
 QPushButton:hover { border-color: $border_hover; background: $hover_warm; }
 /* Pressed has to be a real step, not a shade (F7-23 round 3). It used to reuse
  * the hover colour one notch darker - about 3.5 in L* - and a press lasts
@@ -834,10 +860,15 @@ QPushButton:checked {
 QPushButton:disabled { background: $disabled_bg; color: $disabled_text;
                        border-color: $border_default; }
 /* primary action (Run trial / Run all): objectName = "primary" */
+/* Same as the toolbar copy: its own padding, so it needs the change restated. */
 QPushButton#primary {
     background: $accent; color: #ffffff; border: $hairline solid $accent;
-    padding: 5px 18px; font-weight: 600;
+    padding: 7px 18px; font-weight: 600;
 }
+/* #primary sets its own `padding: 5px 18px`, which beats the rule above on
+   specificity - so the glyph room has to be restated here, wider because the
+   side padding is wider (the same pair as the toolbar copy). */
+QPushButton#primary[hasGlyph="true"] { padding-left: 30px; }
 /* Same as the toolbar copy above: the border follows the fill. */
 QPushButton#primary:hover { background: $accent_hover;
                             border-color: $accent_hover; }
@@ -861,6 +892,16 @@ QPushButton[variant="ghost"] {
     background: transparent; color: $text_secondary; border: $hairline solid transparent;
 }
 QPushButton[variant="ghost"]:hover { background: $hover_warm; color: $text_primary; }
+/* A ghost button that is still an action: no box, but the accent text colour
+   says it can be clicked (F120). Plain ghost is $text_secondary, which next to
+   a grey caption reads as dead text - and these are the "try this instead"
+   candidates, which are the one thing on the panel a lost user should click. */
+QPushButton[variant="ghost"][clickableText="true"] {
+    color: $accent_active; font-weight: 600;
+}
+QPushButton[variant="ghost"][clickableText="true"]:hover {
+    background: $accent_bg; color: $accent_active;
+}
 QPushButton[variant="danger"] {
     background: $danger_bg; color: $danger_text; border: $hairline solid $danger_border;
     font-weight: 600;
@@ -961,22 +1002,27 @@ QPushButton#cardButton:checked {
  * into a field and getting no border change is wrong - the caret is blinking
  * there, and "which box am I typing into" needs saying. Browsers treat text
  * inputs as always focus-visible for the same reason. */
+/* ⚠ These give back 1px of padding for the 2px ring, so they are the THIRD
+   place the button rhythm's number lives (base rule, #primary, here). The
+   base went 5 -> 7 (F120), so the compensation goes 4 -> 6 - otherwise a
+   button SHRINKS 4px the moment you Tab to it, and pushes its neighbours.
+   `test_the_focus_ring_costs_no_space` caught exactly that. */
 QPushButton[kbFocus="true"]:focus, QPushButton[variant="secondary"][kbFocus="true"]:focus,
 QPushButton[variant="danger"][kbFocus="true"]:focus {
-    border: 2px solid $border_focus; padding: 4px 11px;
+    border: 2px solid $border_focus; padding: 6px 11px;
 }
-QToolBar QToolButton[kbFocus="true"]:focus { border: 2px solid $border_focus; padding: 4px 11px; }
+QToolBar QToolButton[kbFocus="true"]:focus { border: 2px solid $border_focus; padding: 6px 11px; }
 QPushButton#primary[kbFocus="true"]:focus {
-    border: 2px solid $focus_ring_inverse; padding: 4px 17px;
+    border: 2px solid $focus_ring_inverse; padding: 6px 17px;
 }
 QToolBar QToolButton#primary[kbFocus="true"]:focus {
-    border: 2px solid $focus_ring_inverse; padding: 4px 15px;
+    border: 2px solid $focus_ring_inverse; padding: 6px 15px;
 }
 /* These two already have a 1px border (transparent), so the ring costs them
  * nothing - but they must restate their padding, or the blanket rule's
  * 1px-compensation above applies to them and the label shifts anyway. */
 QPushButton[variant="ghost"][kbFocus="true"]:focus {
-    border: $hairline solid $border_focus; padding: 5px 12px;
+    border: $hairline solid $border_focus; padding: 7px 12px;
 }
 /* #cardButton forgot its padding, and the vacuous label-shift test never said
  * so (F80): the blanket rule above gives back 1px for its 2px ring, and that
@@ -993,7 +1039,11 @@ QPushButton[variant="ghost"][kbFocus="true"]:focus {
  * size cannot move, but their content can, so they restate theirs too. */
 QPushButton#cardButton[kbFocus="true"]:focus {
     border: $hairline solid $border_focus; background: $accent_bg; color: $accent_active;
-    padding: 5px 12px;
+    /* Restates the BLANKET padding (its ring is 1px, so nothing to give back)
+       - which means it moves with the rhythm too: 5 -> 7 (F120). That is the
+       FOURTH copy of the number; the comment above explains why this rule has
+       to exist at all. */
+    padding: 7px 12px;
 }
 QPushButton#cardButton[shape="square"][kbFocus="true"]:focus,
 QPushButton#cardButton[shape="tool"][kbFocus="true"]:focus { padding: 0px; }
@@ -1050,7 +1100,10 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     color: $text_primary;
     border: $hairline solid $border_input;
     border-radius: $radius_md;
-    padding: 2px 6px;
+    /* Follows the buttons' rhythm above: an input sitting next to a button in
+       the same row has to be the same height or the row goes ragged (the
+       period boxes sit beside x2 and Reset). 30 -> 34 with them (F120). */
+    padding: 4px 6px;
     min-height: 22px;
     selection-background-color: $selection;
     selection-color: $text_primary;

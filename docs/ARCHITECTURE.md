@@ -334,6 +334,13 @@ d4t/
 │   │   ├── klarf_out.py      #   KLARF 三種寫回模式：inplace／annotate／topn
 │   │   ├── report.py html.py boxplot.py  #   CSV／Excel／HTML 報表／box plot（手寫 SVG，零新相依）
 │   │   ├── uniformity_charts.py  #   均勻度四種圖（同上手寫 SVG）⚠ 一個點＝一格框，不是一顆 defect
+│   │   ├── ramps.py         #   **色階**：一階色 ＋ 0–1 → 一個顏色（`heat_hex`／
+│   │   │                    #   `seq_hex`）。2026-09-23 從 `uniformity_charts` 拆出來
+│   │   │                    #   —— ⚠ **一條跨層的線**：`ui/image_view.py` 為了畫影像
+│   │   │                    #   上那條色條要一個顏色函式，於是一個 widget import 了
+│   │   │                    #   **報表產生器**（底下掛著 boxplot／chart_draw／report／
+│   │   │                    #   klarf_out）。實測代價：10 支模組、7,672 行。
+│   │   │                    #   `uniformity_charts` 從這裡轉出去，名字一個都沒換家
 │   │   ├── chart_frame.py    #   **一列一格框**的長表（F88 第一刀）——「一份資料、
 │   │   │                     #   很多種看法」的那個「一份資料」。`row`/`col` 走
 │   │   │                     #   `cell_edges` 的同一套分群，**整張表一起分**

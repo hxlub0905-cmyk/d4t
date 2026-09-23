@@ -67,7 +67,8 @@ from . import period as algo_period
 from . import period2d as algo_period2d
 
 __all__ = [
-    "GoldenCell", "MatchResult", "MeasuredPeriod", "build_golden_cell", "anchor_cell",
+    "GoldenCell", "MatchResult", "MeasuredPeriod", "measure_period",
+    "build_golden_cell", "anchor_cell",
     "encode_cell", "decode_cell", "tile_cell", "match_patch",
     "patch_structure", "period_text", "MIN_PERIOD_CONFIDENCE", "SNAP_DRIFT_PX",
     "CELL_ENCODING",
@@ -252,7 +253,7 @@ def anchor_cell(cell: np.ndarray,
 # --------------------------------------------------------------------------- #
 @dataclass
 class MeasuredPeriod:
-    """`_measure_period` 的答案：兩軸的週期（可以是小數）、信心、講給人聽的決定。"""
+    """`measure_period` 的答案：兩軸的週期（可以是小數）、信心、講給人聽的決定。"""
 
     px: float = 0.0
     py: float = 0.0
@@ -261,6 +262,35 @@ class MeasuredPeriod:
     notes: List[str] = field(default_factory=list)
     stagger: float = 0.0
     doubled: Tuple[bool, bool] = (False, False)
+
+    # ---- 三票各自的答案（F120，2026-09-21）--------------------------------
+    #
+    # 使用者：「我可以看到每個方法的分數嗎？（顯示細節）」
+    #
+    # 它們本來就**算出來了，然後被丟掉** —— 只有仲裁完的那一組活下來。而
+    # 三票不一致正是「這張圖有點特別」的信號：投影法看到 30、二維看到 60，
+    # 答案是 60，而「投影法看到 30」是關於這個 layout 的一個**事實**
+    # （相鄰列交錯），不是雜訊。留下來給畫面上的 Details 用。
+    #
+    # ⚠ **全部選填、全部有預設值。** 這個 dataclass 不進 recipe、不進 feature、
+    # 不進黃金值，所以加欄位不會動到任何一個數字 —— 但它有第二個呼叫者
+    # （`build_golden_cell`），而那一支只讀 px/py/conf/notes/stagger/doubled。
+    #: 投影法（`period.estimate_period`）自己的答案。``None`` ＝ 那一軸沒找到。
+    proj_px: Optional[float] = None
+    proj_py: Optional[float] = None
+    proj_conf_x: float = 0.0
+    proj_conf_y: float = 0.0
+    #: 二維自相關（`period2d.estimate_period_2d`）自己的答案（次像素）。
+    ac_px: Optional[float] = None
+    ac_py: Optional[float] = None
+    ac_conf_x: float = 0.0
+    ac_conf_y: float = 0.0
+    #: 半週期檢查的增益（`ac[2q] - ac[q]`，正得夠多就加倍）。
+    half_gain_x: float = 0.0
+    half_gain_y: float = 0.0
+    #: 諧波上的其他可能（`estimate_period` 本來就會算）—— 「取錯怎麼辦」的答案。
+    candidates: List[Tuple[Optional[int], Optional[int]]] = field(
+        default_factory=list)
 
 
 def period_text(px: float, py: float) -> str:
@@ -278,9 +308,17 @@ def _snap(p: float, span: int) -> float:
     return r if abs(p - r) * cells <= SNAP_DRIFT_PX else p
 
 
-def _measure_period(gray: np.ndarray,
-                    given: Tuple[bool, bool] = (False, False)) -> MeasuredPeriod:
+def measure_period(gray: np.ndarray,
+                   given: Tuple[bool, bool] = (False, False)) -> MeasuredPeriod:
     """三種量法對一次 → :class:`MeasuredPeriod`（0 ＝ 那一軸量不到）。
+
+    ⚠ **這一支是「這張圖的 cell period 是多少」的唯一出處**，所以它是公開的
+    （F120，2026-09-21 從 ``_measure_period`` 改名）。`build_golden_cell` 疊模板
+    之前問它；當初是 F120 的 pitch helper（丟一張圖進去只問那個數字）成為第二
+    個呼叫者，而那一天的選擇只有「開放這一支」與「抄一份三票制出去」，後者一定
+    會漂（`CLAUDE.md` §0）。**那個工具 2026-09-23 搬去自己的 repo 了，而這一支
+    照樣公開**：把它收回 private 只會讓下一個第二呼叫者重走一次同一個選擇。
+    歷史見 docs/history/plans/F120-pitch-helper.md。改名**沒有留舊名字的別名**：一件事兩個名字正是那一節在擋的東西。
 
     投影法（`period.estimate_period`）是主：四個月的實測與諧波修正都在它身上。
     二維自相關（`period2d.estimate_period_2d`，F104）在兩種情況接手，
@@ -301,7 +339,17 @@ def _measure_period(gray: np.ndarray,
     * **交錯分數**進答案（一個可以畫分布的數字），加倍與否也進答案。
 
     每一次接手或加倍都在 notes 講一句：換了量法、改了數字是使用者該知道的事。
+
+    ⚠ **空的／小到沒有意義的影像回一個空答案，不丟例外**（F120）。它私有的
+    時候這一關不必在這裡 —— 唯一的呼叫者 `build_golden_cell` 更早就擋掉了。
+    公開之後呼叫端是「使用者剛剛丟進來的那個東西」，而 `cv2.Sobel` 對 0×0
+    的陣列是 `cv2.error`。**開放一支函式就要讓它自己站得住**，不是要求每一個
+    新呼叫者都記得先擋一次。這一關擋掉的路 `build_golden_cell` 走不到，
+    所以任何一份跑得動的 recipe 算出來的數字**一個 byte 都沒有變**。
     """
+    g = np.asarray(gray)
+    if g.ndim != 2 or g.size == 0 or min(g.shape) < 4:
+        return MeasuredPeriod(notes=["the image is too small to look for a repeat"])
     est = algo_period.estimate_period(gray)
     two = algo_period2d.estimate_period_2d(gray)
     notes: List[str] = list(est.warnings or [])
@@ -344,9 +392,24 @@ def _measure_period(gray: np.ndarray,
             notes.append("the period %s was doubled after the half-period check "
                          "(%s → %s px); rows are probably staggered"
                          % (axis, algo_period2d.fmt_px(was), algo_period2d.fmt_px(now)))
-    return MeasuredPeriod(px=fx, py=fy, conf_x=cx, conf_y=cy,
-                          notes=notes, stagger=float(hp.stagger),
-                          doubled=(bool(hp.doubled_x), bool(hp.doubled_y)))
+    return MeasuredPeriod(
+        px=fx, py=fy, conf_x=cx, conf_y=cy,
+        notes=notes, stagger=float(hp.stagger),
+        doubled=(bool(hp.doubled_x), bool(hp.doubled_y)),
+        # 三票各自的答案（見 `MeasuredPeriod` 那幾個欄位的說明）。
+        proj_px=(float(est.px) if est.px else None),
+        proj_py=(float(est.py) if est.py else None),
+        proj_conf_x=float(est.confidence_x or 0.0),
+        proj_conf_y=float(est.confidence_y or 0.0),
+        ac_px=(float(two.px_sub) if two.px_sub else
+               (float(two.px) if two.px else None)),
+        ac_py=(float(two.py_sub) if two.py_sub else
+               (float(two.py) if two.py else None)),
+        ac_conf_x=float(two.confidence_x or 0.0),
+        ac_conf_y=float(two.confidence_y or 0.0),
+        half_gain_x=float(hp.gain_x or 0.0),
+        half_gain_y=float(hp.gain_y or 0.0),
+        candidates=list(est.candidates or []))
 
 
 def build_golden_cell(image: Any, px: Optional[float] = None,
@@ -357,7 +420,7 @@ def build_golden_cell(image: Any, px: Optional[float] = None,
     """從大圖疊出一個 Golden Cell。
 
     ``px`` / ``py`` 留空就從影像自己量（``period.estimate_period`` 投影法，再拿
-    ``period2d.estimate_period_2d`` 二維自相關對一次 —— 見 :func:`_measure_period`）。
+    ``period2d.estimate_period_2d`` 二維自相關對一次 —— 見 :func:`measure_period`）。
     量不到週期時回一個空的 cell 並在 ``warnings`` 說明 —— 不猜。
 
     小數週期（F105）
@@ -404,7 +467,7 @@ def build_golden_cell(image: Any, px: Optional[float] = None,
     if not (given_x and given_y):
         if not _say("Measuring the period\u2026", 0, 1):
             return cancelled
-        m = _measure_period(gray, given=(given_x, given_y))
+        m = measure_period(gray, given=(given_x, given_y))
         if not given_x:
             px, conf_x = m.px, m.conf_x
         if not given_y:

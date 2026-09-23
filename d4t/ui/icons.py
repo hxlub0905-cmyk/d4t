@@ -32,7 +32,7 @@ from . import theme
 
 __all__ = [
     "GLYPH_ICONS", "METRIC_GLYPHS", "draw_glyph_icon", "draw_metric_glyph",
-    "IconButton", "restyle", "apply_button_cursors",
+    "IconButton", "GlyphButton", "restyle", "apply_button_cursors",
 ]
 
 
@@ -88,6 +88,13 @@ GLYPH_ICONS = (
     # 「量的是一條線還是一團東西」（F19 第二批）。這兩顆**不是**同一套小版圖：
     # 它們畫的就是那兩種樣品本身，而那正是這個岔路在問的事。
     "shape_line", "shape_blob",
+    # Pitch helper 的工具列（F120）。四顆都是「這顆鈕在做什麼」，不是它長什麼
+    # 樣 —— 而四顆並排，所以輪廓要各不相同：
+    #   `paste`  一塊夾板（上緣一個夾子）   `copy`  兩張疊著的紙
+    #   `crop`   兩支交錯的直角尺           `ruler` 一把帶刻度的尺
+    # ⚠ `ruler` 是**斜的**：另外三顆都是正的方塊，而一把斜放的尺在一排小圖示
+    # 裡是唯一一個對角線的輪廓 —— 16 px 下那是最容易認出來的差別。
+    "paste", "copy", "crop", "ruler",
 # ⚠ 上面這一族是**按鈕**上的圖；設定區那些**膠囊**上的圖住在 `ui/glyphs.py`
 # （F68 第二輪，五十幾張 —— 塞回這裡只會讓這個檔案更難動，而 CLAUDE.md §4
 # 早就指名這幾群自繪圖示最好拆）。兩族由這張表接起來，所以呼叫端（與那條
@@ -252,6 +259,42 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
         p.drawPolygon(blob)
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
+    elif n == "paste":
+        # 一塊夾板：外框 ＋ 上緣一個夾子。跟 `document`（一張紙、右上折角）
+        # 的差別就在那個夾子 —— 兩顆都是「一個長方形」，而那是唯一的區別。
+        p.drawRect(QRectF(m, h * 0.24, w - 2 * m, h - h * 0.24 - m))
+        p.drawRect(QRectF(w * 0.36, h * 0.12, w * 0.28, h * 0.16))
+    elif n == "copy":
+        # 兩張紙錯開疊著 —— 「同一個東西多了一份」，而那正是複製。
+        p.drawRect(QRectF(m, m, w * 0.52, h * 0.52))
+        p.drawRect(QRectF(w * 0.32, h * 0.32, w * 0.52, h * 0.52))
+    elif n == "crop":
+        # 兩支交錯的直角尺（攝影上的裁切記號）：它們圍出來的那一塊就是留下來
+        # 的。⚠ 不畫成「一個框」—— 那會跟 `roi_drag` 撞，而那一顆是畫區域的。
+        p.drawPolyline(QPolygonF([
+            QPointF(w * 0.28, m), QPointF(w * 0.28, h - m * 1.4),
+            QPointF(w - m, h - m * 1.4)]))
+        p.drawPolyline(QPolygonF([
+            QPointF(m, w * 0.28), QPointF(h - m * 1.4, w * 0.28),
+            QPointF(h - m * 1.4, w - m)]))
+    elif n == "ruler":
+        # 一把斜放的尺：長邊 ＋ 三道刻度。**斜的**是刻意的（見 GLYPH_ICONS 的
+        # 說明）—— 這一排裡唯一的對角線輪廓。
+        p.save()
+        p.translate(w * 0.5, h * 0.5)
+        p.rotate(-38.0)
+        p.translate(-w * 0.5, -h * 0.5)
+        body = QRectF(m * 0.4, h * 0.36, w - m * 0.8, h * 0.28)
+        p.drawRect(body)
+        thin = QPen(QColor(color), max(1.0, size / 12.0))
+        thin.setCapStyle(Qt.RoundCap)
+        p.setPen(thin)
+        for f in (0.3, 0.5, 0.7):
+            x = body.left() + body.width() * f
+            p.drawLine(QPointF(x, body.top()),
+                       QPointF(x, body.top() + body.height() * 0.5))
+        p.setPen(pen)
+        p.restore()
     elif n.startswith(("place_", "side_", "fill_", "dir_", "target_")):
         _draw_profile_glyph(p, n, w, h, color, pen)
     elif n in glyphs.CHIP_ICONS:
@@ -1075,6 +1118,28 @@ class IconButton(_GlyphMixin, QPushButton):
         if tip:
             self.setToolTip(str(tip))
         self._init_glyph(icon)
+
+
+class GlyphButton(_GlyphMixin, QPushButton):
+    """**有文字、左邊帶一個自繪圖示**的一般按鈕（F120）。
+
+    `IconButton` 是「只有圖示」的那一種（工具列上的小方鈕）；工具列上那種
+    「圖示 ＋ 一個字」的組合在這之前只有 `studio_layout` 的 `_GlyphToolButton`
+    做得到，而它是 `QToolButton`，套不進一排 `QPushButton` 裡（框線、高度、
+    hover 全部是另一套 QSS）。
+
+    ⚠ 左邊那一格的空間是 QSS 的 ``[hasGlyph="true"]`` 撐出來的（`_init_glyph`
+    會設），不是這裡調 padding —— 兩邊各調一次的話遲早會差幾個像素，而它們
+    就並排放著。
+    """
+
+    def __init__(self, icon: str, text: str = "", tip: str = "",
+                 parent: Optional[QWidget] = None):
+        QPushButton.__init__(self, str(text), parent)
+        self.setCursor(Qt.PointingHandCursor)
+        if tip:
+            self.setToolTip(str(tip))
+        self._init_glyph(icon, "left" if text else "center")
 
 
 def restyle(widget: QWidget) -> None:

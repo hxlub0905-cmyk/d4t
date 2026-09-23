@@ -19,8 +19,8 @@ import os
 
 from PySide6.QtGui import QIcon
 
-__all__ = ["ASSETS_DIR", "ICON_PATH", "WORDMARK_PATH", "WORDMARK_DARK_PATH",
-           "app_icon"]
+__all__ = ["ASSETS_DIR", "ICON_PATH", "WORDMARK_PATH",
+           "WORDMARK_DARK_PATH", "app_icon"]
 
 #: 這個目錄裡的東西要跟著套件走 —— 見 ``pyproject.toml`` 的 package-data。
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -43,3 +43,4 @@ def app_icon() -> QIcon:
     if not os.path.isfile(ICON_PATH):
         return QIcon()
     return QIcon(ICON_PATH)
+

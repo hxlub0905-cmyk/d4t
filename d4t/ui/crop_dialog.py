@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 
 from . import fit_screen
 from .theme import TOKENS
-from .widgets import apply_button_cursors
+from .icons import apply_button_cursors   # 不走 `widgets` 轉出口（見 docs/history/plans/F120-pitch-helper.md）
 from . import buttons as buttons_mod
 
 __all__ = ["CropView", "CropDialog", "MIN_SIDE", "crop_array"]
@@ -252,7 +252,17 @@ class CropDialog(QDialog):
 
     def __init__(self, image: Any, name: str = "",
                  initial: Optional[Rect] = None,
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None,
+                 ok_text: str = "Stack from this box"):
+        """``ok_text`` —— 那顆確定鈕上的字。
+
+        ⚠ 它是參數而不是寫死的一句話，因為**按下去之後會發生什麼事不只一種**：
+        模板那條路按完去疊 cell（"Stack from this box"），而 F120 的
+        pitch helper 按完只是量一次週期，不疊任何東西（那個工具 2026-09-23
+        搬去自己的 repo 了，歷史見 docs/history/plans/F120-pitch-helper.md）。寫死的話那顆鈕會對其中一邊說謊，
+        而分叉出第二個裁切對話框會讓「框怎麼變成像素」有兩個家
+        （見 :func:`crop_array` 的說明）。
+        """
         super().__init__(parent)
         self.setWindowTitle("Where to measure the cell")
         fit_screen.fit(self, 960, 720)
@@ -288,7 +298,7 @@ class CropDialog(QDialog):
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
-        self.buttons.button(QDialogButtonBox.Ok).setText("Stack from this box")
+        self.buttons.button(QDialogButtonBox.Ok).setText(str(ok_text))
         buttons_mod.mark_primary(self.buttons)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)

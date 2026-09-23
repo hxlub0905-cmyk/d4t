@@ -162,7 +162,7 @@ def test_regular_and_staggered_lattices_score_stagger_as_expected():
 # 3. 仲裁：答案、小數、講出來
 # ---------------------------------------------------------------------------
 def test_the_arbitration_ends_on_the_true_cell_and_says_why(tile):
-    m = template._measure_period(template._gray_u8(tile))
+    m = template.measure_period(template._gray_u8(tile))
     assert abs(m.px - PX) < 0.3 and 79.2 <= m.py <= 79.8
     assert m.stagger > 0.6
     assert any("staggered" in n for n in m.notes)

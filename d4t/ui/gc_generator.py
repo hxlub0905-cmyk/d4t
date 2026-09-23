@@ -47,7 +47,7 @@ from . import theme
 from .gc_paint import (
     MODE_BRUSH, MODE_ERASE, MODE_RECT, GcPaintView,
 )
-from .widgets import to_uint8
+from .image_view import to_uint8         # 不走 `widgets` 轉出口（見 docs/history/plans/F120-pitch-helper.md）
 
 __all__ = ["GcGeneratorWindow", "load_backend", "qimage_to_gray"]
 

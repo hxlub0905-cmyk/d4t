@@ -115,5 +115,7 @@ def format_feature_value(value: Any) -> str:
     """
     ok, out = finite(value)
     if not ok:
-        return out
-    return format_number(out)
+        # ⚠ `finite` 的第二格在「不是數字」那一路回的是**要顯示的字**，
+        # 在另一路回的是 float —— 兩路各自收口，型別才跟實情一致。
+        return str(out)
+    return format_number(float(out))

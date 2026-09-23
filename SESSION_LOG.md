@@ -28,6 +28,74 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F120 收尾：Pitch helper 搬去自己的 repo，d4t 這邊移除乾淨（2026-09-23）
+
+使用者 2026-09-23：「我之後帶走後 d4t 會把 pitch helper 移除，就等於 pitch
+helper 直接開新 repo，原來 d4t 不會有殘留」，然後開了 repo
+（<https://github.com/hxlub0905-cmyk/pitch-helper>，public）並說「幫我做 d4t -B」。
+simgen 那一支**不搬**（使用者同一天決定），所以 `apps/` 整個跟著刪 —— 它本來
+就只是搬家的箱子。
+
+**A（開新 repo）**：48 個檔、`ruff` 全綠、141 條測試全綠、量到 60×44 信心
+92.4／92.6。⚠ 照著交接檔做才發現改 import 的 `sed` **不夠**：三條測試驗的東西
+在新 repo 裡本來就不存在（讀 `d4t/__main__.py` 原始碼那條、`BLURRED_BELOW`
+指向沒被抽出來的 `template_dialog` 那條、從 Studio 原始碼反查 `Cell W`／`Cell H`
+那條）。另外補了 `pyproject.toml`（ruff 沒設定會報一大片誤報）、`.gitignore`、CI。
+
+**B（從 d4t 移除）**：整支刪 8 個（含 `apps/`、`tools/extract_app.py`、交接檔
+自己）、逐行改 11 個、5 處註解改字不改行為。`docs/plans/F120-*.md` 搬進
+`docs/history/plans/`。`confidence_at` 跟著走了 —— 它唯一的呼叫者是 helper 本人
+（早期版本誤把它列進「不要刪」）。
+
+**這一輪唯一值得記下來的事**：**刪的時候真正的風險不是「刪不乾淨」，是「刪到
+不該刪的」。** 那幾條為了抽取才剪的解耦，d4t 自己也受益，而它們在移除之後看
+起來就像死碼 —— `core/export/ramps.py`（色階的家，讓 `ui/image_view.py` 不再為
+了一個顏色函式 import 報表產生器：省 10 支模組、7,672 行）、四行不走 `widgets`
+轉出口的 import、`algo/golden.BLURRED_BELOW`（門檻住在演算法旁邊）、
+`algo/template.measure_period` 公開（量週期只有一個家）。所以這一輪**沒有只刪
+東西**：每一條的理由都改寫成「為什麼它現在還在」，指向
+`docs/history/plans/F120-pitch-helper.md`，而不是指向一支不存在的模組。
+
+⚠ 另外兩次 CI 紅燈都是同一個形狀 ——「我把『受影響』想成程式碼」：新增一支模組
+沒畫上 ARCHITECTURE 的目錄樹、改一行 `.md` 沒重跑 `tools/release.py`（搬運檔是
+從 `git ls-files` 產的）。收斂成一句：**動到版控裡任何一個檔案就跑那一行**。
+
+## F120 Pitch helper：七輪，而第七輪才發現前三輪沒生效（2026-09-21）
+
+使用者要把「算 repeating pattern 的 cell period」獨立成一個 helper（原本 ROI
+那張卡一個字不動），形狀照 `simgen`：`python -m d4t pitch`。七輪回饋全部在
+[`docs/history/plans/F120-pitch-helper.md`](docs/history/plans/F120-pitch-helper.md)。
+
+**這一輪唯一值得記下來的事**：使用者連著三輪說「Period 答案要清楚一點」，而
+**我每一輪都改了、每一輪都沒有生效**。程式碼寫的是
+`f.setPointSizeF(f.pointSizeF() * 2.6)` —— 這個 app 的 QSS 用**像素**設字級，
+所以 `pointSizeF()` 回 **-1**，乘出來是負數，Qt **安靜地忽略**；而且就算改成
+`setPixelSize` 也沒用，因為 QSS 的 `* { font-size }` 贏過 per-widget 的
+`setFont()`。量出來答案的字一直是 13 px，跟旁邊的說明一模一樣。
+
+> **一個沒有生效的視覺改動，看起來跟沒有被聽見一模一樣。**
+> 使用者第三次講同一句話的時候，該懷疑的是「它到底有沒有發生」，不是「要放多大」。
+
+修法是走 QSS 的 objectName（`theme` 新增 `font_answer` token ＋ 三條規則），
+而守門的測試**量渲染出來的 `fontMetrics().height()`**，不是「我們設了什麼」
+—— 已驗證把 objectName 換掉它會紅。⚠ 測試裡要先 `ensurePolished()`：QSS 是
+polish 的時候才套上去的。
+
+同一輪的另外六點：自定義 period 也有 confidence 了（`period.confidence_at`
+—— 不是新演算法，是 `_analyze_axis` 的尾巴在呼叫者指定的 lag 上求值，所以跟
+引擎報的分數同尺度：打 45 對一張 60 的圖得 0.0，長條當場變紅）、換算後的單位
+改 µm、Copy 搬到答案正下方（「copy 是 copy 誰？」）、`X + Y` 改名
+`Force both`、打字中途不重算、疊圖那一行三句收成一句。連帶修掉 `Bar` 的
+「0 分畫成空軌道」（跟「沒有被評分過」長得一樣）與 `_fill_try` 的孤兒候選鈕
+（`removeWidget` 不會讓它從畫面上消失，實拍到它疊在最大的那個答案上）。
+
+⚠ **更正我自己上一輪講錯的數字**：`main` 的 pyright 不是 128 而是 **131**
+（同容器、同版 pyright，用 `git worktree` 開 `origin/main` 量的），也就是
+`main` 自己就超過它自己的上限，而 F120 這條分支一條都沒有加（兩份清單逐行
+相同）。這一輪把那 3 條修掉了，現在 128 = 上限，沒有調高任何天花板。
+
+---
+
 ## F117 I6：畫布、Features、Results 互相指（2026-09-20）
 
 走查 52/58 → 53/58。這三塊講的是同一顆 defect 的三個面向 —— 畫布是**怎麼算
