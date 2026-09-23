@@ -120,7 +120,8 @@ docs/HANDOVER-PITCH-SPLIT.md           # 這一份，最後刪
 | `docs/ARCHITECTURE.md` | 視窗政策表的 `PitchHelperWindow` 那一列；目錄樹的 `pitch_helper.py`、`pitch_core.py`、`apps/` 三段 |
 | `README.md` | `python -m d4t pitch` 那一行 |
 | `AGENTS.md` | 機器對照表的 `extract_app.py` 那一列 |
-| `CLAUDE.md` | §0 表格裡指向這一份的那一列（如果有加）|
+| `CLAUDE.md` | §0 表格裡指向這一份的那一列 |
+| `tests/test_size_ceilings.py` | ⚠ `FILE_CEILINGS["CLAUDE.md"]` **調回 332** —— 上一行刪掉之後它會少一行，而這張表有反向測試（掉下去不跟著降就會叫）|
 
 ### B.3 ⚠ 註解裡提到 `pitch_helper` 的幾處 —— 改字，**不要改行為**
 
