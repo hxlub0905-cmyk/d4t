@@ -1,8 +1,11 @@
 """量週期那一支是**公開的**，而且只有一個家（F120）。
 
-2026-09-21 加了 `ui/pitch_helper.py`（丟一張圖進去只問 cell period）。在那之前
-「這張圖的 pitch 是多少」只存在於 `_measure_period` —— 一支私有函式，而它的
-唯一呼叫者是 `build_golden_cell`。
+2026-09-21 加了一個只問 cell period 的小工具（pitch helper，2026-09-23 搬去自己
+的 repo 了）。在那之前「這張圖的 pitch 是多少」只存在於 `_measure_period` ——
+一支私有函式，而它的唯一呼叫者是 `build_golden_cell`。
+
+⚠ **那個工具走了，這一份留著。** 它守的不是那個工具，是「量週期只有一個家」；
+把 `measure_period` 收回 private 只會讓下一個第二呼叫者重走一次同一個選擇：
 
 第二個呼叫者出現的那一天，選擇只有兩個：
 
@@ -82,9 +85,9 @@ def test_a_useless_image_does_not_raise(bad):
 
 
 # --------------------------------------------------------------------------- #
-# 「d4t 自己算的 pitch」與「pitch helper 算的 pitch」是不是同一個
-# （使用者 2026-09-23：「雖然 pitch helper 要搬家，但請幫我確保 d4t 自己算 pitch
-#   的演算法與 pitch helper 一致」）
+# 量週期只有一個家：三票制不准有第二份，而兩條路要給同一個數字
+# （起點是使用者 2026-09-23：「請幫我確保 d4t 自己算 pitch 的演算法與 pitch
+#   helper 一致」。那個工具搬走之後守的對象變成 d4t 自己的兩條路）
 # --------------------------------------------------------------------------- #
 #: 只有這一支可以叫那三個原始的估測器。**其餘任何一支叫了 = 第二份三票制。**
 PERIOD_PRIMITIVES = ("estimate_period", "estimate_period_2d",
@@ -99,9 +102,6 @@ def test_the_raw_estimators_have_exactly_one_caller():
     把它們仲裁成一個答案的三票制**只准住在 `template.measure_period`**。
     哪一天有人為了「只要快速估一下」在別處直接叫原料，那一刻就有了第二個
     pitch —— 而兩個地方對同一張圖給出不同的數字，是這個工具最糟的失敗。
-
-    ⚠ 它掃的是 `d4t/`，**不掃 `apps/`**：那底下是抽出去的複本，本來就是同一份
-    程式碼（`test_the_taken_away_copy_is_the_same_algorithm` 守它們一致）。
     """
     import ast
     import io
@@ -133,12 +133,12 @@ def test_the_raw_estimators_have_exactly_one_caller():
 
 
 @pytest.mark.parametrize("px,py", [(60, 44), (30, 30), (79, 51), (120, 88)])
-def test_the_helper_and_the_template_path_give_the_same_number(px, py):
-    """⚠ **這一條是那句指路的前提。**
+def test_the_two_ways_in_give_the_same_number(px, py):
+    """⚠ **同一張圖，兩條路，一個答案。**
 
-    helper 底下寫著「把它貼進 Template & regions → Cell W / Cell H」。兩邊算出
-    不同的數字的話，那句話就是在教使用者把一個錯的值貼進去 —— 而畫面上不會有
-    任何地方說它們不一樣。
+    直接問 `measure_period` 與走 `build_golden_cell` 是進同一個演算法的兩個門，
+    而模板對話框的 `Cell W` / `Cell H` 讀的是後者。兩邊給出不同的數字的話，
+    畫面上不會有任何地方說它們不一樣 —— 那正是這個工具最糟的失敗。
 
     判準是模板那條路對外給的 `period_x` / `period_y`（Cell W/H 讀的就是它），
     **不是** `px`／`py`（那是 cell 陣列的尺寸 = round）。
@@ -154,9 +154,9 @@ def test_the_helper_and_the_template_path_give_the_same_number(px, py):
 def test_a_one_dimensional_layout_agrees_too():
     """⚠ **一維是常態，不是邊角。** 垂直條紋只有 X 有週期。
 
-    兩邊對「另一軸」的處置必須一樣：`build_golden_cell` 取整張影像的長度當
-    「一格」，而 helper 的 `lattice_periods` 做同一件事 —— 兩邊各寫一次的那天，
-    畫面上的格線會跟疊進去的格子差一整格。
+    ⚠ 判準是**沒有週期的那一軸取整張影像的長度當「一格」**，不是 0、不是
+    NaN。任何一個畫格線的呼叫者都要靠它 —— 它一旦變成 0，那一軸的格線會鋪成
+    無限多條，而那不會拋例外，只會畫出一片黑。
     """
     rng = np.random.default_rng(7)
     y, x = np.mgrid[0:480, 0:600]
@@ -167,40 +167,3 @@ def test_a_one_dimensional_layout_agrees_too():
     assert round(float(m.px)) == 48 and float(m.py) < 2
     assert gc.periodic_x and not gc.periodic_y
     assert gc.py == img.shape[0], "沒有週期的那一軸要取整張影像的高"
-
-    pc = pytest.importorskip("d4t.ui.pitch_core")
-    flags = pc.axis_flags(pc.AXIS_BOTH, m.px, m.py, m.conf_x, m.conf_y)
-    ux, uy = pc.lattice_periods(img.shape[:2], m.px, m.py, flags)
-    assert flags == (True, False)
-    assert abs(ux - gc.px) <= 1 and abs(uy - gc.py) <= 1, (ux, uy, gc.px, gc.py)
-
-
-def test_the_taken_away_copy_is_the_same_algorithm():
-    """⚠ **搬家期間 `apps/pitch` 底下有第二份 —— 它必須一字不差。**
-
-    使用者 2026-09-23：「雖然 pitch helper 要搬家，但請幫我確保 d4t 自己算 pitch
-    的演算法與 pitch helper 一致」。那一份是 `tools/extract_app.py` 抽出來的，
-    唯一該有的差別是 package 名（`d4t.` → `pitchapp.`）。多一個字就是漂移的
-    第一天，而那一天沒有人會發現 —— 兩邊都跑得起來，只是答案不一樣。
-
-    ⚠ `apps/` 搬走之後這一條跟著刪（見 `docs/plans/F120-pitch-helper.md` §29.4）。
-    """
-    import io
-    import os
-
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    copy_root = os.path.join(root, "apps", "pitch", "pitchapp")
-    if not os.path.isdir(copy_root):
-        pytest.skip("apps/pitch 已經搬走了")
-    differ = []
-    for rel in ("core/algo/template.py", "core/algo/period.py",
-                "core/algo/period2d.py", "core/algo/golden.py"):
-        mine = io.open(os.path.join(root, "d4t", rel), encoding="utf-8").read()
-        theirs = io.open(os.path.join(copy_root, rel), encoding="utf-8").read()
-        theirs = theirs.replace("from pitchapp.", "from d4t.") \
-                       .replace("import pitchapp.", "import d4t.")
-        if mine != theirs:
-            differ.append(rel)
-    assert not differ, (
-        "抽出去的那一份跟 d4t 的不一樣了：%s —— "
-        "重跑 `python tools/extract_app.py pitch apps/pitch`" % "、".join(differ))

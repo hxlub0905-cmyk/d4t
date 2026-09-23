@@ -54,10 +54,10 @@ import numpy as np
 # --------------------------------------------------------------------------- #
 # ⚠ 這個常數 2026-09-22 從 `ui/template_dialog.py` 搬到這裡（F120 第十七輪）。
 # 它是 `stack_agreement` 的門檻，本來就該住在那支旁邊 —— 而它待在一支 1,300
-# 行的 Qt 對話框裡的代價是：`pitch_helper` 為了**一個 float** 得把整支對話框
-# import 進來。那條線寫在 `docs/plans/F120-pitch-helper.md` §28 的拆解清單上，
-# 而它是清單裡唯一一條「真的該剪」的。`template_dialog` 現在從這裡轉出去，
-# 所以 `template_dialog.BLURRED_BELOW` 這個名字照樣在。
+# 行的 Qt 對話框裡的代價是：另一個呼叫者為了**一個 float** 得把整支對話框
+# import 進來。那條線寫在 docs/history/plans/F120-pitch-helper.md §28 的拆解清單上，而它是清單裡唯一一條「真的該
+# 剪」的。`template_dialog` 現在從這裡轉出去，所以
+# `template_dialog.BLURRED_BELOW` 這個名字照樣在。
 #: 一致性低於這個值就講「疊出來是糊的」（`golden.stack_agreement`，0–1）。
 #:
 #: **這個數字是量出來的，不是挑的**（F40）。正確的週期在 repo 自己的擬真產生器

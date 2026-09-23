@@ -314,10 +314,11 @@ def measure_period(gray: np.ndarray,
 
     ⚠ **這一支是「這張圖的 cell period 是多少」的唯一出處**，所以它是公開的
     （F120，2026-09-21 從 ``_measure_period`` 改名）。`build_golden_cell` 疊模板
-    之前問它，`ui/pitch_helper.py`（丟一張圖進去只問那個數字）也問它 —— 第二個
-    呼叫者出現的那一天，選擇只有「開放這一支」與「抄一份三票制出去」，
-    而後者一定會漂（`CLAUDE.md` §0）。改名**沒有留舊名字的別名**：一件事兩個
-    名字正是那一節在擋的東西。
+    之前問它；當初是 F120 的 pitch helper（丟一張圖進去只問那個數字）成為第二
+    個呼叫者，而那一天的選擇只有「開放這一支」與「抄一份三票制出去」，後者一定
+    會漂（`CLAUDE.md` §0）。**那個工具 2026-09-23 搬去自己的 repo 了，而這一支
+    照樣公開**：把它收回 private 只會讓下一個第二呼叫者重走一次同一個選擇。
+    歷史見 docs/history/plans/F120-pitch-helper.md。改名**沒有留舊名字的別名**：一件事兩個名字正是那一節在擋的東西。
 
     投影法（`period.estimate_period`）是主：四個月的實測與諧波修正都在它身上。
     二維自相關（`period2d.estimate_period_2d`，F104）在兩種情況接手，

@@ -19,22 +19,14 @@ import os
 
 from PySide6.QtGui import QIcon
 
-__all__ = ["ASSETS_DIR", "ICON_PATH", "PITCH_ICON_PATH", "WORDMARK_PATH",
-           "WORDMARK_DARK_PATH", "app_icon", "pitch_icon"]
+__all__ = ["ASSETS_DIR", "ICON_PATH", "WORDMARK_PATH",
+           "WORDMARK_DARK_PATH", "app_icon"]
 
 #: 這個目錄裡的東西要跟著套件走 —— 見 ``pyproject.toml`` 的 package-data。
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 #: 視窗／工作列圖示。
 ICON_PATH = os.path.join(ASSETS_DIR, "d4t.svg")
-#: Pitch helper 自己的圖示（F120，2026-09-21 使用者：「這個 helper 要有一個
-#: 自己的 icon（獨立於 d4t）」）。
-#:
-#: ⚠ **獨立不等於無關**：磚的形狀跟 `d4t.svg` 一樣（同一套工具的不同入口），
-#: 分別在顏色 —— d4t 是三段式的藍／橙／紫，這一支只有 Measure 的橙，因為它
-#: 從頭到尾只做量東西這一件事。
-PITCH_ICON_PATH = os.path.join(ASSETS_DIR, "pitch.svg")
-
 #: 字標（淺色底用）。
 WORDMARK_PATH = os.path.join(ASSETS_DIR, "d4t-wordmark.svg")
 #: 字標（深色底用）。
@@ -52,14 +44,3 @@ def app_icon() -> QIcon:
         return QIcon()
     return QIcon(ICON_PATH)
 
-
-def pitch_icon() -> QIcon:
-    """回 Pitch helper 的視窗圖示；檔案不在就回空 :class:`QIcon`。
-
-    理由跟 :func:`app_icon` 一字不差（不快取、缺檔不拋例外）—— 兩支長一樣
-    是因為它們**是同一件事的兩個實例**，不是因為忘了抽出來：多一層
-    `_icon(path)` 買不到任何東西，而少一顆圖示不該讓視窗開不起來。
-    """
-    if not os.path.isfile(PITCH_ICON_PATH):
-        return QIcon()
-    return QIcon(PITCH_ICON_PATH)

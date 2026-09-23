@@ -1,10 +1,17 @@
 # F120 — Pitch helper（丟一張圖進去，回答它的 cell period）
 
-狀態：**第十六版，等使用者看過（2026-09-22）** —— `python -m d4t pitch` 開得
-起來，四點追加的需求都在（§5／§5.1／§5.2），使用者七輪回饋都做完（§18），
-第八輪是「截其他狀態的圖」而那幾張圖抓出三個 bug（§19），
-第九輪三顆膠囊／按鈕圖示／畫布量尺（§20），第十輪注意力的分配（§21），第十一輪指路那一句與拖得動的版面（§22），第十二輪信心條搬家與兩色格線（§23），第十三輪青色色標／扁按鈕的真相／一軸一顆複製鍵（§24），第十四輪按鈕高度 30 → 34（§25），第十五輪重看 UI／空狀態的四個問題（§26），第十六輪答案先上畫面＋鍵盤（§27）、右欄整個重排成「先看圖→中間是答案→下面才是設定」＋拆出 `pitch_core`（§27.7）。使用者已經說了下一步是**完全獨立成一個應用程式**（§28 記著要剪哪幾條線）。⚠ **不寫「已收斂」**：使用者還沒
-在真實影像上用過，而這種工具的驗收只有那一件事算數。⚠ §5 那顆「格線」按鈕
+狀態：**結案 —— 這個工具 2026-09-23 搬去自己的 repo 了**
+（<https://github.com/hxlub0905-cmyk/pitch-helper>），d4t 這邊已經移除乾淨。
+這一份留在 history 是因為它是**十七輪的決策紀錄**：每一條都是量出來的不是挑的，
+而新 repo 帶了一份同樣的副本（`docs/F120-pitch-helper.md`）。要動那個工具的版面
+之前先讀它，否則會把已經試過而且被否決的東西再做一次（例：`Auto` 軸向、常駐的
+「What it decided」面板、hero 版面）。
+⚠ **d4t 這邊還留著的，是它當初逼出來的那幾條解耦**，而那些 d4t 自己也受益：
+`core/export/ramps.py`（色階的家）、四行不走 `widgets` 轉出口的 import、
+`algo/golden.BLURRED_BELOW`（門檻住在演算法旁邊）、
+`algo/template.measure_period` 公開（量週期只有一個家）。**不要把它們當死碼刪掉。**
+
+⚠ §5 那顆「格線」按鈕
 **做的時候從「一顆鈕」改成「預設開著」**，理由與它揪出來的那個 bug 在 §10。
 
 使用者 2026-09-21 指定：把「算 repeating pattern 的 cell period」這一件事
@@ -1589,8 +1596,8 @@ period」—— 一句不表態的話配一條紅色的 bar，是那一行在它
    ⚠ **`algo/period`、`algo/period2d`、`algo/golden` 不要刪** —— `template.py`
    與 `ui/lattice_dialog.py` 在用。⚠ **更正**：本節早期的版本把
    `confidence_at` 也列進「不要刪」並說「模板那條路也在用」，**那是錯的** ——
-   掃過之後它唯一的呼叫者是 `pitch_helper.py`，處置見
-   [`docs/HANDOVER-PITCH-SPLIT.md`](../HANDOVER-PITCH-SPLIT.md) B.5。
+   掃過之後它唯一的呼叫者是 `pitch_helper.py`，所以 2026-09-23 移除的時候它
+   跟著走了（見 §29.6）。
 4. `python tools/release.py`（bundle 會縮回去，`apps/` 讓它從 4.6 漲到 5.0 MB）
 
 ⚠ **`simgen` 沒有被要求移除**，只是一起抽了一份。它要不要走是另一個決定。
@@ -1617,24 +1624,27 @@ pitch helper 一致」。**先量再答。** 同一張圖，兩條路的數字�
 | 測試 | 守什麼 |
 |---|---|
 | `test_the_raw_estimators_have_exactly_one_caller` | ⚠ **擋的是「再寫一份」不是「算錯」**：`estimate_period`／`estimate_period_2d`／`half_period_check` 是原料，把它們仲裁成一個答案的三票制只准住在 `template.py`。用 `ast` 掃 `d4t/`，別處叫了就紅 |
-| `test_the_helper_and_the_template_path_give_the_same_number` | helper 底下那句「貼進 Cell W / Cell H」的前提。判準是 `period_x/period_y`（Cell W/H 讀的那一組），**不是** `px`／`py`（那是 cell 陣列的尺寸 = round）|
-| `test_a_one_dimensional_layout_agrees_too` | ⚠ **一維是常態不是邊角**：兩邊對「沒有週期的那一軸」的處置也要一樣（都取整張影像的長度），各寫一次的那天格線會跟疊進去的格子差一整格 |
-| `test_the_taken_away_copy_is_the_same_algorithm` | 搬家期間 `apps/pitch` 底下那一份必須**一字不差**（只准差在 package 名）。多一個字就是漂移的第一天，而那天沒有人會發現 —— 兩邊都跑得起來，只是答案不一樣。⚠ `apps/` 搬走之後這一條跟著刪 |
+| `test_the_helper_and_the_template_path_give_the_same_number` | helper 底下那句「貼進 Cell W / Cell H」的前提。判準是 `period_x/period_y`（Cell W/H 讀的那一組），**不是** `px`／`py`（那是 cell 陣列的尺寸 = round）。⚠ 搬家之後改名 `test_the_two_ways_in_give_the_same_number`：它比的變成 d4t 自己的兩條路（直接問 `measure_period` vs 走 `build_golden_cell`），而那件事沒有因為工具走了就不重要 |
+| `test_a_one_dimensional_layout_agrees_too` | ⚠ **一維是常態不是邊角**：沒有週期的那一軸要取整張影像的長度，不是 0 不是 NaN（0 的話格線會鋪成無限多條，而那不會拋例外，只會畫出一片黑）。⚠ 搬家之後 `pitch_core` 的那段斷言刪了，前半段留著 |
+| `test_the_taken_away_copy_is_the_same_algorithm` | 搬家期間 `apps/pitch` 底下那一份必須**一字不差**（只准差在 package 名）。⚠ **已隨 `apps/` 一起刪**（2026-09-23）—— 它守的是中繼狀態，而中繼狀態結束了 |
 
-### 29.6 之後要怎麼跟 agent 說
+### 29.6 搬完了（2026-09-23）
 
-**完整的操作手冊：[`docs/HANDOVER-PITCH-SPLIT.md`](../HANDOVER-PITCH-SPLIT.md)**
-—— 逐檔的刪除清單、兩段可以直接貼的話（A.3／B.6）、三個「不要刪」、做完的
-判準，以及一段「`pitch` 這個字本身不是殘留」的判準（它是領域術語，到處都是）。
+整個搬家有一份獨立的操作手冊（`docs/HANDOVER-PITCH-SPLIT.md`），而**它自己也
+有壽命**：做完就刪 —— 一份講「怎麼搬家」的文件留在搬完的房子裡，只會讓下一個
+人以為還有東西要搬。所以它現在不在了，這一節是它的結案摘要。
 
-⚠ 三件在那兩段話裡特別標出來的：
+**A（開新 repo）**：<https://github.com/hxlub0905-cmyk/pitch-helper>，48 個檔、
+`ruff` 全綠、141 條測試全綠、量到 60×44 信心 92.4／92.6。⚠ 照手冊做的時候發現
+改 import 的 `sed` **不夠**：三條測試驗的東西在新 repo 裡本來就不存在（讀
+`d4t/__main__.py` 原始碼的那條、`BLURRED_BELOW` 指向沒被抽出來的
+`template_dialog` 的那條、從 Studio 原始碼反查 `Cell W`／`Cell H` 的那條）。
+另外補了 `pyproject.toml`（ruff 沒設定會報一大片誤報）、`.gitignore`、CI。
 
-1. `algo/period`、`period2d`、`golden`、`template.measure_period` **不要刪** ——
-   `template.py` 與 `ui/lattice_dialog.py` 在用。⚠ **`confidence_at` 不在這張
-   清單上**（早期版本誤列）：它唯一的呼叫者是 helper 本人，建議一起帶走。
-2. `core/export/ramps.py` 與 `widgets` 轉出口的解耦**留著** —— 它們是為了抽取才
-   做的，但 d4t 自己也受益（一個 widget 不再 import 報表產生器）。
-3. **`docs/plans/F120-pitch-helper.md` 要一起帶去新 repo** —— 抽取工具不帶文件，
-   而沒有它，下一個人會把已經試過而且被否決的東西再做一次。
+**B（從 d4t 移除）**：整支刪 8 個、逐行改 11 個、5 處註解改字不改行為。
+⚠ **`confidence_at` 跟著走了** —— 它唯一的呼叫者是 helper 本人（早期版本誤把
+它列進「不要刪」，那是錯的）。真正留下來而且**不要當死碼刪掉**的是
+`algo/period`／`period2d`／`golden`／`template.measure_period`（`template.py`
+與 `ui/lattice_dialog.py` 在用）、`core/export/ramps.py`、四行 `widgets` 解耦。
 
-⚠ **A 做完再做 B。** 反過來的話，萬一新 repo 少帶了什麼，來源已經沒了。
+⚠ **順序是 A 做完再做 B。** 反過來的話，萬一新 repo 少帶了什麼，來源已經沒了。

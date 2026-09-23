@@ -28,11 +28,43 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F120 收尾：Pitch helper 搬去自己的 repo，d4t 這邊移除乾淨（2026-09-23）
+
+使用者 2026-09-23：「我之後帶走後 d4t 會把 pitch helper 移除，就等於 pitch
+helper 直接開新 repo，原來 d4t 不會有殘留」，然後開了 repo
+（<https://github.com/hxlub0905-cmyk/pitch-helper>，public）並說「幫我做 d4t -B」。
+simgen 那一支**不搬**（使用者同一天決定），所以 `apps/` 整個跟著刪 —— 它本來
+就只是搬家的箱子。
+
+**A（開新 repo）**：48 個檔、`ruff` 全綠、141 條測試全綠、量到 60×44 信心
+92.4／92.6。⚠ 照著交接檔做才發現改 import 的 `sed` **不夠**：三條測試驗的東西
+在新 repo 裡本來就不存在（讀 `d4t/__main__.py` 原始碼那條、`BLURRED_BELOW`
+指向沒被抽出來的 `template_dialog` 那條、從 Studio 原始碼反查 `Cell W`／`Cell H`
+那條）。另外補了 `pyproject.toml`（ruff 沒設定會報一大片誤報）、`.gitignore`、CI。
+
+**B（從 d4t 移除）**：整支刪 8 個（含 `apps/`、`tools/extract_app.py`、交接檔
+自己）、逐行改 11 個、5 處註解改字不改行為。`docs/plans/F120-*.md` 搬進
+`docs/history/plans/`。`confidence_at` 跟著走了 —— 它唯一的呼叫者是 helper 本人
+（早期版本誤把它列進「不要刪」）。
+
+**這一輪唯一值得記下來的事**：**刪的時候真正的風險不是「刪不乾淨」，是「刪到
+不該刪的」。** 那幾條為了抽取才剪的解耦，d4t 自己也受益，而它們在移除之後看
+起來就像死碼 —— `core/export/ramps.py`（色階的家，讓 `ui/image_view.py` 不再為
+了一個顏色函式 import 報表產生器：省 10 支模組、7,672 行）、四行不走 `widgets`
+轉出口的 import、`algo/golden.BLURRED_BELOW`（門檻住在演算法旁邊）、
+`algo/template.measure_period` 公開（量週期只有一個家）。所以這一輪**沒有只刪
+東西**：每一條的理由都改寫成「為什麼它現在還在」，指向
+`docs/history/plans/F120-pitch-helper.md`，而不是指向一支不存在的模組。
+
+⚠ 另外兩次 CI 紅燈都是同一個形狀 ——「我把『受影響』想成程式碼」：新增一支模組
+沒畫上 ARCHITECTURE 的目錄樹、改一行 `.md` 沒重跑 `tools/release.py`（搬運檔是
+從 `git ls-files` 產的）。收斂成一句：**動到版控裡任何一個檔案就跑那一行**。
+
 ## F120 Pitch helper：七輪，而第七輪才發現前三輪沒生效（2026-09-21）
 
 使用者要把「算 repeating pattern 的 cell period」獨立成一個 helper（原本 ROI
 那張卡一個字不動），形狀照 `simgen`：`python -m d4t pitch`。七輪回饋全部在
-[`docs/plans/F120-pitch-helper.md`](docs/plans/F120-pitch-helper.md)。
+[`docs/history/plans/F120-pitch-helper.md`](docs/history/plans/F120-pitch-helper.md)。
 
 **這一輪唯一值得記下來的事**：使用者連著三輪說「Period 答案要清楚一點」，而
 **我每一輪都改了、每一輪都沒有生效**。程式碼寫的是

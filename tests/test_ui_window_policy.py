@@ -16,8 +16,9 @@
 
 ⚠⚠ **但它不在核心那一批裡** —— 這裡原本寫著「所以它跑在核心那一批裡」，而那
 是錯的：核心批是 ``--ignore-glob="*test_ui_*"``，**判準是檔名**，跟這個檔案
-裡有沒有 Qt 無關。代價在 F120 收到了：`PitchHelperWindow` 沒表態，本機核心批
-（3797 passed）全綠，**CI 才紅**。跑不到 Qt 的機器上要跑這一份的話，要指名：
+裡有沒有 Qt 無關。代價在 F120 收到了：當時新加的一個視窗沒在下面那張表上表態，
+本機核心批（3797 passed）全綠，**CI 才紅**（那個工具後來搬去自己的 repo 了，
+教訓留著）。跑不到 Qt 的機器上要跑這一份的話，要指名：
 
     python -m pytest -q tests/test_ui_window_policy.py
 """
@@ -38,10 +39,6 @@ _SIDE_BY_SIDE = {
     "GcGeneratorWindow": "產模擬資料跟目前的 recipe 無關，它自己是一個小工具",
     "LatticeDialog": "一邊看格線鋪在原圖上對不對、一邊在模板對話框改 cell 尺寸 ——"
                      " 它是那顆「Grid」開關的另一半（F104）",
-    "PitchHelperWindow": "它算出來的那個數字，使用者下一步就是打進 Studio 的"
-                         " 模板對話框／卡片裡 —— 一邊看著它一邊打，正是那個"
-                         " 迴圈（F120；同 GcGeneratorWindow，它有自己的 CLI"
-                         " 進入點 `python -m d4t pitch`，不吃目前的 recipe）",
 }
 
 #: **進去做完一件事再出來的**（規則的反面）—— 這些必須是 modal 對話框。

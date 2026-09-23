@@ -601,20 +601,6 @@ def _cmd_simgen(_args: argparse.Namespace) -> int:
     return simgen_run([])
 
 
-def _cmd_pitch(_args: argparse.Namespace) -> int:
-    """開 Pitch helper：丟一張圖進去，回答它的 cell period（F120）。
-
-    跟 `gui`／`simgen` 一樣 lazy import Qt —— core/CLI 本身不依賴它（鐵則 1）。
-    """
-    try:
-        from d4t.ui.pitch_helper import run as pitch_run
-    except ImportError as exc:
-        print(f"[錯誤] 無法載入圖形介面（需要 PySide6）：{exc}\n"
-              f"       安裝：pip install PySide6", file=sys.stderr)
-        return 2
-    return pitch_run([])
-
-
 def _pct(value: Any) -> str:
     """比率 → ``"25.0%"``，**沒有定義的時候是 `—` 不是 0%**。
 
@@ -684,9 +670,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_parser("simgen",
                    help="從一張 Golden Cell 產一整批擬真資料（貼上就能用）"
                    ).set_defaults(func=_cmd_simgen)
-    sub.add_parser("pitch",
-                   help="Pitch helper：丟一張圖進去，算它的 cell period"
-                   ).set_defaults(func=_cmd_pitch)
     sub.add_parser("steps", help="列出所有已註冊卡片").set_defaults(func=_cmd_steps)
 
     p_val = sub.add_parser("validate", help="Recipe 健檢（lint）")

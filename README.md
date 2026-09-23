@@ -101,9 +101,6 @@ python -m d4t gui                                  # 開啟 Studio
 單獨一件事的小工具（不必先開 Studio、不必先有 recipe）：
 
 ```bash
-python -m d4t pitch                                # Pitch helper：丟一張圖進去，
-                                                   #   算 repeating pattern 的 cell
-                                                   #   period（px；填了 nm/px 就多一行 µm）
 python -m d4t simgen                               # 從一張 Golden Cell 產一整批擬真資料
 ```
 
@@ -212,7 +209,6 @@ git add -A && python tools/release.py && git add -A
 | 給使用者的操作手冊：對焦分數怎麼看、怎麼跟機台的 F.I. 對齊 | [`docs/USING-FOCUS.md`](docs/USING-FOCUS.md) |
 | 已知的坑（**只增不減**） | [`docs/PITFALLS.md`](docs/PITFALLS.md) |
 | 設計緣由：需求訪談結論、名稱由來、六個來源專案 | [`docs/HANDOVER.md`](docs/HANDOVER.md) |
-| **把 Pitch helper 搬成自己的 repo**（⚠ 有壽命：搬完連它自己一起刪）| [`docs/HANDOVER-PITCH-SPLIT.md`](docs/HANDOVER-PITCH-SPLIT.md) |
 | **授權與來源**：d4t 的授權狀態、vendoring 來源、第三方相依 | [`docs/LICENSING.md`](docs/LICENSING.md) |
 | 廠內待驗證假設、受限機器部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) |
 | 上游 GLAS 的介面契約 | [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) |

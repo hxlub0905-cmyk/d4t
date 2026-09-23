@@ -212,7 +212,6 @@ Path 行都建在它上面。
 | `RegionCheckWindow` | 一邊看區域畫在很多顆上、一邊改那張 Region 卡 |
 | `GcGeneratorWindow` | 產模擬資料是一件**跟主視窗無關**的事（它自己是一個小工具，不吃目前的 recipe）|
 | `LatticeDialog` | 一邊看格線鋪在原圖上對不對、一邊在模板對話框改 cell 尺寸 —— 它是模板對話框那顆「Grid」開關的另一半（F104），開著它 re-stack 格線會跟著換 |
-| `PitchHelperWindow` | 它算出來的那個數字，使用者下一步就是打進 Studio 的模板對話框／卡片裡 —— 一邊看著它一邊打，正是那個迴圈（F120）。跟 `GcGeneratorWindow` 同一種：有自己的 CLI 進入點（`python -m d4t pitch`），不吃目前的 recipe |
 
 其餘一律 modal（`WelcomeDialog`、`TemplateDialog`、`ChartSettingsDialog`、
 `GraphBuilderDialog`、`CurveDialog`、`StatusHistoryDialog`、
@@ -250,12 +249,6 @@ Path 行都建在它上面。
 ├── recipes/                  # **出貨的 recipe**：走 `Open recipe…`，不走範本庫
 │                             #   每一份都被 `tests/test_shipped_recipes.py` 真的跑一次
 ├── tools/                    # 開發／搬運／診斷腳本（bootstrap 那幾支 stdlib-only）
-├── apps/                     # **可以帶走的獨立工具**（F120，2026-09-23）：`pitch/`、
-│                             # `simgen/` —— 各自是一個完整、複製出去就跑得起來的
-│                             # 程式。⚠ **這是搬家的箱子，不是一個可以長住的地方**：
-│                             # 使用者帶走之後 d4t 這邊的那一份會刪掉，所以它不是
-│                             # 「同一件事兩個家」。由 `tools/extract_app.py` 抽出來，
-│                             # `tests/test_standalone_apps.py` 守著它真的帶得走
 ├── fab_probe/                # 廠內格式探測腳本（stdlib-only、純文字輸出、單檔可貼）
 ├── bundle/
 │   └── d4t_bundle.py         #   整個 repo 打成的單檔純文字包 —— 公司機拿程式碼的唯一路徑
@@ -281,7 +274,7 @@ Path 行都建在它上面。
 
 ```
 d4t/
-├── __main__.py               # CLI：run / steps / validate / runs / rescore / export / gui / simgen / pitch
+├── __main__.py               # CLI：run / steps / validate / runs / rescore / export / gui / simgen
 ├── core/                     # 純運算，**禁止任何 Qt import**（`tests/test_no_qt.py` 守門）
 │   ├── ingest/               # 讀進來：KLARF、TIFF、影像檔、掛在 lot 上的第二份資料
 │   │   ├── klarf_core.py     #   KLARF 1.2/1.8 無損讀寫引擎（vendored from KLIP，最重要的資產）
@@ -418,27 +411,6 @@ d4t/
     │                         #     （F61 —— 畫一個週期＝畫每一個重複）
     │                         #     `python -m d4t simgen`；只做介面，邏輯在
     │                         #     `tools/make_lot_from_gc.py`
-    ├── pitch_helper.py       #   **Pitch helper**（F120）：丟一張圖進去，回答它的
-    │                         #     cell period（px，填了 nm/px 就多一行 µm）。
-    │                         #     `python -m d4t pitch`。⚠ **一行自己的演算法
-    │                         #     都沒有**：量週期是 `algo/template.measure_period`
-    │                         #     （三票制）、疊 Golden Cell 是
-    │                         #     `build_golden_cell` 本人、裁切 `crop_dialog`、
-    │                         #     格線 `lattice_dialog`、糊不糊的門檻沿用
-    │                         #     `algo/golden.BLURRED_BELOW`。
-    │                         #     畫面上是**兩張圖**：原圖＋切點格線、疊起來那
-    │                         #     一格（清楚＝週期對），配 0–100 的綠黃紅橫條。
-    │                         #     右欄由上而下：**看圖 → 數字 → 設定**（使用者
-    │                         #     2026-09-22 定的順序）
-    ├── pitch_core.py         #   ↑ 的**不碰 widget 的那一半**：常數、判準、
-    │                         #     數字 → 字（`axis_flags` / `nm_text` /
-    │                         #     `pitch_rows` / `trim_to_inner` …）。
-    │                         #     ⚠ **不 import Qt** —— 兩個理由：`pitch_helper`
-    │                         #     撞到 2,200 行的上限，以及**這一半是獨立出去的
-    │                         #     那個 app 要帶走的東西**（`docs/plans/
-    │                         #     F120-pitch-helper.md` §28）。`pitch_helper`
-    │                         #     把每一個名字轉出去，所以 `ph.axis_flags`
-    │                         #     那些既有的叫法一個都沒有換家
     ├── welcome.py            #   首啟導覽 ＋ 範例 recipe 庫對話框（兩個入口各一個旗標，
     │                         #     開關狀態的唯一出處是 `ui/scope.py`）
     ├── workers.py            #   載入／預覽（請求合併）／試跑／寫出 背景執行緒

@@ -289,14 +289,6 @@ _LIGHT: Dict[str, Any] = {
     "font_body": "13px",     #: 面板上正常的一行字（``*`` 那條規則就是它）
     "font_title": "15px",    #: 標題：設定區的卡名、空白狀態、導覽
     #: **一個畫面只有一個答案的時候，那個答案的字級**（F120）。
-    #: Pitch helper 的整個視窗就是為了回答「週期是多少」一件事，所以那個數字
-    #: 不能跟旁邊的說明一樣大。
-    #:
-    #: ⚠ 它**必須走 QSS**，不能在 widget 上 `setFont()` —— 上面那條 ``*``
-    #: 規則有寫 `font-size`，而 QSS 一旦設了字級就會蓋掉 `setFont()`。F120
-    #: 連續三輪把答案「放大」（1.7× → 1.9× → 2.6×）全部**安靜地沒有生效**，
-    #: 量出來一直是 13px；使用者每一輪都回報「答案不夠清楚」。
-    "font_answer": "32px",   #: 一個畫面唯一的那個答案（pitch helper 的週期）
     #: 一條線的粗細。`1px` 在 QSS 裡出現十幾次，而它跟字級是同一個問題：
     #: 螢幕變了要一起改，而「一起」的前提是只有一個地方。
     "hairline": "1px",
@@ -910,13 +902,6 @@ QPushButton[variant="ghost"][clickableText="true"] {
 QPushButton[variant="ghost"][clickableText="true"]:hover {
     background: $accent_bg; color: $accent_active;
 }
-/* The pixel size is a footnote on the answer, not an action: flat, quiet, and
-   it stops looking like a peer of the Copy button sitting under it. */
-QDoubleSpinBox#pitchPixelSize {
-    background: transparent; border: $hairline solid $border_default;
-    color: $text_secondary;
-}
-QDoubleSpinBox#pitchPixelSize:focus { background: $bg_input; color: $text_primary; }
 QPushButton[variant="danger"] {
     background: $danger_bg; color: $danger_text; border: $hairline solid $danger_border;
     font-weight: 600;
@@ -1268,18 +1253,6 @@ QToolTip {
 /* -- Studio-specific object names -------------------------------------- */
 QLabel#paramTitle { color: $text_primary; font-size: $font_title; font-weight: 700; }
 QLabel#paramStepHelp { color: $text_secondary; font-size: $font_small; }
-/* -- the one answer on screen (F120 pitch helper) ----------------------- */
-/* Has to go through QSS, not setFont(): the `*` rule above sets font-size,
-   and a stylesheet font-size beats a per-widget QFont. */
-/* The right column's header: the tool's own name on the left, how this run is
-   going on the right. One row, not two — stacking them costs 18px, and on a
-   1366x768 laptop (with the 125% scaling that is normal in a fab) the column
-   only has about 700px to give. */
-QLabel#pitchName { font-size: $font_title; font-weight: 700; }
-QLabel#pitchState { font-weight: 600; }
-QLabel#pitchAnswer { color: $text_primary; font-size: $font_answer; font-weight: 700; }
-QLabel#pitchAnswerSub { color: $text_secondary; font-size: $font_title; }
-QLabel#pitchAnswerUnit { color: $text_hint; font-size: $font_small; font-weight: 600; }
 /* Section heading in the parameter form. A signpost, not content: it has to
    read as a heading (weight, colour, space above) without competing with the
    parameters themselves.
