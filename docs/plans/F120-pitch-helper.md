@@ -1586,8 +1586,11 @@ period」—— 一句不表態的話配一條紅色的 bar，是那一行在它
    `tests/test_period_confidence_at.py`、`docs/plans/F120-*.md`（搬進
    `docs/history/plans/`）、`ARCHITECTURE.md` 的那兩列與視窗政策表那一列、
    `ui/scope.py` 若有旗標、`apps/pitch/` 與 `tools/extract_app.py` 本身。
-   ⚠ **`algo/period.confidence_at`、`algo/period2d`、`algo/golden` 不要刪** ——
-   模板那條路也在用。
+   ⚠ **`algo/period`、`algo/period2d`、`algo/golden` 不要刪** —— `template.py`
+   與 `ui/lattice_dialog.py` 在用。⚠ **更正**：本節早期的版本把
+   `confidence_at` 也列進「不要刪」並說「模板那條路也在用」，**那是錯的** ——
+   掃過之後它唯一的呼叫者是 `pitch_helper.py`，處置見
+   [`docs/HANDOVER-PITCH-SPLIT.md`](../HANDOVER-PITCH-SPLIT.md) B.5。
 4. `python tools/release.py`（bundle 會縮回去，`apps/` 讓它從 4.6 漲到 5.0 MB）
 
 ⚠ **`simgen` 沒有被要求移除**，只是一起抽了一份。它要不要走是另一個決定。
@@ -1620,13 +1623,15 @@ pitch helper 一致」。**先量再答。** 同一張圖，兩條路的數字�
 
 ### 29.6 之後要怎麼跟 agent 說
 
-兩段可以直接貼的話寫在 [`apps/README.md`](../../apps/README.md) 最下面 ——
-**A 在新 repo 裡繼續開發**、**B 在 d4t 裡移除**。
+**完整的操作手冊：[`docs/HANDOVER-PITCH-SPLIT.md`](../HANDOVER-PITCH-SPLIT.md)**
+—— 逐檔的刪除清單、兩段可以直接貼的話（A.3／B.6）、三個「不要刪」、做完的
+判準，以及一段「`pitch` 這個字本身不是殘留」的判準（它是領域術語，到處都是）。
 
 ⚠ 三件在那兩段話裡特別標出來的：
 
-1. `algo/period.confidence_at`、`period2d`、`golden`、`template.measure_period`
-   **不要刪** —— 模板那條路也在用。
+1. `algo/period`、`period2d`、`golden`、`template.measure_period` **不要刪** ——
+   `template.py` 與 `ui/lattice_dialog.py` 在用。⚠ **`confidence_at` 不在這張
+   清單上**（早期版本誤列）：它唯一的呼叫者是 helper 本人，建議一起帶走。
 2. `core/export/ramps.py` 與 `widgets` 轉出口的解耦**留著** —— 它們是為了抽取才
    做的，但 d4t 自己也受益（一個 widget 不再 import 報表產生器）。
 3. **`docs/plans/F120-pitch-helper.md` 要一起帶去新 repo** —— 抽取工具不帶文件，

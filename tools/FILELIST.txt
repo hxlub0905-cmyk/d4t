@@ -4,11 +4,11 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 05c93bfe4f450929664975133d72d2034d07a8fa .github/workflows/ci.yml
 01f407bd48dc147fa73fa20ce5b7a420b3ca577f .gitignore
 f59f2a0ab3e28b41ec622f838d60b2ddde5800ec AGENTS.md
-957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
+aa7e7e7fefe0bf57e4af870afc10a6c989991d45 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
-e2ae9ca80e7a46d42e3646bb138901bbaff342b5 README.md
+e90a4801daa1f3794b68e58dae94404816f13d81 README.md
 4e806a90a2befdade420107ccfba3bc2310939ff SESSION_LOG.md
-d33d0cfba8be56488def216b497952fa3a91808f apps/README.md
+e2574a21eb9dfc2b82dac2323751a1a4ace39918 apps/README.md
 7e958e9a6f1e836ed8620835b62a80cf80a6234f apps/pitch/README.md
 5620476231b098a5b3e741288e69c217a6eee4ce apps/pitch/main.py
 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 apps/pitch/pitchapp/__init__.py
@@ -244,6 +244,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 b73af2fce98ec03d3847f229e64efd77f4d4b0ab docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
+badaf51c70f22e2d9c3b96163fd1fdf345fd6f39 docs/HANDOVER-PITCH-SPLIT.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 726dece56f0c958d72a98c2571c431ee0df5bbb6 docs/LICENSING.md
 7132326e294b605b1553659156b5f6a62df12543 docs/NO-GIT-SETUP.md
@@ -256,7 +257,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 f995944c47938d392dc4f4baec59760bc3e6ea90 docs/USING-UNIFORMITY.md
 4a56b0ed65886c59f4282f7e67cbc1ac0a64c140 docs/plans/F117-ui-review.md
-34337e8e68f85dfaf1ec9c6150b60e335bcc4cfe docs/plans/F120-pitch-helper.md
+19624b14cf3b1820ef6047b8abb92ff74031d6b5 docs/plans/F120-pitch-helper.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py

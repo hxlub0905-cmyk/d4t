@@ -23,6 +23,7 @@
 | CD 卡的使用手冊 | [`docs/USING-CD.md`](docs/USING-CD.md) | 動 CD 卡的參數、help、輸出名之前 |
 | Focus index 與機台 F.I. 校正的使用手冊 | [`docs/USING-FOCUS.md`](docs/USING-FOCUS.md) | 動 `focus_quality`／`algo/iqi.py`、或要解釋一個對焦分數之前 |
 | Golden Cell 產模擬資料的使用手冊 | [`docs/USING-SIMGEN.md`](docs/USING-SIMGEN.md) | 動 `simgen` 視窗或 `tools/make_lot_from_gc.py` 之前 |
+| **把 Pitch helper 搬成自己的 repo** | [`docs/HANDOVER-PITCH-SPLIT.md`](docs/HANDOVER-PITCH-SPLIT.md) | 要開那個新 repo、或要把 pitch helper 從 d4t 移除之前。⚠ **有壽命**：搬完連它自己一起刪 |
 | **架構**：三段式心智模型、資料模型、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 動 pipeline／資料流之前 |
 | **已知的坑**（只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
