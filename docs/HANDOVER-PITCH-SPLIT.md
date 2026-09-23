@@ -1,6 +1,7 @@
 # 交接：把 Pitch helper 搬成自己的 repo
 
-**狀態：資料夾已經抽好（`apps/pitch`），兩邊都還在。A 與 B 都還沒做。**
+**狀態：A 做完了** —— 新 repo 是 [`hxlub0905-cmyk/pitch-helper`](https://github.com/hxlub0905-cmyk/pitch-helper)（2026-09-23，public，`main` 的 `c1b813e`；141 條測試全綠）。
+**B 還沒做** —— d4t 這邊還完整留著，隨時可以動手。
 
 使用者 2026-09-23：
 
@@ -16,7 +17,8 @@
 
 | | |
 |---|---|
-| `apps/pitch/` | 完整、可以單獨跑的複本（27 支模組、12,786 行）。`python main.py` 就開得起來 |
+| 新 repo | [`hxlub0905-cmyk/pitch-helper`](https://github.com/hxlub0905-cmyk/pitch-helper) —— **A 節做完的成品**（48 個檔、`ruff` 全綠、141 條測試全綠、量到 60×44 信心 92.4／92.6）|
+| `apps/pitch/` | 抽取工具的產出（28 支模組）。新 repo 就是從它長出來的 —— 它的工作結束了，B.1 會刪掉 |
 | `apps/simgen/` | 同樣抽了一份（11 支模組）。⚠ **使用者沒有要求移除它** —— 它要不要走是另一個決定 |
 | `d4t/ui/pitch_helper.py` 等 | **還在**，而且是目前唯一有測試守著的那一份 |
 | `tools/extract_app.py` | 抽取工具（一次性） |
@@ -29,6 +31,10 @@
 
 ## A. 開新 repo
 
+> **A 已經做完了（2026-09-23）** —— 下面留著是因為 B 節要驗「新 repo 真的有
+> 那些東西」，以及萬一要重做一次。實際做出來的成品見
+> <https://github.com/hxlub0905-cmyk/pitch-helper>。
+
 ### A.1 動手
 
 ```bash
@@ -38,6 +44,11 @@ git init && git add -A && git commit -m "Initial commit: extracted from d4t"
 pip install -r requirements.txt
 python main.py              # 確認開得起來
 ```
+
+⚠ 實際做的時候還補了抽取工具與 A.2 都沒列的三樣：`pyproject.toml`（ruff 設定
+沿用 d4t 同一套，否則 `ruff check` 在沒有設定的情況下會報一大片誤報）、
+`.gitignore`、`.github/workflows/ci.yml`（lint ＋ 3.9／3.11／3.12 三版；
+⚠ UI 測試**一個檔案一個行程**，理由同 `AGENTS.md` §5）。
 
 ### A.2 ⚠ 抽取工具**不會**帶的東西，手動補
 
