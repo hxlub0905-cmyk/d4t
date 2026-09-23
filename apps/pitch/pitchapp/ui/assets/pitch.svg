@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Pitch helper">
+  <title>Pitch helper</title>
+  <!-- Pitch helper 自己的圖示（F120，2026-09-21 使用者：「這個 helper 要有一個
+       自己的 icon（獨立於 d4t）」）。
+
+       畫的就是這個工具做的那一件事：**一組重複的柱子，量出它們隔多遠**。
+       底下那一條帶端點的線從一根柱子的中心拉到下一根的中心 —— 那正是
+       pitch 的定義（中心到中心），不是「兩根柱子之間的縫」。
+
+       ⚠ **第一版在 16 px 上糊掉了**（實際渲染六個尺寸看出來的）：四根柱子
+       ＋ 一個框起來的格子 ＋ 一條量線，三層東西疊在 16 px 裡就是一團。
+       現在只剩兩層 —— 柱子（重複）＋ 一條量線（pitch），而量的是**正中間那
+       一對**，所以整個構圖是對稱的。
+
+       ⚠ 磚的形狀（深色圓角方 ＋ rx 14.7）跟 `d4t.svg` **刻意相同** —— 同一套
+       工具的不同入口；形狀講家族，顏色講「這是哪一段」。
+       ⚠ 橙色**逐字取自** `theme.PALETTES["dark"]["stage_measure"]`（#e0a05c）：
+       量東西是 Measure 段，而這支 helper 從頭到尾只做那一件事。柱子用的
+       #e3e6ec 跟 `d4t.svg` 的接線同一個值。改了要一起改 ——
+       `tests/test_ui_branding.py` 會擋。 -->
+  <rect width="64" height="64" rx="14.7" fill="#1c212c"/>
+  <!-- 重複的圖案：四根柱子，中心在 11 / 25 / 39 / 53（pitch = 14） -->
+  <g fill="#e3e6ec">
+    <rect x="7.5" y="11" width="7" height="27" rx="1.8"/>
+    <rect x="21.5" y="11" width="7" height="27" rx="1.8"/>
+    <rect x="35.5" y="11" width="7" height="27" rx="1.8"/>
+    <rect x="49.5" y="11" width="7" height="27" rx="1.8"/>
+  </g>
+  <!-- pitch：中心到中心，而且**量的是正中間那一對** —— 整個構圖因此對稱，
+       不會像量最左邊那一對時那樣右下角空一塊。 -->
+  <g stroke="#e0a05c" stroke-width="4" stroke-linecap="round">
+    <path d="M25 49 L39 49"/>
+    <path d="M25 43 L25 55"/>
+    <path d="M39 43 L39 55"/>
+  </g>
+</svg>

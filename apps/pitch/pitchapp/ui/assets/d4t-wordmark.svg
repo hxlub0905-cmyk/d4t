@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 60" width="168" height="60" role="img" aria-label="d4t">
+  <title>d4t</title>
+  <!-- 字標：d、4、t 三個字用跟圖示同一套筆畫畫出來，整個字標就是一張接線圖。
+       筆畫是深色，配淺色底；深色底請用 d4t-wordmark-dark.svg。 -->
+  <g fill="none" stroke="#1f2430" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="20" cy="34" r="12"/>
+    <path d="M32 8 L32 46"/>
+    <path d="M78 12 L57 34 L92 34"/>
+    <path d="M78 12 L78 46"/>
+    <path d="M120 14 L120 46"/>
+    <path d="M110 24 L132 24"/>
+  </g>
+  <circle cx="32" cy="8" r="4" fill="#4a7ba7"/>
+  <circle cx="57" cy="34" r="4" fill="#4a7ba7"/>
+  <circle cx="78" cy="12" r="4" fill="#4a7ba7"/>
+  <circle cx="78" cy="34" r="4.6" fill="#b0722f"/>
+  <circle cx="78" cy="46" r="4" fill="#7a68a6"/>
+  <circle cx="120" cy="46" r="4" fill="#7a68a6"/>
+</svg>

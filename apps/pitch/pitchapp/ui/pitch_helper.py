@@ -82,10 +82,10 @@ from PySide6.QtWidgets import (
     QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from d4t.core.algo import period as algo_period
-from d4t.core.algo import period2d as algo_period2d
-from d4t.core.algo import template as algo_template
-from d4t.core.log import swallowed
+from pitchapp.core.algo import period as algo_period
+from pitchapp.core.algo import period2d as algo_period2d
+from pitchapp.core.algo import template as algo_template
+from pitchapp.core.log import swallowed
 
 from . import branding, fit_screen, theme
 from .chips import ChoiceChips
@@ -327,7 +327,7 @@ class _PitchWorker(QThread):
         內部叫的也是這兩支），不是再跑一次整支 —— 相位搜尋在 4096² 要 5 秒，
         而它的答案不會因為少了一圈格子而改變。
         """
-        from d4t.core.algo import golden as algo_golden
+        from pitchapp.core.algo import golden as algo_golden
         box = trim_to_inner(self._image.shape[:2], ux, uy, gc.origin, flags)
         if box is None:
             return gc                       # 格子太少，拿掉不划算（見 `trim_to_inner`）
@@ -1030,7 +1030,7 @@ class PitchHelperWindow(QMainWindow):
             self._load_path(str(path))
 
     def _load_path(self, path: str) -> None:
-        from d4t.core.ingest import imageio as ingest_imageio
+        from pitchapp.core.ingest import imageio as ingest_imageio
         try:
             arr = ingest_imageio.load_gray(path)
         except Exception as e:
@@ -1756,7 +1756,7 @@ def _qimage_to_gray(img: Optional[QImage]) -> Optional[np.ndarray]:
 
 
 def run(argv: Optional[Sequence[str]] = None) -> int:
-    """``python -m d4t pitch`` 的進入點。"""
+    """``python main.py`` 的進入點。"""
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(list(argv or []))
     theme.apply_theme(app)

@@ -1494,3 +1494,100 @@ period」—— 一句不表態的話配一條紅色的 bar，是那一行在它
 
 ⚠ **`d4t/core` 不得 import Qt**（鐵則 1）在拆完之後仍然成立，而且更重要：
 那條線就是「引擎可以被兩個前端共用」的那條線。
+
+## 29. 真的抽出去了：`apps/pitch` 與 `apps/simgen`（2026-09-23）
+
+使用者：「請幫我將這個 pitch helper 獨立成一個資料夾，同時我記得 d4t 好像也有
+這種獨立功能的 UI 也幫我獨立出來」，然後補了決定性的一句：
+
+> 我之後帶走後 d4t 會把 pitch helper 移除，就等於 pitch helper 直接開新 repo，
+> **原來 d4t 不會有殘留**。
+
+⚠ **那一句把設計整個翻過來。** 在它之前我準備的是「結構分家 ＋ 一支產生器」，
+因為這個 repo 的頭號鐵則是「同一件事只寫在一個地方」，而複製一份出來一定會漂。
+但既然 d4t 那邊之後會刪掉，就**不會有兩個家**，所以：
+
+* 不需要產生器來防漂 —— 只需要一支**一次性的搬家工具**把最容易手工做錯的事做對；
+* 那個資料夾應該直接長成**一個可以 `git init` 的 repo**（自己的 README、
+  requirements、進入點），而不是一份「裁剪過的複本」；
+* 也因此**不該讓它繼承用不到的東西**。
+
+### 29.1 ⚠ 先砍兩條「為了一個名字，背一整層」的線
+
+量出來的相依閉包：
+
+| | 抽之前 | 砍完 |
+|---|---|---|
+| pitch helper | 78 支模組、48,495 行 | **27 支、12,786 行** |
+| simgen | 75 支、46,715 行 | **11 支、4,355 行** |
+
+兩條線的形狀一模一樣 —— **為了一個名字，把它底下整層拖進來**：
+
+1. **`widgets.py`**：四個工具寫 `from .widgets import to_uint8`，而 `widgets.py`
+   是一道把整個 UI 層轉出去的檔案，於是卡片庫、參數表單、圖表設定全被拉進來。
+   而那兩個名字本來就住在 `icons.py` / `image_view.py`，**那四支本來就已經
+   import 它們了** —— 四行改動。
+2. **`uniformity_charts.heat_hex`**：`ui/image_view.py` 為了畫影像上那條色條要
+   一個顏色函式，於是**一個 widget import 了報表產生器**（底下掛著 `boxplot`／
+   `chart_draw`／`report`／`klarf_out`／`klarf_core`）。代價 10 支模組、7,672 行。
+   色階搬進新的 `core/export/ramps.py`，`uniformity_charts` 從那裡轉出去 ——
+   同 §27.7.4 的 `BLURRED_BELOW`，**一個門檻／一個紅只有一個家**。
+
+> 這兩條都不是「順手清一下」：帶走的 repo 一開張就背著一個它永遠用不到的 KLARF
+> 寫回器，那是錯的。
+
+### 29.2 抽取工具：`tools/extract_app.py`
+
+它只做兩件手工最容易做錯的事：
+
+* **相依閉包** —— ⚠ `from d4t.core.algo import period` 這種要拆開看：
+  `d4t.core.algo` 是 package，真正要帶走的是 `d4t.core.algo.period`。只看
+  `node.module` 會漏掉它，而**漏掉的那一支不會在 import 的時候炸**，要等使用者
+  走到那條路。
+* **import 改寫** —— 目錄形狀保持跟 `d4t/` 一樣（`ui/`、`core/`），所以相對
+  import 一個字都不用動，只有絕對的 `d4t.xxx` 換成新的 package 名。
+
+它另外擋兩件**不會報錯的**錯誤：
+
+* `branding.py` 名字裡寫著的資產沒被複製 —— `app_icon()` 的 `os.path.isfile`
+  會安靜地回一個空 `QIcon`，畫面上只是「沒有圖示」。
+* `RENAMES` 那張表沒套用完 —— 來源改過了而表沒跟上 ⇒ 帶走的那份留著一句假話。
+
+`RENAMES` 是一份**短、而且寫在工具原始碼裡看得見**的清單，判準只有一個：
+**這句話在新的 repo 裡還是不是真的。** 目前四條：`NEXT_STEP`（指向 Studio 的
+`Template & regions`，§28 早就點名）、simgen 的視窗標題（`— d4t`）、兩支
+`run()` 的 `python -m d4t …`。**其餘一個字都不改** —— 抽取要是忠實的。
+
+### 29.3 守門：`tests/test_standalone_apps.py`
+
+守的是**帶走那一刻會安靜做錯的三件事**，三條都驗過會紅：
+
+| 測試 | 守什麼 |
+|---|---|
+| `test_nothing_in_there_imports_d4t` | ⚠ **在開發機上跑得動不算數**：這台機器裝著 d4t，一支漏改的 `import d4t.…` 完全正常。所以用 `ast` 掃，不靠跑跑看 |
+| `test_every_module_it_imports_is_actually_in_there` | 漏一支不會在 import 的時候炸 |
+| `test_no_sentence_points_at_something_that_will_not_exist` | 指向 d4t Studio 的指路、掛著 `d4t` 的視窗標題 |
+| `test_the_asset_files_it_names_are_all_there` | 少一個不報錯，只是安靜地沒有圖示 |
+| `test_it_opens_without_d4t_on_the_path` | ⚠ **最後一關是動態的**：裝一個 meta path hook 讓任何 `import d4t…` 直接炸，然後把視窗開起來。不擋的話這一條永遠是綠的 |
+
+實測抽出來的那一份跟 d4t 裡**逐位元組相同**：同一張圖、同一組參數，
+`agreement = 0.989895`、`n_cells = 90` 兩邊一樣。
+
+### 29.4 ⚠ `apps/` 是搬家的箱子，不是一個可以長住的地方
+
+它現在讓 repo 裡有兩份同樣的程式碼，而那只在「搬完就刪」的前提下才成立。
+**搬走之後要做的**（`apps/README.md` 也寫了一份）：
+
+1. `cp -r apps/pitch ~/pitch-helper && cd ~/pitch-helper && git init`
+2. 補一份 `LICENSE`
+3. 回頭刪 d4t 這邊：`d4t/ui/pitch_helper.py`、`d4t/ui/pitch_core.py`、
+   `d4t/ui/assets/pitch.svg`、`branding.PITCH_ICON_PATH` / `pitch_icon()`、
+   `__main__.py` 的 `pitch` 子命令、`tests/test_ui_pitch_helper.py`、
+   `tests/test_period_confidence_at.py`、`docs/plans/F120-*.md`（搬進
+   `docs/history/plans/`）、`ARCHITECTURE.md` 的那兩列與視窗政策表那一列、
+   `ui/scope.py` 若有旗標、`apps/pitch/` 與 `tools/extract_app.py` 本身。
+   ⚠ **`algo/period.confidence_at`、`algo/period2d`、`algo/golden` 不要刪** ——
+   模板那條路也在用。
+4. `python tools/release.py`（bundle 會縮回去，`apps/` 讓它從 4.6 漲到 5.0 MB）
+
+⚠ **`simgen` 沒有被要求移除**，只是一起抽了一份。它要不要走是另一個決定。

@@ -26,8 +26,8 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QLabel, QVBoxLayout, QWidget,
 )
 
-from d4t.core.algo import golden as algo_golden
-from d4t.core.algo import period2d as algo_period2d
+from pitchapp.core.algo import golden as algo_golden
+from pitchapp.core.algo import period2d as algo_period2d
 
 from . import fit_screen
 from .image_view import ImageView

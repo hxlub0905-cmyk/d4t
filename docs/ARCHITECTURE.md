@@ -250,6 +250,12 @@ Path 行都建在它上面。
 ├── recipes/                  # **出貨的 recipe**：走 `Open recipe…`，不走範本庫
 │                             #   每一份都被 `tests/test_shipped_recipes.py` 真的跑一次
 ├── tools/                    # 開發／搬運／診斷腳本（bootstrap 那幾支 stdlib-only）
+├── apps/                     # **可以帶走的獨立工具**（F120，2026-09-23）：`pitch/`、
+│                             # `simgen/` —— 各自是一個完整、複製出去就跑得起來的
+│                             # 程式。⚠ **這是搬家的箱子，不是一個可以長住的地方**：
+│                             # 使用者帶走之後 d4t 這邊的那一份會刪掉，所以它不是
+│                             # 「同一件事兩個家」。由 `tools/extract_app.py` 抽出來，
+│                             # `tests/test_standalone_apps.py` 守著它真的帶得走
 ├── fab_probe/                # 廠內格式探測腳本（stdlib-only、純文字輸出、單檔可貼）
 ├── bundle/
 │   └── d4t_bundle.py         #   整個 repo 打成的單檔純文字包 —— 公司機拿程式碼的唯一路徑
@@ -335,6 +341,13 @@ d4t/
 │   │   ├── klarf_out.py      #   KLARF 三種寫回模式：inplace／annotate／topn
 │   │   ├── report.py html.py boxplot.py  #   CSV／Excel／HTML 報表／box plot（手寫 SVG，零新相依）
 │   │   ├── uniformity_charts.py  #   均勻度四種圖（同上手寫 SVG）⚠ 一個點＝一格框，不是一顆 defect
+│   │   ├── ramps.py         #   **色階**：一階色 ＋ 0–1 → 一個顏色（`heat_hex`／
+│   │   │                    #   `seq_hex`）。2026-09-23 從 `uniformity_charts` 拆出來
+│   │   │                    #   —— ⚠ **一條跨層的線**：`ui/image_view.py` 為了畫影像
+│   │   │                    #   上那條色條要一個顏色函式，於是一個 widget import 了
+│   │   │                    #   **報表產生器**（底下掛著 boxplot／chart_draw／report／
+│   │   │                    #   klarf_out）。實測代價：10 支模組、7,672 行。
+│   │   │                    #   `uniformity_charts` 從這裡轉出去，名字一個都沒換家
 │   │   ├── chart_frame.py    #   **一列一格框**的長表（F88 第一刀）——「一份資料、
 │   │   │                     #   很多種看法」的那個「一份資料」。`row`/`col` 走
 │   │   │                     #   `cell_edges` 的同一套分群，**整張表一起分**

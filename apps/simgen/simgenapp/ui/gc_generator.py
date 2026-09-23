@@ -144,7 +144,7 @@ class GcGeneratorWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Simulate a lot from a Golden Cell — d4t")
+        self.setWindowTitle("Golden Cell generator")
         self._gc: Optional[np.ndarray] = None
         self._worker: Optional[_GenWorker] = None
         self._backend = None
@@ -756,7 +756,7 @@ class GcGeneratorWindow(QMainWindow):
 
 
 def run(argv=None) -> int:
-    """``python -m d4t simgen`` 的進入點。"""
+    """``python main.py`` 的進入點。"""
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(list(argv or []))
     theme.apply_theme(app)
