@@ -45,7 +45,7 @@ python main.py              # 確認開得起來
 |---|---|---|
 | **`docs/F120-pitch-helper.md`** | `d4t/docs/plans/F120-pitch-helper.md` | **最重要的一件**。十七輪的決策紀錄，每一條都是量出來的。沒有它，下一個人會把已經試過而且被否決的東西再做一次（例：`Auto` 軸向、常駐的「What it decided」面板、hero 版面）|
 | `LICENSE` | `d4t/LICENSE` | 目前沿用專有／內部條款 |
-| 測試 | `d4t/tests/test_ui_pitch_helper.py`（129 條）、`tests/test_period_confidence_at.py`（13 條）| 抽取工具只帶程式碼。這兩支要改 import（`d4t.ui.…` → `pitchapp.ui.…`）|
+| 測試 | `d4t/tests/test_ui_pitch_helper.py`（129 條）、`tests/test_period_confidence_at.py`（13 條）| 抽取工具只帶程式碼。這兩支要改 import，**而且有三條要改內容**（見 A.2.1）|
 | `.gitignore` / CI | 自己寫 | d4t 的不一定合用 |
 
 改 import 的最小做法：
@@ -56,8 +56,22 @@ sed -i 's/\bfrom d4t\.ui\./from pitchapp.ui./g; s/\bfrom d4t\.core\./from pitcha
         s/"d4t\.ui\./"pitchapp.ui./g' tests/*.py
 ```
 
-⚠ 測試裡有**字串形式**的模組名（`pytest.importorskip("d4t.ui.pitch_core")`、
-`monkeypatch.setattr("d4t.ui....")`），`grep import` 找不到它們 —— 跑一次就知道。
+#### A.2.1 ⚠ sed 是必要但**不夠** —— 有三條測試會紅（實測）
+
+上面那道 sed 套完之後**實際跑過**：142 條裡 **3 條紅**。它們紅的原因都一樣 ——
+它們驗的東西在新 repo 裡本來就不存在，不是 import 沒改到：
+
+| 測試 | 為什麼紅 | 怎麼改 |
+|---|---|---|
+| `test_the_cli_has_a_pitch_subcommand` | 它讀 `d4t/__main__.py` 的**原始碼字串**驗 `add_parser("pitch"`。新 repo 沒有 argparse 子命令，入口是 `main.py` | 改成讀 `main.py` 與 `pitchapp/__main__.py`，驗它們叫 `from pitchapp.ui.pitch_helper import run` |
+| `test_the_agreement_bar_uses_the_same_threshold_as_the_template_path` | `from d4t.ui.template_dialog import BLURRED_BELOW` —— sed 把它改成 `pitchapp.ui.template_dialog`，而**那支模組沒被抽出來**（1,300 行的 Studio 對話框） | 改成 `from pitchapp.core.algo.golden import BLURRED_BELOW`（那才是門檻真正的家，`template_dialog` 只是轉出去）|
+| `test_the_next_step_names_something_that_exists` | 它從 `d4t/ui/template_dialog.py` 的原始碼反查 `Cell W` / `Cell H`，確認 `NEXT_STEP` 指的地方真的存在。新 repo 沒有那個地方，而 `NEXT_STEP` 本來就被抽取工具改寫成 `"Copy it into your tool's cell size fields."` | **整支刪掉**。它守的是「d4t Studio 那一格的標籤改了要叫」，那件事跟新 repo 無關 |
+
+改完再跑：**141 條全綠**（129 + 13 − 刪掉的那一條）。
+
+`tests/conftest.py` **不用帶** —— 拿掉它 141 條照樣全綠，而它裡面三個
+`sys.modules.get("d4t.ui.…")` 在新 repo 是死碼（它服務的是 Studio 的 modal
+與動畫，helper 沒有那些）。
 
 ### A.3 給 agent 的話（可以直接貼）
 
@@ -79,10 +93,32 @@ sed -i 's/\bfrom d4t\.ui\./from pitchapp.ui./g; s/\bfrom d4t\.core\./from pitcha
 
 ```bash
 cd ~/pitch-helper
-python -m pytest -q                       # 帶過去的測試全綠
-python main.py                            # 視窗開得起來、量得出數字
-grep -rn "\bd4t\b" pitchapp/ --include="*.py" | grep -v "^.*:.*#"   # 應該是空的
+python -m pytest -q                       # 141 條全綠（見 A.2.1）
+python main.py                            # 視窗開得起來、標題是 `Pitch helper`、量得出數字
+
+# ⚠ 這一道才是判準：**import 層**還有沒有人在叫 d4t
+grep -rn "^\s*\(from\|import\)\s\+d4t\b\|[\"']d4t\.[a-z]" pitchapp/ --include="*.py"
 ```
+
+⚠ **不要**拿 `grep -rn "\bd4t\b" pitchapp/` 當判準 —— 實測命中 58 行，而那 58 行
+**應該留著**：它們是 vendoring 的出處（`# Vendored into d4t on 2026-07-27.`）、
+慣例的規範出處、以及「這個 token 為什麼長這樣」的理由。把它們洗掉等於把六個來源
+專案的履歷洗掉。判準是**執行時有沒有依賴**，不是**字面上有沒有出現**。
+
+上面那道 import 層的掃描目前命中**一行**，而它不是 import：
+
+```
+pitchapp/ui/branding.py:29:ICON_PATH = os.path.join(ASSETS_DIR, "d4t.svg")
+```
+
+那是**資產檔名**，跟著它的是 `ui/assets/` 底下三個檔：`d4t.svg`、
+`d4t-wordmark.svg`、`d4t-wordmark-dark.svg`（`branding.py` 點名它們，少一個
+`app_icon()` 會安靜地回一個空 `QIcon`）。新 repo 要自己決定：
+
+* **留著** —— 零成本，但新 repo 裡有三個叫 d4t 的檔案
+* **改名／換圖** —— 三個檔案 ＋ `branding.py` 裡三個常數。⚠ 視窗用的是
+  `pitch.svg`（`pitch_icon()`），`d4t.svg` 只走 `app_icon()`；wordmark 目前沒有
+  呼叫者，要刪就連 `branding.py` 裡的常數一起刪
 
 ---
 
