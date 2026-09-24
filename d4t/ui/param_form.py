@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from d4t.core.steps.load import fit_channel_map
+
 from . import strings
 from . import theme
 from .chips import ChoiceChips, MetricChips, MetricPick, _ChipFlow, _ChoiceChip
@@ -93,6 +95,8 @@ class ParamForm(QWidget):
         #: 編輯器用得到它 —— 但它是「資料的事實」而不是「這張卡的參數」，
         #: 所以放在表單上（一份資料一次）而不是塞進 `set_step` 的簽章。
         self._image_count = 0
+        #: 開著的那份資料的第一顆（F121 期 3，見 :meth:`set_data_item`）。
+        self._data_item: Any = None
         #: 目前掛上的 GLAS 匯出**有幾層**（0 = 沒掛）。`channel_map` 的
         #: `row_kind="labels"` 靠它排列數 —— 使用者打開那一格時，第一個要知道
         #: 的是「這份匯出有哪幾層」，而那在掛上去的那一刻就知道了。
@@ -339,6 +343,30 @@ class ParamForm(QWidget):
             if isinstance(row.editor, ChannelMapField) \
                     and row.editor.row_kind() == "images":
                 row.editor.set_min_rows(n)
+
+    def set_data_item(self, item: Any) -> None:
+        """開著的那份資料的**第一顆**（沒有資料給 ``None``，F121 期 3）。
+
+        一件事講兩個事實給 `channel_map` 的編輯器：一顆有幾張（排列數，同
+        :meth:`set_image_count`），與「把名字表對齊到這份資料」—— 後者讓編輯器
+        在值跟資料對不上時露出「照這份資料填」那顆鈕。對齊的規則在 core
+        （`steps/load.fit_channel_map`），這裡不自己寫第二份。
+        """
+        images = dict(getattr(item, "images", None) or {}) \
+            if item is not None else {}
+        self._data_item = item if images else None
+        self.set_image_count(len(images))
+        for row in self._rows.values():
+            if isinstance(row.editor, ChannelMapField) \
+                    and row.editor.row_kind() == "images":
+                row.editor.set_fitter(self._fitter())
+
+    def _fitter(self) -> Any:
+        """「把一張名字表對齊到開著的那份資料」—— 沒開資料就是 ``None``。"""
+        item = self._data_item
+        if item is None:
+            return None
+        return lambda current, it=item: fit_channel_map(current, it)
 
     def set_label_count(self, n: int) -> None:
         """告訴表單「掛上的 GLAS 匯出有幾層」（F11 Region-3）。
@@ -1086,6 +1114,8 @@ class ParamForm(QWidget):
                 min_rows=(self._label_count if kind == "labels"
                           else self._image_count),
                 row_kind=kind)
+            if kind == "images":
+                w.set_fitter(self._fitter())
             w.changed.connect(lambda t, n=name: self._emit(n, str(t)))
             return w
 

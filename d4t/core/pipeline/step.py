@@ -1583,6 +1583,23 @@ class Step(ABC):
         """
         return []
 
+    @classmethod
+    def data_issues(cls, params: Dict[str, Any],
+                    data: Any) -> List[Tuple[str, str, str, str]]:
+        """**對著現在開著的那份資料**才看得出來的發現：``(code, level, title, detail)``。
+
+        ``data`` 是 `ingest.dataset.DataProfile`（一顆幾張、有沒有 KLARF、有哪幾欄；
+        core 的這一層不 import ingest，所以型別寫 Any）。跟 :meth:`kind_issues`
+        的差別是它問的是**事實**，不是資料型別的名字 —— 一條 pipeline 吃不吃得下
+        一份資料，看的是那幾個事實（F121 期 1 的結論）。只有 `validate` 拿到
+        ``data`` 時才呼叫（沒開資料的時候沒有東西可以對）。
+
+        為什麼要它（F121 期 3，使用者回報 2026-09-24）：一條 EBI 的 pipeline 開在
+        一個影像資料夾上，**每一顆**都在 Input 卡報同一句錯。那句話的每一個字在
+        開資料那一刻就知道了 —— 講一次、講在那張卡上、在開跑之前。
+        """
+        return []
+
     # ---- 跨顆那一層（F16）--------------------------------------------------
     #: 這張卡是**整批跑完之後跑一次**的嗎（而不是一顆一顆）。
     #:

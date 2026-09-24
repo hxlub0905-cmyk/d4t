@@ -254,7 +254,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     print(f"\nRecipe 健檢（{ds.kind}）：")
-    if _print_issues(validate(recipe, kind=ds.kind)):
+    # 對著**這份資料**檢查（F121 期 3）：Input 卡的名字表要幾張、要不要 KLARF ——
+    # 對不上的話在這裡擋一次，而不是跑下去每一顆報一次。
+    from d4t.core.ingest.dataset import data_profile
+    if _print_issues(validate(recipe, kind=ds.kind, data=data_profile(ds))):
         print("[錯誤] recipe 有 error 等級問題，請先修正。", file=sys.stderr)
         return 1
 

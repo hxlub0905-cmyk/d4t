@@ -26,6 +26,7 @@ from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       is_region_edge, region_edge_values,
                                       rules_to_tree)
 from d4t.core.steps._util import centre_name, others_name
+from d4t.core.ingest.dataset import data_profile
 from d4t.core.steps.load import channel_map_for
 from d4t.core.steps.glv_stats import EACH_BOX, POOLED
 
@@ -1797,16 +1798,21 @@ class RecipeModel:
         self.route_by = None
         self._changed()
 
-    def validate(self, data_kind: Optional[str] = None):
-        """健檢。``data_kind`` ＝ **現在開著的資料**是哪一種（F121 期 1）。
+    def validate(self, data: Any = None):
+        """健檢。``data`` ＝ **現在開著的資料**（一份 `Dataset`；只給型別字串也行）。
 
-        給了就照「這份 recipe 在這份資料上會跑哪一條、那條上的卡對這種資料
-        講不講得通」來檢查 —— 那正是開跑前要問的。以前這裡一律拿
+        給了就照「這份 recipe 在這份資料上會跑哪一條（F121 期 1）、那條上的卡
+        對這份資料講不講得通（一顆幾張、有沒有 KLARF —— F121 期 3，
+        `Step.data_issues`）」來檢查 —— 那正是開跑前要問的。以前這裡一律拿
         ``self.kind``（正在編的 route 鍵），於是一份 `ebi_patch` 的 recipe 開在
         一個影像資料夾上時健檢說「沒問題」，跑下去每一顆都錯。沒有資料時退回
         ``self.kind``。
         """
-        return validate(self.to_recipe(), kind=data_kind or self.kind)
+        if data is None or isinstance(data, str):
+            return validate(self.to_recipe(), kind=data or self.kind)
+        return validate(self.to_recipe(),
+                        kind=str(getattr(data, "kind", "") or self.kind),
+                        data=data_profile(data))
 
 
 # ---------------------------------------------------------------------------

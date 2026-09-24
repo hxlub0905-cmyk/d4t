@@ -668,6 +668,64 @@ def load_raw_folder(folder, spec: "RawSpec") -> Dataset:
 #: 一支寫出來，F16 讓 main 也要用，於是它們搬回自己的家（`pair_source` 仍然
 #: re-export，呼叫端一個字都不用改 —— 那是搬家，不是複製一份）。
 
+def images_in_order(images: Dict[str, Any]) -> List[str]:
+    """一顆 defect 的影像**依「第幾張」排序**的 channel 名。
+
+    多頁 TIFF 的每一張都帶 ``page``（0-based 絕對頁號），同一顆的幾張是連續的，
+    所以照 page 排就是「這一顆的第 1、2、3… 張」。沒有 page 的（每顆一個檔案的
+    資料集）就照 ingest 放進 dict 的順序 —— 那也是它給的順序。
+
+    ⚠ **「第幾張」只有這一個家**（F121 期 3 從 `steps/load.py` 搬來）：Input 卡的
+    名字表照它編號、:func:`data_profile` 照它講「這批資料的第 1 張叫什麼」——
+    兩邊數法不一樣的話，名字表的 ``2:ref`` 會指到另一張圖。
+    """
+    keys = list(images)
+    pages = [getattr(images[k], "page", None) for k in keys]
+    if keys and all(p is not None for p in pages):
+        return [k for _p, k in sorted(zip(pages, keys), key=lambda t: t[0])]
+    return keys
+
+
+@dataclass(frozen=True)
+class DataProfile:
+    """**這批資料長什麼樣** —— Input 卡對資料講話時要的那幾個事實（F121 期 3）。
+
+    一條 pipeline 能不能吃一份資料，看的是「一顆幾張」與「有沒有 KLARF、有哪幾
+    欄」，不是資料型別的名字（F121 期 1 的結論）。這一份把那幾個事實在開資料時
+    算一次，交給 `validate`（→ `Step.data_issues`）與 UI，讓「對不上」在**開跑之前**、
+    **在那張卡上**講一次，而不是跑下去每一顆報一次。
+    """
+
+    kind: str
+    n_items: int
+    #: 整批「一顆幾張」的最少與最多（通常相等；不等就是有幾顆少拍了）。
+    images_min: int
+    images_max: int
+    #: 第一顆的影像依「第幾張」排好的 channel 名（名字表照它填）。
+    image_names: Tuple[str, ...]
+    has_klarf: bool
+    #: KLARF 的欄名（大寫）；沒有 KLARF 是空的。
+    columns: Tuple[str, ...]
+
+
+def data_profile(dataset: Any) -> Optional[DataProfile]:
+    """算一份 :class:`DataProfile`；沒有資料集（``None``）就回 ``None``。"""
+    if dataset is None:
+        return None
+    items = list(getattr(dataset, "items", None) or [])
+    counts = [len(getattr(it, "images", None) or {}) for it in items]
+    first = dict(getattr(items[0], "images", None) or {}) if items else {}
+    return DataProfile(
+        kind=str(getattr(dataset, "kind", "") or ""),
+        n_items=len(items),
+        images_min=min(counts) if counts else 0,
+        images_max=max(counts) if counts else 0,
+        image_names=tuple(images_in_order(first)),
+        has_klarf=getattr(dataset, "klarf", None) is not None,
+        columns=tuple(columns_of(dataset)),
+    )
+
+
 def columns_of(dataset: Any) -> List[str]:
     """這一份 KLARF 有哪些欄（大寫）。沒有 KLARF 就是空的。
 

@@ -166,8 +166,7 @@ class RunController(QObject):
         # 錯的卡片以前的下場是**跑完 200 顆、每一顆都失敗**：進度條走完、結果
         # 是空的、原因埋在每顆的錯誤訊息裡。同一份檢查 CLI 從 M1 就在用了，
         # 只是 Studio 一直沒接上來。只擋 error，warning 照跑。
-        issues = self.w.model.validate(
-            getattr(self.w.dataset, "kind", None))
+        issues = self.w.model.validate(self.w.dataset)
         problems = [i for i in issues if i.level == "error"]
         if problems:
             first = problems[0]
@@ -324,8 +323,7 @@ class RunController(QObject):
         if not rows:
             self.w._status("Nothing to re-run yet — run a trial first.", "error")
             return False
-        issues = self.w.model.validate(
-            getattr(self.w.dataset, "kind", None))
+        issues = self.w.model.validate(self.w.dataset)
         problems = [i for i in issues if i.level == "error"]
         if problems:
             first = problems[0]

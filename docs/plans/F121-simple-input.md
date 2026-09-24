@@ -1,6 +1,6 @@
 # F121 — 入口簡單化：一顆 Open、一張 Input 卡、recipe 不認資料型別
 
-狀態：**進行中（2026-09-24）—— 期 0（拿掉 DOE）、期 1（recipe 不認型別）、期 2（一張 Input 卡）做完了；下一步期 3。**
+狀態：**進行中（2026-09-24）—— 期 0～3 做完了（拿掉 DOE、recipe 不認型別、一張 Input 卡、Input 卡看資料）；剩期 4（一顆 Open）。**
 方向與四項做法使用者已同意（「好 開始做」）。
 
 同一系列的後續：ADC 與 Output 那兩張「特別的卡」各自另開一份（見 §6）。
@@ -243,7 +243,33 @@ route）；規模尺：遷移 22 → 23、`recipe.py` 648 → 650（各寫了為
   一律有測試跑，`tests/test_shipped_recipes.py`）。
 * 驗收：`load_single` → Input 的遷移前後，出貨 recipe 與黃金值逐位元組相同的特徵表。
 
-### 期 3 — Input 卡看資料
+### 期 3 — Input 卡看資料 ✅ 2026-09-24
+
+做成的樣子（使用者回報的原始情境，`tests/test_ui_input_sees_the_data.py` 從頭走一次）：
+開 EBI recipe、再開 RSEM 影像資料夾 → **Input 卡上兩句 error**（「名字表要 2 張
+（test、ref）、這份資料一顆 1 張（single）」「Carry these columns 要 KLARF，這份資料
+沒有」）→ 按跑**開跑前擋下**、一顆都沒跑 → 名字表旁「Match this data's images」按
+一下 → ``1:test``（**線能留的就留**，見下）→ 吃 `ref` 的那張 Normalize 在畫布上
+變紅、`test` 那一條照舊。CLI `run` 同一道關。
+
+**做的時候改掉的一件**：計畫寫「名字表改成資料有的那幾張」，第一版照字面做成
+``1:single`` —— 結果連 `test` 那一條也斷了，兩張 Normalize 都紅，看不出缺的其實
+只是參照影像。改成 `fit_channel_map`：資料有的位置**留原名**（線不動）、沒有的拿掉、
+多出來的補 ingest 的名字。空白畫布開資料補的那一張照舊是 ``1:single``（名字表是空的，
+`channel_map_for` ＝ 對齊一張空表）。
+
+**沒照計畫做的一件**：「KLARF 那幾格在沒有 KLARF 的資料上整塊變灰」沒做。那一句
+話已經是 Input 卡上的 error（開跑前擋下、講得出「清掉它」），而變灰要在 `ParamForm`
+開一條「依資料停用某幾格」的新機制 —— 只為了重講同一句話。要做的話另外談。
+
+**測試抓到的一件**：`data_issues` 是第二個「卡片自己判、健檢轉手」的地方，而
+`tests/test_ui_wording.py` 規定只准有一個（轉手的 code 原始碼的名冊數不到，多一個
+轉手點就安靜地少一批）。兩個鉤子收進同一支 `recipe_validate._relayed`。
+全套 `run_tests.py` 299 個檔案、typecheck 128（上限 128）。
+
+**期 2 留下的那一件**：資料開著時從卡片庫手動加的 Input 卡，名字表仍是預設的
+``1:test, 2:ref``（沒有自動照資料填）；對不上的話健檢會講、那顆鈕一按就對齊。
+要改成加進來就照資料填，改的地方在 `studio._on_add_requested`（`studio.py` 只准變短）。
 
 * **一份「這批資料長什麼樣」**（core，不碰 Qt）：一顆幾張（整批的最小／最大）、
   有沒有 KLARF、KLARF 有哪幾欄。Studio 開資料時算一次，CLI 開跑前算一次。

@@ -7,7 +7,9 @@ import**：`recipe.py` 在最後才轉出口這一支，模組層互相 import �
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type
+from typing import (
+    TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple, Type,
+)
 
 from .expression import ExpressionError, parse_expression
 from .recipe_schema import (
@@ -1083,8 +1085,27 @@ def _how_they_differ(a: str, ha: List[Any], b: str, hb: List[Any],
     return ("'%s' and '%s' were treated differently upstream" % (a, b))
 
 
+def _relayed(nid: str, route: str,
+             found: Sequence[Tuple[str, str, str, str]]) -> List[Issue]:
+    """卡片自己判的發現 ``(code, level, title, detail)`` → `Issue`。
+
+    **全 repo 唯一的轉手點**（`tests/test_ui_wording.py` 數著它是一個）：
+    `Step.kind_issues`（PR-2：只在某種資料型別上成立）與 `Step.data_issues`
+    （F121 期 3：對著開著的那份資料）都從這裡過。轉手的 code 是卡片寫的、
+    原始碼的名冊數不到 —— 所以轉手的地方要數得出**有幾個**，多一個就少一批。
+
+    句子是卡片寫的（它才知道 patch 與一張大圖、一顆幾張差在哪），這裡只補
+    **畫面自己答得出來的那一件**：route（單 route 的畫面不講它，見 `wording`）。
+    """
+    return [Issue(code=str(code), level=str(level), node_id=nid,
+                  title=str(title), detail="route '%s': %s" % (route, detail),
+                  route=str(route), advice=str(detail))
+            for code, level, title, detail in found]
+
+
 def validate(recipe: Recipe, kind: Optional[str] = None,
-             registry: Optional[Dict[str, Type[Step]]] = None) -> List[Issue]:
+             registry: Optional[Dict[str, Type[Step]]] = None,
+             data: Any = None) -> List[Issue]:
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
     檢查項（code）：unknown-step / bad-param / not-configured（error）/
@@ -1100,10 +1121,16 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     port-not-produced（warning），加上各卡
     `Step.kind_issues` 宣告的 kind 條件項（PR-2；GLV 的
     center-on-big-image（warning）/ each-box-on-patch（info））。
+
+    ``data``（`ingest.dataset.DataProfile`，F121 期 3）＝**現在開著的那份資料**：
+    給了就多問各卡 `Step.data_issues`（Input 卡的「名字表要的張數比資料多」
+    「沒有 KLARF 卻要帶欄位」…），而 ``kind`` 沒給時用它的型別。
     """
     from .recipe import execution_order  # 延遲：見檔頭
     if registry is None:
         registry = REGISTRY
+    if kind is None and data is not None:
+        kind = str(getattr(data, "kind", "") or "") or None
     issues: List[Issue] = []
 
     # ---- 判定段（F21-D）：兩種寫法只能有一種 ----
@@ -1476,6 +1503,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             if step_cls is None:
                 continue  # 已記 unknown-step
             p = clean_params.get(nid, {})
+            # 對著**開著的那份資料**才看得出來的（F121 期 3，`Step.data_issues`）
+            # —— 一顆幾張、有沒有 KLARF。要排在入口卡的 `continue` 前面：
+            # 最常對不上資料的正是入口卡。沒開資料就沒有東西可以對。
+            if data is not None:
+                issues.extend(_relayed(nid, k, step_cls.data_issues(p, data)))
             if step_cls.is_source():
                 # **入口卡**（沒有輸入埠 —— 見 Step.is_source）：reads /
                 # requires_ref 不檢查，因為它的資料不是從別張卡來的。
@@ -1618,15 +1650,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             # （`Step.kind_issues`）：`configuration_issues` 看不到 kind，
             # 而「這組設定對不對」有時取決於一顆 defect 拿到的是置中的
             # patch 還是一張大圖。
-            for code, level, title, detail in step_cls.kind_issues(
-                    p, data_kind(k)):
-                # 句子是卡片寫的（它才知道 patch 與一張大圖差在哪），所以這裡
-                # 只補**畫面自己答得出來的那一件**：單 route 就不要講 route。
-                issues.append(Issue(
-                    code=str(code), level=str(level), node_id=nid,
-                    title=str(title),
-                    detail="route '%s': %s" % (k, detail),
-                    route=str(k), advice=str(detail)))
+            issues.extend(_relayed(nid, k, step_cls.kind_issues(
+                p, data_kind(k))))
 
             # 吃**特徵**的卡（F16，Algo 段）：指到一個沒人算出來的數字，在跑
             # 之前就講。沒有這一段的話它要等**每一顆 defect 都失敗**才看得出來

@@ -28,6 +28,28 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F121 期 3：Input 卡看資料（2026-09-24）
+
+使用者回報的那一個到這裡收尾：EBI 的 recipe 開在沒有 KLARF 的 RSEM 影像上，
+**開資料的那一刻** Input 卡上就有兩句話、按跑在第一顆之前擋下、名字表旁一顆鈕
+一按就對齊。
+
+* `ingest.dataset.DataProfile` / `data_profile`：一顆幾張（整批最少／最多）、第一顆
+  的影像名、有沒有 KLARF、有哪幾欄。「第幾張」的排法搬進 `images_in_order`（只有
+  一個家，Input 卡與 profile 共用）。
+* `Step.data_issues(params, data)` ＋ `validate(recipe, data=…)`：Input 卡講三件 ——
+  名字表要的張數比資料多（error）、比資料少（info）、`carry` / `only_*` 要 KLARF 或
+  那一欄而資料沒有（error；`only_*` 以前講的是「篩選沒對上」）。呼叫點排在入口卡的
+  `continue` 之前（第一版排在後面，入口卡一句都問不到）。
+* Studio 的健檢與開跑前那兩道、CLI `run` 都餵資料（`RecipeModel.validate(dataset)`）。
+* 名字表編輯器的「Match this data's images」：`steps/load.fit_channel_map` ——
+  **線能留的就留**（資料有的位置留原名）。第一版照字面填 `1:single`，連 `test` 那一條
+  也斷了；改完之後 EBI 在 RSEM 上是 `1:test`，只有吃 `ref` 的卡變紅。知道一顆幾張之後
+  名字表只排那麼多列（一顆一張不再多一列寫著 ref）。
+* 沒做：KLARF 那幾格整塊變灰（理由在計畫書期 3）。
+
+---
+
 ## F121 期 2：一張 Input 卡（2026-09-24）
 
 使用者：「繼續做」（四項已同意：合卡、一顆 Open、名字少於張數就讀第一張並警告、

@@ -1256,7 +1256,7 @@ class StudioWindow(QMainWindow):
         out: Dict[str, Any] = {}
         if issues is None:
             try:
-                issues = self.model.validate(getattr(self.dataset, "kind", None))
+                issues = self.model.validate(self.dataset)
             except Exception:  # 顯示用，壞了就沒標記
                 return out
         rank = {"error": 0, "warning": 1, "info": 2}
@@ -1277,7 +1277,7 @@ class StudioWindow(QMainWindow):
         # ⚠ **lint 只跑一次**，畫布的警示點與 Problems 列吃同一份（U2）。
         # 各算一次的那天，畫面上會有一張卡是紅的而清單說沒有問題。
         try:
-            issues: Sequence[Any] = self.model.validate(getattr(self.dataset, "kind", None))
+            issues: Sequence[Any] = self.model.validate(self.dataset)
         except Exception:  # 顯示用
             issues = []
         self.problems.set_issues(issues, self.model)
@@ -1473,7 +1473,7 @@ class StudioWindow(QMainWindow):
         from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
 
         try:
-            issues = self.model.validate(getattr(self.dataset, "kind", None))
+            issues = self.model.validate(self.dataset)
         except Exception:  # 顯示用
             return ("", "")
         rank = {"error": 0, "warning": 1, "info": 2}
@@ -3085,10 +3085,9 @@ class StudioWindow(QMainWindow):
                     % (", ".join(self.model.route_keys()), ds_kind)))
         added = self._adopt_source_for()
 
-        # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11）。
-        # 那是資料的事實，所以在這裡講一次，不是每次選卡片時重新猜。
-        self.param_form.set_image_count(
-            len(getattr(items[0], "images", {}) or {}) if items else 0)
+        # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11），並露出
+        # 「照這份資料填」（F121 期 3）—— 資料的事實，在這裡講一次。
+        self.param_form.set_data_item(items[0] if items else None)
 
         self._update_defect_label()
         self._update_action_states()

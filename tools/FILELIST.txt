@@ -7,10 +7,10 @@ bc543e31aaf0d68aef8a52fdd799c2e587c06487 AGENTS.md
 bc7eadb8da5ab253626a1e5ec82bc4816514e7cd CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 cc0c2da28954ec9748d304b5a8434baa20569643 README.md
-5f08c53b04e54a408cc72c4d52f5097d0ed01f9e SESSION_LOG.md
+1b11ddac5d534428c5d37be8616685101fc1f932 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
-a29c27c7729d4171c4c5310a503f2605ba1bec18 d4t/__main__.py
+6d22211e501fc6474c8f7db76019dfcc78d49eec d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 dbcf7ddc11affd20145254f192259784aa3b8789 d4t/core/algo/__init__.py
 4831e63cce346047c2bb15032d3ad47e7a2cb847 d4t/core/algo/align.py
@@ -47,7 +47,7 @@ f1096aa00597a3ce6e7a69b03aa11fdfe0b6cd1a d4t/core/export/overlay.py
 02e51bf6d0e44581402d4134b97e4c7f8d98bba9 d4t/core/export/report.py
 95e810a6138d4e5a6a5a870b41dcf69376753a12 d4t/core/export/uniformity_charts.py
 054a0ebbc743919f01f0eac92eb368b56eef9a8d d4t/core/ingest/__init__.py
-25fd10f014ec1470cabcb6d029441e474777bdc5 d4t/core/ingest/dataset.py
+185b6a914c4cfa5f80464583bbf3667c852c2540 d4t/core/ingest/dataset.py
 8e73de19c7ae0e640d64a03465ef96248f7ae28c d4t/core/ingest/glas_export.py
 42948c7ff7901d48434530d524790904d1466be4 d4t/core/ingest/imageio.py
 c035ede25a8f2e1c7edd6abe585475f57ec00ddf d4t/core/ingest/klarf_core.py
@@ -71,9 +71,9 @@ f451241ab78aabe3ccd9418d5fa75443738ba7f8 d4t/core/pipeline/engine.py
 5263c80f3916e18c2f27f1cdfb5c6b38ac79237d d4t/core/pipeline/recipe.py
 7b4b704dd45d6646ed974903d6253fab2af54c48 d4t/core/pipeline/recipe_migrations.py
 338ee3b8fab482e72ec08c816767198dc3f60856 d4t/core/pipeline/recipe_schema.py
-92a070fd2e45a559ddfacb7d095ad2b110cde0d4 d4t/core/pipeline/recipe_validate.py
+903d9724e1bc6eac141fb5508ba3fa7e7503d4fa d4t/core/pipeline/recipe_validate.py
 f9758a867504c40c30b0974bb9cd81afe033a8b6 d4t/core/pipeline/sampling.py
-98da3cac39d8982072da36d9f74191f85c549d37 d4t/core/pipeline/step.py
+3b282dd7cbf2e038efe6b76720ba76e83d034e2f d4t/core/pipeline/step.py
 78f4e6b77a07748b6f6bd2c8072cea8023929c1a d4t/core/pipeline/verdict_features.py
 9a0dcd35a2680f45a271a9549224910c45732124 d4t/core/pipeline/verdict_trace.py
 67ba9409c1ec9d2c3a1c61ef7c07920df891bee2 d4t/core/steps/__init__.py
@@ -86,7 +86,7 @@ f1b5b8f722b902b4ba755dcb6c160d7b8e9444d8 d4t/core/steps/cd.py
 04d20bfd7351b9868e9af57275b197a4eaebabaf d4t/core/steps/denoise.py
 3c0a7c3a280e1a63d413bac064a3b32e1f24a4c5 d4t/core/steps/flatten.py
 7dde13120b10344162bbe64a3cc67ef49cdaf82b d4t/core/steps/glv_stats.py
-1f02e8ff6bc69223e76a227544e721d2afbd1723 d4t/core/steps/load.py
+2c1f3d78cc5536bd7336e59e8597bba4e75b0715 d4t/core/steps/load.py
 87e1b6e0c5588ccda9e5a66c95b2d73b49708f25 d4t/core/steps/load_sidecar.py
 d8b1021ce4eb76b436ba9dea26d62951febd06ac d4t/core/steps/normalize.py
 926b430192e60c14926932878f3f0838825a6ad1 d4t/core/steps/output.py
@@ -124,7 +124,7 @@ dbbd2cfb271d7aa788e3dd7b59a308c8013a9618 d4t/ui/failure_dialog.py
 3fea0845e35705d81839e31cb36790ae859103f4 d4t/ui/feature_panel.py
 f9e0842eac2b39db8c8c82358517963cc29eb235 d4t/ui/feature_text.py
 53065dce2154c0baf72fc53c96c26818f325c130 d4t/ui/feature_tree.py
-5f36d00b87e518edd388be9c63c2cdefce8b1ebc d4t/ui/fields.py
+b4e1bde7f726f3952b566db561dcdd9b8c79fb13 d4t/ui/fields.py
 54394401c3f2e10bbffe34eb952a045338286943 d4t/ui/fit_screen.py
 609792e09dd861516568287882f085741f21fc67 d4t/ui/focus_visible.py
 9a665deb398460e3616e3e3f2ef535ed952acfcd d4t/ui/frozen_column.py
@@ -152,7 +152,7 @@ f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
 cb7ac4fa539bf7aef89107a57c136dadb337b057 d4t/ui/open_dialogs.py
-57cc6601162d1e7f167430284a473b4bc5a2a148 d4t/ui/param_form.py
+6bb4088d43a2ed83efa058ef8477ee25d947a2e6 d4t/ui/param_form.py
 c08987763ca4d0fd4065665244429ed83cc091ed d4t/ui/preview_overlays.py
 dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 0ec4763b0c322ef7618b9c71f7b0ae7be5f0e5f2 d4t/ui/raw_dialog.py
@@ -162,13 +162,13 @@ dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 4a732bbb220f24288ed22d3c88b77f87d0b3be10 d4t/ui/results_table.py
 fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
-0be63da77167b6439c31c70de85f56be0ab8a78b d4t/ui/run_controller.py
+6eceb350c1248f727813244ccd45932b202de635 d4t/ui/run_controller.py
 62a3b46af1a85cfaf98f0ae067a030447f2dfc3d d4t/ui/scope.py
 290e9af828021e66a1b944acd1e46ddb52aeb578 d4t/ui/splitters.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 7049adc73b88e981b292b8f168e593c0519b1dd8 d4t/ui/strings.py
-73175d7bc6a88a7a5c8e2193b5604dd6fc0ba452 d4t/ui/studio.py
+a240412f6f1bfeecc6246265447af1944d7815a1 d4t/ui/studio.py
 af7b9880b328104595c586ca0e1e1d6a667a5b68 d4t/ui/studio_layout.py
 1657d2a467406dff1f80677b888ae916e079e74c d4t/ui/template_dialog.py
 3602605dc1bb4e8542054d518220f389dc80be28 d4t/ui/theme.py
@@ -178,7 +178,7 @@ e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
 3ef77f5c339cffd31d12127954e819113e0c0885 d4t/ui/truth_marks.py
 363b7e077297333d0e6a1556af81841bff9bddb1 d4t/ui/uniformity_window.py
 0611dc036f87182c1b34b9671744c5c538abc2fc d4t/ui/verdict_band.py
-4888f8fe72f91a647cb4bf570c9606d643b28d21 d4t/ui/viewmodel.py
+8942cd055587e472b933eaedf96afd5cc2e8b977 d4t/ui/viewmodel.py
 6e784ee4b21583fca3d79b02b3e6040b82b3756f d4t/ui/welcome.py
 2eef41969bba9444e913a02eff367c9db50c657d d4t/ui/why_panel.py
 eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
@@ -193,7 +193,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 726dece56f0c958d72a98c2571c431ee0df5bbb6 docs/LICENSING.md
 7132326e294b605b1553659156b5f6a62df12543 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
-7cf9d408020cdf92b1c55c5aa693300a67a53c04 docs/PITFALLS.md
+e37c86163a9375d8a6c41bdb01954afec169abdd docs/PITFALLS.md
 29ffd31a2a29ce8fb9b93772ea08772d56f8db60 docs/ROADMAP.md
 7d6e3d3a6e7ca55d6c61bd7d218efe51f9d4fa38 docs/USING-CD.md
 d0c02d62e82126148d3807ad4d4c588821d1c746 docs/USING-CHARACTERIZATION.md
@@ -201,7 +201,7 @@ d0c02d62e82126148d3807ad4d4c588821d1c746 docs/USING-CHARACTERIZATION.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 82bde8c1f83c6e40caf2cac674764f2b9596e453 docs/USING-UNIFORMITY.md
 c02b5ed1aa8d2c33e7bfa8a9ca830a324fbd0cb4 docs/plans/F117-ui-review.md
-676d0891ff38560cbd24ae8676f91df51148d3ee docs/plans/F121-simple-input.md
+ccd10a51c4356a9b66dc228665e40997f88d9a3e docs/plans/F121-simple-input.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -296,6 +296,7 @@ e14c2a7b4942e7e6b55174b53ad8c234acb1cdc4 tests/test_glv_kind_lints.py
 68f4c1d0784f125b13994a5fc576da6ac9270279 tests/test_histmatch.py
 d6d6bb54f0d27fba79fcb386365635f7420ad388 tests/test_i01_companion.py
 01cdfb6a5ce7316f3c3272cfec4f6cb8520b3050 tests/test_input_code_filter.py
+343ba57d3e19338478dd17a94c25a818e7d01171 tests/test_input_sees_the_data.py
 456c805c9e7e2df0b0d4275ef21db5eb01b617af tests/test_iqi.py
 285184f2a87157aa2a1848722f4104d20bfe5f36 tests/test_klarf_core.py
 b9641759599b4584c733275281fe3b252e8b66c5 tests/test_klarf_variant_d.py
@@ -448,6 +449,7 @@ f480eedce6d10f8e192050bdbe65d03676911df0 tests/test_ui_ground_truth.py
 d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_ui_guided_condition.py
 8b2a011ac4b15c695b65eb5c85cf5fb5ac77acc3 tests/test_ui_info_level.py
 664f2aefa3a8ce8af85d951c35b85f24be8c00d4 tests/test_ui_input_kinds.py
+6f806706a980144b6bc5fbc610365146cb664e83 tests/test_ui_input_sees_the_data.py
 9fb2df3eb827f0f6c70f18b38c3c4fcddf7536ad tests/test_ui_inspectors.py
 0f7447bee32093710fef2a59af90d79f1abd951b tests/test_ui_language.py
 e080d7615bf2f2b8df2c17b6bd0d9b4e4c1b9107 tests/test_ui_layout_follows_the_wires.py
@@ -510,7 +512,7 @@ d0376810421f39558164147504fe67aac211af1d tests/test_ui_toolbar_spacers.py
 7c7580b282453121d7dfdbf13113e76923b9e98f tests/test_ui_widgets.py
 483e421852a7b9ce3811f3c1af583e09f2b77a85 tests/test_ui_window_policy.py
 d1af1990d9983970da75f4e863c7aa8d19bdb905 tests/test_ui_wiring_slot.py
-829d70afacd4ee2c41132f14741c65600a2eeb74 tests/test_ui_wording.py
+56bb9c70a612e9574cad3af199cf376a68dbf143 tests/test_ui_wording.py
 ea71103ed94aa28b6e8d54f2c0fe2472e89415cd tests/test_ui_workbench.py
 d8b2329e90e524b0600781a641019718516a0d9f tests/test_ui_workers.py
 f01a0b4834b4b21a104c824c23885d213095e5f6 tests/test_ui_write_only_on_run_all.py
