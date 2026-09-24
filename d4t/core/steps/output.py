@@ -104,6 +104,7 @@ from ..pipeline.step import (
     CATEGORY_BATCH, GROUP_OUTPUT, SCALE_LOT, ParamSpec, Step, StepError,
     register_step,
 )
+from ..log import swallowed
 from ._util import parse_key_list
 # `align_off_*` 是那張卡的產出，「它什麼時候不能讀」的判準因此也住在
 # 那張卡上 —— 這裡只負責把它講到使用者眼前（同 `overlay_marks` 的分工）。
@@ -189,11 +190,12 @@ class _OutputStep(Step):
         # （`_ensure_parent`），而 Export 精靈走的是同一支。在這裡擋的話，
         # 一個完全正常的路徑會被說成設定錯誤。第一版真的這樣寫了，測試抓到。
 
-    def _folder_of(self, p: Dict[str, Any]) -> str:
+    def _folder_of(self, p: Dict[str, Any], bctx: Any = None) -> str:
         """寫資料夾那幾張卡的開場白（**三行一模一樣的東西收成一支**）。"""
         folder = str(p[self.PATH]).strip()
         if not folder:
             raise StepError(self.key, "nowhere to write - fill in “Write to”.")
+        folder = _anchor(folder, bctx)
         wrong = self.path_issue(folder)
         if wrong:
             raise StepError(self.key, wrong)
@@ -211,11 +213,34 @@ class _OutputStep(Step):
             "once per defect. If you are seeing this, something ran it the "
             "wrong way round.")
 
-    def _path_of(self, p: Dict[str, Any]) -> str:
+    def _path_of(self, p: Dict[str, Any], bctx: Any = None) -> str:
         path = str(p[self.PATH]).strip()
         if not path:
             raise StepError(self.key, "nowhere to write - fill in “Write to”.")
+        return _anchor(path, bctx)
+
+
+def _anchor(path: str, bctx: Any) -> str:
+    """**相對路徑接在資料旁邊，不接在「現在站在哪」**（2026-09-24）。
+
+    出貨的 recipe 寫的是 ``"folder": "ebi_report"`` —— 以前那是相對於行程的
+    工作目錄，於是在 repo 根目錄跑一次 CLI 就多一個沒被追蹤的 `ebi_report/`，
+    而在 Studio 裡它落在「Studio 從哪裡開的」那個看不見的地方。現在接在
+    KLARF 所在的資料夾（沒有 KLARF 的就是影像那個資料夾）旁邊：使用者找
+    報表時第一個會去看的地方。絕對路徑、或答不出資料在哪時照原樣。
+    """
+    if os.path.isabs(path):
         return path
+    ds = getattr(bctx, "dataset", None)
+    src = ""
+    try:
+        src = str(ds.source_label() or "") if ds is not None else ""
+    except Exception:          # 資料集長得不一樣（測試的替身）→ 照原樣
+        swallowed("output._anchor")
+    if not src:
+        return path
+    base = os.path.dirname(src) if os.path.isfile(src) else src
+    return os.path.join(base, path)
 
 
 def _warn_if_unranked(key: str, bctx: Any, rows: Any,
@@ -966,7 +991,7 @@ class OutputReportStep(_OutputStep):
     # ----------------------------------------------------------------- #
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        folder = self._folder_of(p)
+        folder = self._folder_of(p, bctx)
         rows = list(bctx.rows)
         items = list(getattr(bctx.dataset, "items", None) or [])
         by_id = {str(getattr(it, "defect_id", "")): it for it in items}
@@ -1249,7 +1274,7 @@ class OutputKlarfStep(_OutputStep):
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        path = self._path_of(p)
+        path = self._path_of(p, bctx)
         doc = getattr(bctx.dataset, "klarf", None)
         if doc is None:
             # 沒有 KLARF 的兩種輸入（folder / tiff_stack）—— 那件事在載入的當下
@@ -1449,7 +1474,7 @@ class OutputCharStep(_OutputStep):
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        folder = self._folder_of(p)
+        folder = self._folder_of(p, bctx)
 
         rows = list(bctx.rows)
         items = list(getattr(bctx.dataset, "items", None) or [])
@@ -1898,7 +1923,7 @@ class OutputUniformityStep(_OutputStep):
 
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        folder = self._folder_of(p)
+        folder = self._folder_of(p, bctx)
         rows = list(bctx.rows)
         items = list(getattr(bctx.dataset, "items", None) or [])
         by_id = {str(getattr(it, "defect_id", "")): it for it in items}

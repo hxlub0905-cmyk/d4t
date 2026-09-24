@@ -215,7 +215,7 @@ Path 行都建在它上面。
 
 其餘一律 modal（`WelcomeDialog`、`TemplateDialog`、`ChartSettingsDialog`、
 `GraphBuilderDialog`、`CurveDialog`、`StatusHistoryDialog`、
-`RecipeLibraryDialog`、`CropDialog`）—— 它們都是「進去做完一件事再出來」，而在那段時間裡
+`RecipeLibraryDialog`、`CropDialog`、`RawLayoutDialog`）—— 它們都是「進去做完一件事再出來」，而在那段時間裡
 主視窗沒有東西可看。
 
 ⚠ **`UniformityWindow` 不在上面兩張表裡**，因為它不是頂層視窗 —— 它是
