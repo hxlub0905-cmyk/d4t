@@ -120,7 +120,7 @@ def _open_raw_folder(folder: str, raw: Any):
 
 
 def _open_input(path: str, tiff_path: Any = None, raw: Any = None):
-    """CLI 的輸入 —— **四種都認**（F85），照 `scope.INPUT_SOURCES` 那張表。
+    """CLI 的輸入 —— **每一種都認**（F85），照 `scope.INPUT_SOURCES` 那張表。
 
     以前這裡只呼叫 `load_dataset`，也就是只認 KLARF；給它一個資料夾的下場是
     ``IsADirectoryError``，而那句話對使用者沒有任何意義。Studio 早就吃四種
@@ -130,16 +130,14 @@ def _open_input(path: str, tiff_path: Any = None, raw: Any = None):
 
     判準只看路徑本身，不看副檔名以外的東西：
 
-    * **資料夾**（裡面是影像檔）→ `load_folder`（每個影像檔一顆）
-    * **資料夾**（裡面是資料夾）→ `load_doe_folder`（每個子目錄一顆，
-      裡面每個檔案是一個 imaging condition；F110 的 DOE）
+    * **資料夾** → `load_folder`（每個影像檔一顆；裡面只有子資料夾的話它會
+      講「影像在下一層」）
     * **影像檔** → `load_image_file`（那一張就是唯一的一顆）
     * 其餘 → `load_dataset`（KLARF，含 `--tiff`）
 
-    ⚠ **DOE 那一種由內容判斷，不是多一個旗標**：一個目錄裡裝的是影像檔還是
-    資料夾，是**看得出來的事實**，而使用者在命令列上要重打一次那個事實是沒有
-    道理的（推廣鐵則）。兩種混在一起時以**影像檔**為準（跟 Studio 的
-    `Open images…` 一致），而 DOE 那條路對那種目錄本來就會說一句話。
+    ⚠ F110 在這裡多過一條「資料夾裡只有資料夾 → DOE（一個子目錄一顆）」，
+    2026-09-24（F121 期 0）拿掉了：使用者說那個設計錯了，DOE 的資料就是一個
+    資料夾的單張影像。
 
     ⚠ 多頁 TIFF 走的是**第四條**（KLARF 那一支會自己講不出話），而
     `Open stack…` 那條路 CLI 仍然沒有 —— 它需要「一顆幾張」那個數字，
@@ -147,7 +145,7 @@ def _open_input(path: str, tiff_path: Any = None, raw: Any = None):
     """
     from d4t.core.ingest import dataset as dataset_mod
     from d4t.core.ingest.dataset import (
-        load_dataset, load_doe_folder, load_folder, load_image_file,
+        load_dataset, load_folder, load_image_file,
     )
 
     p = str(path)
@@ -159,10 +157,6 @@ def _open_input(path: str, tiff_path: Any = None, raw: Any = None):
         from d4t.core.ingest.rawfile import RAW_EXTS as _RAW_EXTS
         if any(os.path.splitext(n)[1].lower() in _RAW_EXTS for n in names):
             return _open_raw_folder(p, raw)
-        loose = any(os.path.splitext(n)[1].lower() in dataset_mod._IMAGE_EXTS
-                    and os.path.isfile(os.path.join(p, n)) for n in names)
-        if not loose and any(os.path.isdir(os.path.join(p, n)) for n in names):
-            return load_doe_folder(p)
         return load_folder(p)
     if os.path.splitext(p)[1].lower() in dataset_mod._IMAGE_EXTS:
         return load_image_file(p)

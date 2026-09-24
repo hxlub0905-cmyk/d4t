@@ -216,8 +216,8 @@ class Dataset:
     def source_label(self) -> str:
         """**這份資料是從哪裡來的**，一句給人看的話（F117 F2）。
 
-        有 KLARF 就是那個檔（廠內講的就是那個檔名）；沒有 KLARF 的三種
-        （folder / doe_folder / 單張）回第一顆影像所在的資料夾 —— 那是使用者
+        有 KLARF 就是那個檔（廠內講的就是那個檔名）；沒有 KLARF 的
+        （folder / 單張）回第一顆影像所在的資料夾 —— 那是使用者
         在 `Open images…` 挑的那個。
 
         ⚠ **答不出來就回空字串**，呼叫端那一列就不寫。一列寫著
@@ -580,20 +580,25 @@ def load_folder(folder) -> Dataset:
                         % (len(multipage), ", ".join(multipage[:3])
                            + ("…" if len(multipage) > 3 else "")))
     if not items:
-        warnings.append(f"No image files found in folder: {d}")
+        # **只有子資料夾**的那一種要講出下一步（F121 期 0）：F110 的 DOE 入口
+        # 以前把它讀成「一個子目錄一顆」，那個入口拿掉之後它會走到這裡 ——
+        # 「找不到影像」是真的，但使用者要知道的是「影像在下一層」。
+        subs = [n for n in sorted(os.listdir(d))
+                if os.path.isdir(os.path.join(d, n))]
+        if subs:
+            warnings.append(_SUBFOLDERS_ONLY_WARNING
+                            % (d, ", ".join(subs[:3])
+                               + ("…" if len(subs) > 3 else "")))
+        else:
+            warnings.append(f"No image files found in folder: {d}")
     return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)
 
 
-#: DOE：一個資料夾裡一顆 defect 都湊不出來時說的那一句。
-_DOE_EMPTY_WARNING = (
-    "%d folder(s) have no image in them, so they are not defects (%s). "
-    "In this mode every sub-folder is one defect and the images inside it "
-    "are that defect's imaging conditions.")
-
-#: DOE：兩個子目錄同名（不同層）時說的那一句。
-_DOE_DUPLICATE_WARNING = (
-    "%d folder name(s) appear more than once, and a defect id has to be "
-    "unique (%s). Only the first one of each was loaded - rename the others.")
+#: 資料夾裡沒有影像、只有子資料夾時說的那一句（見 :func:`load_folder`）。
+_SUBFOLDERS_ONLY_WARNING = (
+    "No image files in %s - it only has sub-folders (%s). Every image in the "
+    "folder you open becomes one defect, so open the sub-folder that holds "
+    "the images.")
 
 
 #: `.raw` 一個檔案都湊不出來時說的那一句。
@@ -654,84 +659,6 @@ def load_raw_folder(folder, spec: "RawSpec") -> Dataset:
                             channel="single", raw=use)})
              for n in names]
     return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)
-
-
-def load_doe_folder(root) -> Dataset:
-    """**一個子目錄 = 一顆 defect、裡面每個檔案 = 一個 imaging condition。**
-
-    這是 DOE 要的形狀（F110，使用者定調）：同一顆 defect、位置固定在 FOV 正中間、
-    FOV 相同，用不同的 E-beam condition（Landing energy／電流）各拍一張，
-    對齊之後在同一組 target／ref box 上比 SNR。對標公司內的 imageY 流程。
-
-    ⚠ **跟 :func:`load_folder` 正好相反**，所以它是**第五種 kind** 而不是那一條
-    路上的一個開關：那邊是「一個檔案一顆」，這邊是「一個資料夾一顆」。同一個
-    ``kind`` 兩種形狀的下場是畫布說謊 —— ``step.SINGLE_IMAGE_KINDS`` 裡寫著
-    ``folder``，而 DOE 的一顆有好幾張，於是畫布上那張預設的 ``load_single``
-    對它一定報錯。一種 source 一張載入卡（`CLAUDE.md` §5），而這一種走
-    ``load_patch``（它本來就吃 N 張 → N 條流）。
-
-    **分組是資料層的事、命名是 recipe 的事** —— 照 :func:`load_tiff_stack` 那條
-    紀律。這裡只按檔名排序給 ``test`` / ``ref`` / ``img3``… 這種位置名
-    （:func:`_channel_name`），要叫 ``le300`` / ``le500`` 是 ``load_patch`` 的
-    ``channel_map`` 的事。
-
-    ⚠ **流的順序是「檔名排序」**，而那是一個契約：這些 ``ImageRef`` 的 ``page``
-    都是 ``None``，所以 `steps/load._in_defect_order` 會退回 **dict 插入順序**
-    —— 也就是這裡 ``sorted()`` 的順序，而 ``channel_map`` 的 1-based 編號正是
-    照它數的。
-
-    只掃**一層**子目錄：``defect_id`` 是快取 key 與 Studio 的 ``_items_by_id``
-    的一部分，而巢狀結構裡同名的目錄天生可能重複 —— 撞名的第二個之後
-    **不載入並講出來**，不是安靜地蓋掉（那會讓一顆 defect 拿到另一顆的圖）。
-    湊不出東西的空目錄也一樣：進 ``warnings``，不吞掉（同 `load_tiff_stack`
-    對零頭的處置）。
-    """
-    d = str(root)
-    if not os.path.isdir(d):
-        return Dataset(kind="doe_folder", klarf=None, items=[],
-                       warnings=[f"Not a directory: {d}"])
-    items: List[DefectItem] = []
-    warnings: List[str] = []
-    empty: List[str] = []
-    dupes: List[str] = []
-    seen: set = set()
-    for name in sorted(os.listdir(d)):
-        sub = os.path.join(d, name)
-        if not os.path.isdir(sub):
-            continue            # 這條路上「檔案」不是一顆 defect，是放錯地方
-        files = [f for f in sorted(os.listdir(sub))
-                 if os.path.isfile(os.path.join(sub, f))
-                 and os.path.splitext(f)[1].lower() in _IMAGE_EXTS]
-        if not files:
-            empty.append(name)
-            continue
-        if name in seen:
-            dupes.append(name)
-            continue
-        seen.add(name)
-        item = DefectItem(defect_id=name, die=None, xrel_nm=None,
-                          yrel_nm=None)
-        for j, f in enumerate(files):
-            ch = _channel_name(j, ("test", "ref"))
-            item.images[ch] = ImageRef(path=os.path.join(sub, f), page=None,
-                                       channel=ch)
-        items.append(item)
-    if empty:
-        warnings.append(_DOE_EMPTY_WARNING
-                        % (len(empty), ", ".join(empty[:3])
-                           + ("…" if len(empty) > 3 else "")))
-    if dupes:
-        warnings.append(_DOE_DUPLICATE_WARNING
-                        % (len(dupes), ", ".join(dupes[:3])
-                           + ("…" if len(dupes) > 3 else "")))
-    if not items:
-        warnings.append(
-            "No sub-folders with images in: %s. In this mode every sub-folder "
-            "is one defect and the images inside it are that defect's imaging "
-            "conditions - a folder of loose image files is “Open folder…” "
-            "instead." % d)
-    return Dataset(kind="doe_folder", klarf=None, items=items,
-                   warnings=warnings)
 
 
 # --------------------------------------------------------------------------- #

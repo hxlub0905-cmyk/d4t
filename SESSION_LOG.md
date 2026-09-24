@@ -28,6 +28,24 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F121 期 0：拿掉 DOE 入口（2026-09-24）
+
+使用者：「DOE 的相關都先拿掉……（我當初設計錯了）。DOE 更像是一個資料夾內有多張
+圖片但沒有 KLARF 的情況（單張 image）」→「好 開始做」。
+
+* 刪（不是收起來 —— 設計錯了）：`doe_folder` kind、`Open conditions…` 鈕與它的
+  `folder_stack` 圖示、`ingest.load_doe_folder`、CLI「資料夾裡只有資料夾 → DOE」那條
+  判別、`tools/make_doe_sample.py`、`tests/test_doe_folder.py`。
+* **留著**（DOE 那一輪帶出來、但本身通用）：`align` 卡、`combine`、`snr_px`、三條以上
+  的流時特徵名帶流名前綴。
+* 只有子資料夾的資料夾現在會講「影像在下一層」（CLI 與 Studio 同一句）。
+* 黃金值三份逐項相同；全套 `run_tests.py`。
+* ⚠ 順手看到、沒修、也還沒查原因：CLI 跑一批 **0 顆**（例：只有子資料夾的
+  資料夾）時，`Write charts` 把 `uniformity_charts/` 寫進**目前的工作目錄**。
+  跟 DOE 無關，記在這裡。
+
+---
+
 ## F121 開案：沒有 KLARF 的 RSEM 影像每一顆都 card error（2026-09-24）
 
 使用者回報：跑沒有 KLARF 的 RSEM 影像，每一顆都報

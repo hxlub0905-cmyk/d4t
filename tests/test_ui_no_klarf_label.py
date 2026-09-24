@@ -10,10 +10,14 @@
   蓋掉。所以它掛在**資料集標籤**上 —— 常駐、在眼前。
 * **命名表格的列數來自資料**，不是寫死的。
 
-後兩件跟 stack 一點關係都沒有：`folder`、`doe_folder`、`raw` 三條路**全部**
-沒有 KLARF，而那句話對它們一字不差。所以這一份改接在 `doe_folder` 上 ——
-**測的是機制，不是那一個入口**（同 `test_ui_scope_profiles.py` 那一輪的教訓：
-把某一個具體對象抄進測試裡，那個對象一被拿掉，紅的理由就跟壞掉的東西無關）。
+後兩件跟 stack 一點關係都沒有：沒有 KLARF 的每一條路那句話都一字不差。所以
+這一份改接在 F110 的 `doe_folder` 上 —— **測的是機制，不是那一個入口**。
+
+⚠ **那個教訓 2026-09-24 又應驗了一次**：F121 期 0 把 `doe_folder` 也拿掉了
+（使用者：設計錯了），而這一份跟著紅 —— 紅的理由跟它守的機制無關。所以這一次
+兩件事各自接在**不會因為入口增減而消失**的資料上：沒有 KLARF 的那句話接一個
+影像資料夾（`folder`，最基本的那一條路）；「列數來自資料」接一份 patch lot，
+在記憶體裡把每一顆補成三張（機制只問「一顆幾張」，不問是哪一種入口）。
 """
 from __future__ import annotations
 
@@ -55,21 +59,22 @@ def win(qapp):
 
 
 @pytest.fixture
-def doe(tmp_path):
-    """一顆三張、沒有 KLARF —— `doe_folder` 那條路。"""
-    from make_doe_sample import generate
+def images(tmp_path):
+    """一個資料夾的單張影像、沒有 KLARF —— `folder` 那條路。"""
+    from make_sample_rsem import generate
 
-    return generate(str(tmp_path / "doe"), n=3, seed=5)["out_dir"]
+    return generate(str(tmp_path / "rsem"), n=3, seed=5)["images_dir"]
 
 
-def test_no_klarf_is_said_where_it_stays_on_screen(win, doe):
+def test_no_klarf_is_said_where_it_stays_on_screen(win, images):
     """**不能只在狀態列講一次。**
 
     載完就接著算預覽，狀態列那句話幾毫秒後就被 "Computing preview…" 蓋掉 ——
     這一條就是那樣紅出來的（同一個教訓 ground truth 那一輪學過）。所以掛在
     資料集標籤上：常駐、在眼前，而且它講的正是「你現在手上是什麼資料」。
     """
-    win.load_folder_path(str(doe), doe=True, sync=True)
+    win.load_folder_path(str(images), sync=True)
+    assert win.dataset.kind == "folder"
     assert "no KLARF" in win.defect_label.text()
     tip = win.defect_label.toolTip()
     assert "written back" in tip and "CSV" in tip     # 講得出還有什麼路可以走
@@ -87,21 +92,33 @@ def test_an_ebi_patch_dataset_does_not_get_that_label(win, tmp_path):
 
 
 def test_a_missing_folder_is_refused_without_touching_the_current_dataset(
-        win, doe):
-    win.load_folder_path(str(doe), doe=True, sync=True)
+        win, images):
+    win.load_folder_path(str(images), sync=True)
     before = win.dataset
-    assert win.load_folder_path(str(Path(doe).parent / "nope"), doe=True,
+    assert win.load_folder_path(str(Path(images).parent / "nope"),
                                 sync=True) is False
     assert win.dataset is before
 
 
-def test_the_channel_map_table_gets_its_rows_from_the_data(win, doe):
+def test_the_channel_map_table_gets_its_rows_from_the_data(win, tmp_path):
     """載一份「一顆三張」的資料 → 命名表格一開就有三列（F11 Input-1 的尾巴）。
 
-    **列數是資料說了算**，不是卡片預設的兩列 —— 寫死兩列的話，第三個
-    condition 會安靜地載不進來。
+    **列數是資料說了算**，不是卡片預設的兩列 —— 寫死兩列的話，第三張
+    會安靜地載不進來。一份 patch lot 在記憶體裡補成每顆三張（多一個 detector
+    channel 的樣子），走的是跟 `load_dataset_path` 同一個接手點。
     """
-    win.load_folder_path(str(doe), doe=True, sync=True)
+    from dataclasses import replace
+
+    from make_sample import generate
+
+    from d4t.core.ingest.dataset import load_dataset
+
+    paths = generate(str(tmp_path / "lot"), n=3, seed=5)
+    ds = load_dataset(paths["klarf"], paths["tiff"])
+    for it in ds.items:
+        it.images["img3"] = replace(it.images["ref"], channel="img3")
+    assert all(len(it.images) == 3 for it in ds.items)
+    assert win._on_dataset_loaded(ds)
     win.select_node(first_source(win))
     ed = win.param_form.editor("channel_map")
     assert ed is not None and ed.row_count() == 3

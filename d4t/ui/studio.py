@@ -2954,15 +2954,11 @@ class StudioWindow(QMainWindow):
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
-    def load_folder_path(self, folder: Any, sync: bool = False,
-                         doe: bool = False) -> bool:
-        """載入一個**資料夾的單張影像**（F11 Input-3），或 DOE 的一疊 condition。
+    def load_folder_path(self, folder: Any, sync: bool = False) -> bool:
+        """載入一個**資料夾的單張影像**（F11 Input-3）。
 
-        沒有 KLARF、沒有座標。``doe=False``：每個影像檔一顆 defect，多頁 TIFF
-        在這條路上只讀得到第一頁（ingest 會為此發一句警告並指向 ``Open stack…``）。
-        ``doe=True``（F110）：**一個子目錄一顆、裡面每個檔案一個 imaging
-        condition** —— 正好相反，所以它是第五種 kind 而不是這裡的一個開關；
-        這一格只決定呼叫哪一支 ingest。
+        沒有 KLARF、沒有座標。每個影像檔一顆 defect，多頁 TIFF 在這條路上只讀得到
+        第一頁（ingest 會為此發一句警告）。
         """
         d = str(folder)
         if not os.path.isdir(d):
@@ -2971,13 +2967,13 @@ class StudioWindow(QMainWindow):
         self._pending_dataset_name = os.path.basename(d.rstrip("/\\"))
         if sync:
             try:
-                ds = DatasetLoadWorker.run_sync_folder(d, doe)
+                ds = DatasetLoadWorker.run_sync_folder(d)
             except Exception as e:  # UI 邊界，一律回報
                 self._status("Could not load folder: %s"
                              % wording.failure("studio.load_folder", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
-        if not self.dataset_worker.start_folder(d, doe):
+        if not self.dataset_worker.start_folder(d):
             self._status("A dataset is already loading — please wait.")
             return False
         self._progress_busy("Loading %s…" % os.path.basename(d.rstrip("/\\")))

@@ -1,7 +1,7 @@
 # F121 — 入口簡單化：一顆 Open、一張 Input 卡、recipe 不認資料型別
 
-狀態：**計畫中（2026-09-24）—— 方向與四項做法使用者已同意，程式一行都還沒動。**
-下一步：期 0（拿掉 DOE 入口），做之前先給使用者看這一份。
+狀態：**進行中（2026-09-24）—— 期 0（拿掉 DOE 入口）做完了；下一步期 1。**
+方向與四項做法使用者已同意（「好 開始做」）。
 
 同一系列的後續：ADC 與 Output 那兩張「特別的卡」各自另開一份（見 §6）。
 
@@ -131,7 +131,13 @@ channel 名），所以不會回到 F11 那個「RSEM 單張卻冒出 TEST／REF
 **`python tools/freeze_golden.py --check`**（家用機第三份的已知紅見
 `docs/PITFALLS.md`「`align_score` 那一格」）、最後 `git add -A && python tools/release.py && git add -A`。
 
-### 期 0 — 拿掉 DOE 入口（使用者：「我當初設計錯了」）
+### 期 0 — 拿掉 DOE 入口（使用者：「我當初設計錯了」）✅ 2026-09-24
+
+**做完時多出來的一件**：資料夾裡**只有子資料夾**的那種（以前被 DOE 讀成「一個
+子目錄一顆」）現在走 `load_folder`，而它會講「影像在下一層，請開那個子資料夾」
+（`dataset._SUBFOLDERS_ONLY_WARNING`，CLI 與 Studio 同一句）。
+`tests/test_ui_no_klarf_label.py` 原本借 DOE 的資料測兩件跟 DOE 無關的機制，改接在
+`folder` 與「patch lot 在記憶體裡補成每顆三張」上。黃金值三份逐項相同。
 
 照 `CLAUDE.md` §5 的表，這是**刪掉**（設計錯了）而不是收起來。刪之前量過誰在用：
 

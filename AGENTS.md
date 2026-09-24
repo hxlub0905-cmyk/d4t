@@ -278,7 +278,6 @@ python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 | `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
 | `make_lot_from_gc.py`（CLI）／`python -m d4t simgen`（UI）| **家用機** | ❌ | **拿一張 Golden Cell 鋪成整批擬真資料**：RSEM 大圖（1000²）＋ 從大圖切下來的 patch（81²，test/ref 成對）＋ 兩份 KLARF ＋ ground truth。跟其他產生器的差別是**它不畫圖案，它鋪你給的那一張** —— 圖案是輸入不是參數，所以換 layer 換世代都不用改程式（最高指導原則）。週期用次像素量、缺陷落點從 GC 量出來。⚠ GC 可能是廠內圖案，**吃的跟吐的都不進版控**（鐵則 8）。UI 版（F60）多的只有「貼上就能用」：剪貼簿 `Ctrl+V`／影像檔／recipe／`gc2:` 字串四條路，週期看得到也改得動 |
-| `make_doe_sample.py` | **家用機** | ❌ | 合成一份 **DOE lot**：一個子目錄一顆 defect、裡面每個檔案是一個 imaging condition（不同的 Landing energy／電流），三個 condition 只差在雜訊 σ。⚠ **刻意不沿用 `make_sample.py`** —— 那一份的 patch 整張都是高對比晶格（實測任何 16×16 的框標準差都 > 62），而 DOE 量的 `snr_px` 的分母正是**參照那一塊自己的像素標準差**：拿一塊全是圖案的地方當參照，「哪個 condition 訊噪比比較好」這個問題根本問不出來。要 numpy |
 | `make_glas_export.py` | **家用機** | ❌ | 合成一份 **GLAS 匯出**（`<id>_label.png` + v4 manifest）掛在 RSEM lot 上 —— Region-3 在家用機唯一的資料來源（要 numpy/cv2）|
 | `run_tests.py` | **兩台都可以** | ❌ | **每個測試檔各自一個行程**跑完全套，外加逐檔計時、「最慢的幾個」、失敗全部收集到最後一起印。`--fast` 略過 UI。stdlib-only，所以**Windows 上也跑得動** —— 那正是它存在的理由：`CLAUDE.md` 以前教的 `for f in …; do …; done` 是 bash，而家用機是 Windows |
 | `studio_surface.py` | **兩台都可以** | ❌ | 量 `StudioWindow` 的表面（方法、`self.*`、**測試裡用到的名字**），`--save` / `--check` 一對 —— F116 把那一支一塊一塊搬進 controller 時的安全網。搬家最危險的失敗是**搬走一個測試正在用的名字**，而測試大量用屬性存取，`grep import` 答不出誰在用（`CLAUDE.md` §4）。stdlib-only、不開視窗，所以公司機也跑得動 |

@@ -20,7 +20,6 @@ from .dataset import (
     DefectItem,
     ImageRef,
     load_dataset,
-    load_doe_folder,
     load_folder,
     load_image_file,
 )
@@ -30,5 +29,5 @@ __all__ = [
     "n_pages", "read_page", "read_tiff_pages",
     "load_gray", "save_gray", "save_rgb",
     "Dataset", "DefectItem", "ImageRef", "load_dataset", "load_folder",
-    "load_doe_folder", "load_image_file",
+    "load_image_file",
 ]

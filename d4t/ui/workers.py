@@ -36,7 +36,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（Qt-free、便宜）
 from d4t.core.log import swallowed
 from d4t.core.ingest.dataset import (
-    Dataset, load_dataset, load_doe_folder, load_folder, load_image_file,
+    Dataset, load_dataset, load_folder, load_image_file,
 )
 from d4t.core.pipeline import (
     Recipe, run_batch, run_batch_steps, run_defect,
@@ -268,18 +268,16 @@ class DatasetLoadWorker(_ThreadedWorker):
         """同步載入（不開執行緒）；失敗直接 raise，給測試 / headless 用。"""
         return load_dataset(str(path), None if tiff is None else str(tiff))
 
-    # ---- 一個資料夾（F11 Input-3；F110 多了 DOE 那一種）-------------------
-    #: ``doe`` 決定呼叫哪一支 ingest。兩條路**正好相反** —— 一個檔案一顆
-    #: vs 一個子目錄一顆 —— 而它們在這裡共用一支，因為 worker 要做的事
-    #: （別跟自己搶、例外一律回報、成功就 emit）一模一樣。
-    def start_folder(self, folder: str, doe: bool = False) -> bool:
+    # ---- 一個資料夾（F11 Input-3）----------------------------------------
+    #: F110 在這裡加過一個 ``doe`` 開關（一個子目錄一顆），F121 期 0 拿掉了。
+    def start_folder(self, folder: str) -> bool:
         if self.is_running():
             return False
         d = str(folder)
 
         def job() -> None:
             try:
-                ds = load_doe_folder(d) if doe else load_folder(d)
+                ds = load_folder(d)
             except Exception as e:  # 一律回報
                 self.failed.emit(wording.failure("workers.DatasetLoadWorker", e))
             else:
@@ -289,10 +287,9 @@ class DatasetLoadWorker(_ThreadedWorker):
         return True
 
     @staticmethod
-    def run_sync_folder(folder: str, doe: bool = False) -> Dataset:
+    def run_sync_folder(folder: str) -> Dataset:
         """同步掃一個資料夾；給測試 / headless 用。"""
-        d = str(folder)
-        return load_doe_folder(d) if doe else load_folder(d)
+        return load_folder(str(folder))
 
     def start_image_file(self, path: str) -> bool:
         """一個影像檔一顆 defect（F85）—— `start_folder` 的單檔版。"""

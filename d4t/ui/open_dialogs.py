@@ -1,13 +1,14 @@
 # d4t UI — authored 2026-09-18 (F110).
-"""三顆 Open 鈕各自的**檔案對話框**。
+"""Open 鈕各自的**檔案對話框**。
 
 為什麼自己一個模組（`CLAUDE.md` §4：新的面板一律開新模組，`studio.py` 留給
 接線）：這幾支裡面有**內容**，不是接線 —— 副檔名過濾字串、「一顆幾張」那個
-問句與它的預設值、DOE 那顆按鈕問的是目錄不是檔案。`studio.py` 那一格天花板
-**只准往下**，而 F110 要加第五顆（`Open conditions…`）；照規矩要先從它手上
-搬走等量的東西，於是這一族整個搬過來，`studio.py` 只留一行轉呼叫。
+問句與它的預設值。`studio.py` 那一格天花板**只准往下**，而 F110 要加第五顆
+（DOE 的 `Open conditions…`，F121 期 0 又拿掉了）；照規矩要先從它手上搬走等量
+的東西，於是這一族整個搬過來，`studio.py` 只留一行轉呼叫。
 
-**2026-09-18（F114-2）：五顆併成三顆**（見 :data:`OPENABLE` 的說明）。
+**2026-09-18（F114-2）：五顆併成三顆**（見 :data:`OPENABLE` 的說明）；
+**2026-09-24（F121 期 0）：三顆剩兩顆**（DOE 那顆拿掉）。
 `Open images…` 這一顆吃「一個資料夾**或**一個檔案」，而**是哪一種由那條路徑
 自己回答** —— 那個判斷跟 CLI 的 `d4t.__main__._open_input` 是同一套規則，
 `tests/test_ui_input_kinds.py` 有一條釘住兩邊不准漂。
@@ -46,10 +47,10 @@ OTHER_LAYOUT = "Something else - let me type it in"
 #: 併掉的是 ``folder`` / ``image`` / ``raw`` —— 它們**本來就是同一種 kind**
 #: （``folder``），只差在「一個檔還是一疊檔」與「byte 要怎麼變成像素」，
 #: 而那兩件事**看一眼那條路徑就知道**（CLI 的 `_open_input` 早就是這樣做的）。
-#: 沒併的兩顆是因為它們**看不出來**：KLARF 的形狀由 KLARF 自己講，而
-#: 「資料夾裡還有資料夾」與「一個資料夾的圖」選錯會安靜地得到一批看起來
-#: 正常的錯資料。
-OPENABLE = ("klarf", "images", "doe_folder")
+#: 沒併的那一顆是因為它**看不出來**：KLARF 的形狀由 KLARF 自己講。
+#: **2026-09-24（F121 期 0）**：DOE 的 `Open conditions…`（「資料夾裡還有
+#: 資料夾」）拿掉了 —— 使用者說那個設計錯了，DOE 的資料走 `Open images…`。
+OPENABLE = ("klarf", "images")
 
 
 def ask_klarf(parent: Any) -> Optional[str]:
@@ -81,16 +82,6 @@ def ask_images(parent: Any) -> Optional[str]:
         return None
     got = d.selectedFiles()
     return got[0] if got else None
-
-
-def ask_conditions_folder(parent: Any) -> Optional[str]:
-    """`Open conditions…` —— DOE：一個**子目錄**一顆，裡面每個檔案一個 condition。
-
-    ⚠ 標題要講得出跟上面那一顆的差別，因為兩顆都是「選一個目錄」，而選錯的
-    下場是一批看起來正常的資料（`folder` 會把每個 condition 當成一顆 defect）。
-    """
-    return QFileDialog.getExistingDirectory(
-        parent, "Open a folder of per-defect folders", "") or None
 
 
 def ask_raw_layout(parent: Any, probe: str) -> Optional[Any]:
@@ -158,10 +149,6 @@ def open_source(window: Any, key: str) -> None:
         path = ask_images(window)
         if path:
             _open_picked(window, path)
-    elif key == "doe_folder":
-        d = ask_conditions_folder(window)
-        if d:
-            window.load_folder_path(d, doe=True)
     else:
         window._status("No way to open \u201c%s\u201d yet." % key, "error")
 
@@ -215,7 +202,7 @@ def _open_picked(window: Any, path: str) -> None:
             _load_raw(window, raw_dir, spec)
         return
     if os.path.isdir(path):
-        window.load_folder_path(path, doe=False)
+        window.load_folder_path(path)
     else:
         window.load_image_path(path)
 

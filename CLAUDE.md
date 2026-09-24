@@ -267,16 +267,16 @@ git add -A && python tools/release.py && git add -A
 
 **一種 source 一張載入卡**：`load_patch`「Patch」（一顆好幾張）與 `load_single`
 「SEM image」（一顆一張），**兩張都不看資料型別**（2026-09-18 使用者改的名；
-`key` 與 feature 名一個都沒動）。四種 source：
+`key` 與 feature 名一個都沒動）。三種 source：
 
 | kind | 什麼樣的資料 | 入口 |
 |---|---|---|
 | `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁；檔名 `.tif` 或 `.I01`，**內容都是 TIFF**，副檔名只住在 `klarf_core.PATCH_IMAGE_EXTS`）| `Open KLARF…` |
 | `rsem` | KLARF + 每顆一個影像檔 | `Open KLARF…`（自動判別）|
 | `folder` | 一個資料夾的影像、或單獨一張、沒有 KLARF | `Open images…`（**資料夾或單一檔案都吃**；headerless `.raw` 也在這裡 —— 它沒有寬高與位元深度，所以那顆會問，或從檔案大小推）|
-| `doe_folder` | **一個子目錄一顆、裡面每個檔案一個 imaging condition**（DOE）、沒有 KLARF | `Open conditions…` |
 
-後三種**寫不回 KLARF**，那句話**常駐在資料集標籤上**。第二份 lot 走 `pair_source`
+`folder` **寫不回 KLARF**，那句話**常駐在資料集標籤上**（F110 的 `doe_folder`
+2026-09-24 刪了：設計錯了，DOE 就是 `folder`）。第二份 lot 走 `pair_source`
 卡的 `Open data…`（掛在 `Dataset.sources[代號]`，不取代目前的資料集；CLI
 `--source 代號=路徑`）；**卡片不自己 `open()`**，讀檔在 ingest 層，第二份的身分要進
 快取簽章。
@@ -286,11 +286,11 @@ profile 設（`fab` 預設／`dev`／`demo`，看 `D4T_PROFILE`）。⚠ **旗�
 （`scope.SHOW_ROUTE_BY`），不准 `from .scope import SHOW_…`（拿到的是複本）。
 
 ```python
-SUPPORTED_KINDS = ("ebi_patch", "rsem", "folder", "doe_folder")
+SUPPORTED_KINDS = ("ebi_patch", "rsem", "folder")
 HIDDEN_STEPS = ()                # 目前沒有收起來的卡（`align` F109 拿回來了）
 SHOW_TEMPLATE_LIBRARY = True     # 工具列的 Templates…（2026-09-08 打開）
 SHOW_SAMPLE_DATA = True          # 「用範例資料試一次」（2026-09-09 隨 ebi-die-to-die.json 打開）
-INPUT_SOURCES = (...)            # **三顆** Open 的字、圖示、一句白話說明
+INPUT_SOURCES = (...)            # **兩顆** Open 的字、圖示、一句白話說明
                                  # （加一列就好 —— 分岔在 ui/open_dialogs.open_source）
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）
 ```
