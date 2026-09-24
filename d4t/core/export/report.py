@@ -216,6 +216,9 @@ def summarize(results: Sequence[Dict[str, Any]], *,
     if ground_truth:
         out["ground_truth"] = _confusion(results, ground_truth, positive_bins)
         out["bin_purity"] = _bin_purity(results, ground_truth)
+        by_class = _bin_by_class(results, ground_truth)
+        if by_class:
+            out["bin_by_class"] = by_class
     return out
 
 
@@ -278,6 +281,67 @@ def _bin_purity(results: Sequence[Dict[str, Any]],
             "purity": (row["n_real"] / labelled) if labelled else None,
         })
     return out
+
+
+def _gt_class(ground_truth: Dict[Any, Any], defect_id: Any) -> Optional[str]:
+    """ground truth 的一筆 → **它真正是哪一類**（``type``／``class``），沒標就 None。"""
+    for key in (defect_id, str(defect_id)):
+        if key in ground_truth:
+            value = ground_truth[key]
+            break
+    else:
+        try:
+            value = ground_truth.get(str(int(str(defect_id))))
+        except (TypeError, ValueError):
+            value = None
+    if not isinstance(value, dict):
+        return None
+    for k in ("type", "class", "category"):
+        v = value.get(k)
+        if isinstance(v, (str, int)) and str(v).strip():
+            return str(v).strip()
+    return None
+
+
+def _bin_by_class(results: Sequence[Dict[str, Any]],
+                  ground_truth: Dict[Any, Any]) -> Optional[Dict[str, Any]]:
+    """**判到的 bin × 真正的類別**（評價清單 #2，2026-09-24）。
+
+    `_bin_purity` 只問「真的／假的」，因為手上的標註**大多**只有 ``is_real``。
+    但標了類別的那一種（``make_sample`` 的 ``{"is_real": …, "type": "dark_blob"}``
+    —— 廠內的 ground truth 通常也是一個分類名）答得出更多：某一類是不是整批
+    落進錯的 bin、兩類是不是被判成同一格。那正是調多類別規則的人要看的。
+
+    **一顆都沒標類別就回 None**（不印這張表 —— 一張全空的表比沒有更像壞了）。
+
+    回傳::
+
+        {"classes": ["dark_blob", "none", …],          # 照名字排
+         "rows": [{"bin": "2", "n": 10, "by_class": {"dark_blob": 9, …},
+                   "unlabelled": 0}, …]}                # bin 大到小，未判定最後
+    """
+    classes: set = set()
+    buckets: Dict[Any, Dict[str, Any]] = {}
+    for r in results:
+        b = r.get("bin")
+        key = UNBINNED_KEY if b is None else int(b)
+        row = buckets.setdefault(key, {"n": 0, "by_class": {}, "unlabelled": 0})
+        row["n"] += 1
+        cls = _gt_class(ground_truth, r.get("defect_id"))
+        if cls is None:
+            row["unlabelled"] += 1
+        else:
+            classes.add(cls)
+            row["by_class"][cls] = row["by_class"].get(cls, 0) + 1
+    if not classes:
+        return None
+
+    def _order(k: Any) -> Tuple[int, int]:
+        return (1, 0) if k == UNBINNED_KEY else (0, -int(k))
+
+    return {"classes": sorted(classes),
+            "rows": [dict(buckets[k], bin=str(k))
+                     for k in sorted(buckets, key=_order)]}
 
 
 def _confusion(results: Sequence[Dict[str, Any]], ground_truth: Dict[Any, Any],
@@ -560,6 +624,16 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
             ("Actual: real defect", gt["tp"], gt["fn"]),
             ("Actual: nuisance", gt["fp"], gt["tn"]),
         ]
+    table = s.get("bin_by_class")
+    if table:
+        # 評價清單 #2：多類別的對照（標了類別才有）。
+        rows.append(("__section__", "Bin × actual class"))
+        rows.append(tuple(["Called"] + ["Actual: %s" % c for c in table["classes"]]
+                          + ["Not labelled"]))
+        for row in table["rows"]:
+            rows.append(tuple(["bin %s" % row["bin"]]
+                              + [row["by_class"].get(c, 0) for c in table["classes"]]
+                              + [row["unlabelled"]]))
 
     r_i = 0
     pct_rows = set()
@@ -585,7 +659,7 @@ def write_excel(results: Sequence[Dict[str, Any]], path: str, *,
                 ws.cell(row=r, column=2).number_format = _NUM_FMT
     ws.cell(row=1, column=1).fill = head_fill
     ws.cell(row=1, column=2).fill = head_fill
-    _autosize(ws, _text_width(rows, 3))
+    _autosize(ws, _text_width(rows, max(3, max(len(r) for r in rows))))
     ws.freeze_panes = "A2"
 
     # ---------------- 明細 ----------------

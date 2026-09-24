@@ -348,6 +348,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
                       % (row["bin"], row["n"], row["n_real"],
                          row["n_nuisance"], pct))
 
+        # 判到的 bin × 真正的類別（評價清單 #2）—— ground truth 標了類別才有。
+        table = summary.get("bin_by_class")
+        if table and len(table["classes"]) > 1:
+            print("  每一個 bin 裡是哪幾類（ground truth 的 type）：")
+            for row in table["rows"]:
+                parts = ["%s %d" % (c, row["by_class"][c])
+                         for c in table["classes"] if row["by_class"].get(c)]
+                if row["unlabelled"]:
+                    parts.append("沒標 %d" % row["unlabelled"])
+                print("    bin %-4s %3d 顆　%s" % (row["bin"], row["n"],
+                                               "　".join(parts)))
+
     for r in fail[:5]:
         print(f"  ✗ {r.get('defect_id')}: {r.get('error')}")
 

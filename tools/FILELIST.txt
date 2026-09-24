@@ -10,7 +10,7 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 ae82868894f2fd42d658d84c208f2434ae2b4161 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
-d5f88db59f6da263deba1716ab16c7ddd88fdc98 d4t/__main__.py
+4492d3a9be2c10d9402a4ba5b6725ce2e2b58f78 d4t/__main__.py
 e75a08b69155620720f17d638c3b8e14489091f3 d4t/core/__init__.py
 dbcf7ddc11affd20145254f192259784aa3b8789 d4t/core/algo/__init__.py
 4831e63cce346047c2bb15032d3ad47e7a2cb847 d4t/core/algo/align.py
@@ -44,7 +44,7 @@ e124c808bc10ad7aac2e434dcf87e3a8efef4794 d4t/core/export/chart_frame.py
 df85cecb3e142f94a5ccb6d8775cd3540d99fa97 d4t/core/export/klarf_out.py
 f1096aa00597a3ce6e7a69b03aa11fdfe0b6cd1a d4t/core/export/overlay.py
 76a911d37c1e1888c74db4d6ca0fadbb32b3a3e9 d4t/core/export/ramps.py
-28bdf3174ea4b4743f3305da2a2b68cb414ddb91 d4t/core/export/report.py
+02e51bf6d0e44581402d4134b97e4c7f8d98bba9 d4t/core/export/report.py
 95e810a6138d4e5a6a5a870b41dcf69376753a12 d4t/core/export/uniformity_charts.py
 cfa364ebeaf68456e2ac3a55c7120a3b650d0739 d4t/core/ingest/__init__.py
 dd90cd983e006157c74d60f28d51e66c163d4526 d4t/core/ingest/dataset.py
@@ -230,6 +230,7 @@ ea645411eb897baeb9d9d4967d5e41a86820960f tests/test_algo_edge.py
 a97d52589a216a1629c13bd5c8ee75f2678bf891 tests/test_batch_steps.py
 1c3e6a27a18cad905fb862e5cb8180716b5f7735 tests/test_batch_thread_safety.py
 d6fc85332a76b247686bce5dbd58fc08075535f9 tests/test_bench_tool.py
+1c0442f5f9055bca646814f99a82e309fbd93020 tests/test_bin_by_class.py
 8e347443cb7002c31a154e2021066da2f38eb426 tests/test_blank_let_lines.py
 299ce9e0acf6811de39e6e92bf43664954cbd3ad tests/test_calibration.py
 043df4ef5fd251b0899e54dcb198aa47fafc3dd3 tests/test_card_invariants.py
