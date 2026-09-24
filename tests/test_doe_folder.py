@@ -141,6 +141,7 @@ def test_the_starter_card_for_doe_is_the_one_that_takes_n_images():
 
 def test_the_entry_is_on_the_one_table_that_grows_the_buttons():
     """加／改一個入口＝改 `INPUT_SOURCES`，不要動 UI（`CLAUDE.md` §5）。"""
+    pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
     from d4t.ui import open_dialogs, scope
 
     row = [s for s in scope.INPUT_SOURCES if s.key == "doe_folder"]

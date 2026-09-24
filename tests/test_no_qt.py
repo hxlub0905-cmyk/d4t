@@ -111,3 +111,99 @@ def test_core_tests_guard_lazy_qt_imports_with_the_right_importorskip():
                 bad.append("%s:%d" % (py.name, i))
     assert not bad, (
         "請改成 importorskip('PySide6.QtWidgets', exc_type=ImportError)：%s" % bad)
+
+
+def _ui_modules_needing_qt():
+    """`d4t/ui` 底下哪幾支 import 了就會拉進 Qt（模組層 import 的遞移閉包）。
+
+    靜態算（ast），不真的 import —— 一支一支開子行程太慢，而同一個行程裡
+    Qt 一旦進了 ``sys.modules`` 就分不出是誰拉的。
+    """
+    import ast
+
+    ui = PKG / "ui"
+    direct, deps = set(), {}
+    for py in ui.glob("*.py"):
+        name = py.stem
+        deps[name] = set()
+        for node in ast.parse(py.read_text(encoding="utf-8")).body:
+            mods = []
+            if isinstance(node, ast.Import):
+                mods = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 1:
+                    if node.module:
+                        deps[name].add(node.module.split(".")[0])
+                    else:
+                        deps[name].update(a.name for a in node.names)
+                    continue
+                mods = [node.module or ""]
+            for m in mods:
+                if m.split(".")[0] in ("PySide6", "PySide2", "PyQt5", "PyQt6"):
+                    direct.add(name)
+                elif m.startswith("d4t.ui."):
+                    deps[name].add(m.split(".")[2])
+    need = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        for name, ds in deps.items():
+            if name not in need and ds & need:
+                need.add(name)
+                changed = True
+    return need
+
+
+def test_core_tests_that_reach_into_qt_ui_modules_skip_without_qt():
+    """**函式裡 import 一支會拉進 Qt 的 `d4t.ui` 模組，也要守門**（2026-09-24）。
+
+    上面那兩條只看得到「直接寫 PySide6」。`test_doe_folder.py` 在函式裡
+    ``from d4t.ui import open_dialogs`` —— 那一支在模組層 import PySide6 ——
+    於是沒有 `libEGL` 的機器上核心批紅一條，而兩條守門都沒叫。
+
+    規則：非 `test_ui_*` 的檔案裡，import 一支需要 Qt 的 `d4t.ui` 模組的那個
+    函式（或整個檔案的模組層）要有
+    ``importorskip("PySide6.QtWidgets", exc_type=ImportError)``。
+    """
+    import ast
+
+    need = _ui_modules_needing_qt()
+    assert "open_dialogs" in need and "strings" not in need, "閉包算錯了"
+
+    def qt_targets(node):
+        out = []
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module == "d4t.ui":
+                out = [a.name for a in node.names]
+            elif node.module.startswith("d4t.ui."):
+                out = [node.module.split(".")[2]]
+        elif isinstance(node, ast.Import):
+            out = [a.name.split(".")[2] for a in node.names
+                   if a.name.startswith("d4t.ui.")]
+        return [m for m in out if m in need]
+
+    def guarded(scope_node):
+        src = ast.unparse(scope_node)
+        return ('importorskip("PySide6.QtWidgets", exc_type=ImportError)' in src
+                or "importorskip('PySide6.QtWidgets', exc_type=ImportError)" in src)
+
+    tests_dir = Path(__file__).resolve().parent
+    bad = []
+    for py in sorted(tests_dir.glob("test_*.py")):
+        if py.name.startswith("test_ui_") or py.name == "test_no_qt.py":
+            continue
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        file_guard = any(guarded(n) for n in tree.body
+                         if not isinstance(n, (ast.FunctionDef, ast.ClassDef)))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            hits = [n for n in ast.walk(fn) if qt_targets(n)]
+            if hits and not (file_guard or guarded(fn)):
+                bad.append("%s:%d" % (py.name, hits[0].lineno))
+        for n in tree.body:
+            if qt_targets(n) and not file_guard:
+                bad.append("%s:%d" % (py.name, n.lineno))
+    assert not bad, (
+        "這些地方 import 了需要 Qt 的 d4t.ui 模組卻沒有 "
+        "importorskip('PySide6.QtWidgets', exc_type=ImportError)：%s" % bad)
