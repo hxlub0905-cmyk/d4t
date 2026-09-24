@@ -112,6 +112,8 @@ class Trace:
     bins: Optional[Dict[str, int]] = None
     missing: Tuple[str, ...] = ()    #: 所有「沒人產出」的名字（sorted、去重）
     features: Dict[str, float] = field(default_factory=dict)
+    #: 有題目答不出來、而 recipe 設了「送去 bin N」（評價清單 #1）→ leaf 是那個 bin。
+    unanswered_routed: bool = False
 
 
 def _num(v: Any) -> Optional[float]:
@@ -197,6 +199,12 @@ def verdict_trace(recipe: Recipe, route: str,
             path += "y" if yes else "n"
             step_missing.extend(gaps)
         leaf_bin, leaf_label = int(leaf.bin), str(leaf.label)
+    # 跟引擎同一條規則（`engine._eval_decide`）：有題目答不出來、recipe 又設了
+    # 「送去 bin N」，這一顆就在那個 bin —— 回溯面板不准講一個它沒去的 leaf。
+    routed = bool(step_missing) and decide.unanswered_bin is not None
+    if routed:
+        leaf_bin = int(decide.unanswered_bin)
+        leaf_label = str(decide.unanswered_label or "")
 
     mode = "tree" if decide.tree is not None else "rules"
     # rules 的鏈狀樹裡「走到第 k 步答 yes」= 第 k 條規則對上；全 no = otherwise。
@@ -212,4 +220,4 @@ def verdict_trace(recipe: Recipe, route: str,
         score_valued=valued_text(score_expr, feats) if score_expr else "",
         score=feats.get("score"),
         missing=tuple(sorted(set(step_missing))),
-        features=feats)
+        features=feats, unanswered_routed=routed)

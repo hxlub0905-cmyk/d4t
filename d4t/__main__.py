@@ -290,6 +290,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for r in ok:
             bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
         print("bin 分佈：" + " · ".join(f"bin {b}={c}" for b, c in sorted(bins.items())))
+        # 評價清單 #1：「有題目答不出來」要講出來，不然它安靜地變成一個有把握的 bin。
+        n_q = sum(1 for r in ok
+                  if float((r.get("features") or {}).get("decide_unanswered") or 0) > 0)
+        if n_q:
+            ub = getattr(getattr(recipe, "decide", None), "unanswered_bin", None)
+            print(f"  ⚠ {n_q} 顆有題目答不出來（某張卡在那幾顆上沒量到）—— "
+                  + (f"照 recipe 的設定送進 bin {ub}" if ub is not None else
+                     "被當成「否」繼續判。要另外分出來：判定區勾 "
+                     "“When a question can't be answered”"))
     # ---- 分流摘要（F23 §4.1）----
     # 「掉進 default 的顆數」一定要看得見：站點換了編碼、整批掉進 default，
     # 是「跑得完、有數字、而且是錯的」的形狀。route 的決定是純函式

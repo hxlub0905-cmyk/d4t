@@ -651,6 +651,12 @@ def _eval_decision(recipe: Recipe,
     # ⚠ 它是判定跑完**之後**才寫的，所以樹上問不到自己。要把「有沒有量到」
     # 當成一個明講的問題來問，走 `let` 的「missing ⇒ 用 __」（F24 ⑤）。
     ctx.features["decide_unanswered"] = float(len(unanswered))
+    routed = bool(unanswered) and recipe.decide.unanswered_bin is not None
+    if routed:
+        # 評價清單 #1：recipe 說「問不出來的送去 bin N」—— 不管樹走到哪。
+        chosen_bin = int(recipe.decide.unanswered_bin)
+        chosen_label = str(recipe.decide.unanswered_label or "")
+        chosen_rule = -1
     if unanswered:
         names = sorted(set(unanswered))
         ctx.warn("[decide] %d question(s) could not be asked on this defect "
@@ -660,7 +666,13 @@ def _eval_decision(recipe: Recipe,
                  "failure. To ask about it on purpose, add a 'let' line with "
                  "an 'if missing' fallback and test its <name>_missing flag."
                  % (len(unanswered), ", ".join(names),
-                    "was" if len(names) == 1 else "were"))
+                    "was" if len(names) == 1 else "were")
+                 if not routed else
+                 "[decide] %d question(s) could not be asked on this defect "
+                 "because %s %s not measured on it, so it was put in bin %d "
+                 "(the recipe's 'could not be decided' bin)."
+                 % (len(unanswered), ", ".join(names),
+                    "was" if len(names) == 1 else "were", chosen_bin))
 
     # **沒有分數表達式 ⇒ 沒有分數**（F30）。以前這裡是 `else 0.0`，而判定樹
     # 是一個**分類器** —— 多數樹根本沒有 score 表達式，於是每一顆的分數都是
@@ -686,7 +698,8 @@ def _eval_decision(recipe: Recipe,
     # 目前仍然是不進。）
     ctx.meta["decide"] = {"rule": chosen_rule, "label": chosen_label,
                           "bin": chosen_bin, "path": path,
-                          "unanswered": sorted(set(unanswered))}
+                          "unanswered": sorted(set(unanswered)),
+                          "unanswered_routed": routed}
     return score, chosen_bin
 
 

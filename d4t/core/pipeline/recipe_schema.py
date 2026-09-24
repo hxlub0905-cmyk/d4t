@@ -409,6 +409,14 @@ class DecideSpec:
     #: 兩個地方存，挑一個贏的話另一份會安靜地漂）。``rules`` 是它的特例
     #: （鏈狀樹，見 :func:`rules_to_tree`），所以舊寫法照讀不誤。
     tree: Any = None
+    #: **問不出來的那一顆送去哪個 bin**（評價清單 #1，2026-09-24）。``None``
+    #: ＝照 F30 的規則：問不出來的那一題算「否」，照樣往下走（預設、舊檔案）。
+    #: 設了的話，只要有任何一題問不出來（``decide_unanswered > 0``），不管樹
+    #: 走到哪裡，那一顆都改判進這個 bin —— 「量不到」就不會被當成一個有把握
+    #: 的分類。JSON 是 ``decide.unanswered = {"bin": N, "label": "…"}``，**沒設
+    #: 就不寫這個鍵**（嚴格附加：舊檔案 round-trip 一個 byte 都不變，不需要遷移）。
+    unanswered_bin: Optional[int] = None
+    unanswered_label: str = ""
 
     def entries(self) -> List[Tuple[int, str, str]]:
         """每一類的 ``(bin, 名字, 好壞)``，**照使用者由上往下讀的順序**。
@@ -442,6 +450,8 @@ class DecideSpec:
             _take(rule.bin, rule.label, rule.outcome)
         _take(self.otherwise_bin, self.otherwise_label,
               self.otherwise_outcome)
+        if self.unanswered_bin is not None:
+            _take(self.unanswered_bin, self.unanswered_label, "")
         return out
 
     def bin_labels(self) -> Dict[int, str]:
@@ -876,4 +886,15 @@ def _decide_from_json(raw: Any) -> Optional["DecideSpec"]:
         otherwise_outcome=str(other.get("outcome", "") or ""),
         score=str(raw.get("score", "") or ""),
         tree=tree,
+        **_unanswered_from_json(raw.get("unanswered")),
     )
+
+
+def _unanswered_from_json(raw: Any) -> Dict[str, Any]:
+    """``decide.unanswered`` → DecideSpec 的兩個欄位（沒寫＝照舊，見 `unanswered_bin`）。"""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or "bin" not in raw:
+        raise RecipeError("decide.unanswered must be an object with 'bin'")
+    return {"unanswered_bin": _as_int(raw["bin"], "decide.unanswered.bin"),
+            "unanswered_label": str(raw.get("label", "") or "")}

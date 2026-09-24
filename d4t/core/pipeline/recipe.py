@@ -262,6 +262,9 @@ class Recipe:
                     **({"outcome": self.decide.otherwise_outcome}
                        if str(self.decide.otherwise_outcome or "") else {}))
             d_out["score"] = self.decide.score
+            if self.decide.unanswered_bin is not None:   # 沒設就不寫（嚴格附加）
+                d_out["unanswered"] = {"bin": int(self.decide.unanswered_bin),
+                                       "label": self.decide.unanswered_label}
             out["decide"] = d_out
         # 同一條規矩：**沒有就不寫這個鍵**（嚴格附加，鐵則 9）。
         if self.route_by is not None:

@@ -3957,7 +3957,7 @@ class StudioWindow(QMainWindow):
             self.run_ctl._write_outputs(results)
         # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
         self.results.set_summary(
-            summarize_run(len(results), ok, elapsed, self.trial_scores))
+            summarize_run(len(results), ok, elapsed, self.trial_scores, results))
         # X1：baseline 那一行吃的是**引擎判出來的 bin**（不是某個門檻重算的），
         # 因為使用者剛剛看到的就是它。拖門檻線時 `_refresh_bin_summary` 會用
         # 那個門檻再餵一次。

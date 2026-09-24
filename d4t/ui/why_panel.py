@@ -101,9 +101,12 @@ def why_rows(trace: Any) -> List[Dict[str, Any]]:
         label = str(trace.leaf_label or "")
         tail = "" if trace.leaf_bin is None else "bin %d" % trace.leaf_bin
         text = " · ".join(x for x in (label, tail) if x)
-        rows.append({"kind": "leaf", "name": "",
-                     "text": "⇒ %s" % (text or "?"),
-                     "bin": trace.leaf_bin})
+        leaf = {"kind": "leaf", "name": "",
+                "text": "⇒ %s" % (text or "?"), "bin": trace.leaf_bin}
+        if getattr(trace, "unanswered_routed", False):
+            leaf["note"] = ("a question could not be answered, so the recipe "
+                            "puts this defect here (not where the answers led)")
+        rows.append(leaf)
         if trace.score_expr:
             rows.append({"kind": "score", "name": "score",
                          "text": "score = %s   (= %s)"
