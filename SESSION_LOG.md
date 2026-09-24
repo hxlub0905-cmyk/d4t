@@ -28,6 +28,30 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F121 開案：沒有 KLARF 的 RSEM 影像每一顆都 card error（2026-09-24）
+
+使用者回報：跑沒有 KLARF 的 RSEM 影像，每一顆都報
+`unknown input-type route 'folder'; this recipe only defines ebi_patch`。
+使用者定調「先查出原因，不要急著動手」—— **這一輪只查、只寫計畫書，程式沒動。**
+
+* **原因**：recipe 用資料型別當鑰匙（`routes = {"ebi_patch": …}`），沒有 KLARF 的影像
+  是 `folder`（不是 `rsem`）。三條走得到的路都在 headless Studio 重現過（先有
+  pipeline 再開影像／先開影像再開 recipe／先開 recipe 再開影像 —— 最後一條會**默默把
+  route 改名**，存檔就改寫原檔）。
+* **為什麼沒擋下**：開跑前健檢 `model.validate()` 拿 pipeline 自己的 kind 去比，
+  `unknown-route` 那條 lint 寫好了卻餵錯型別。
+* **改名也救不了**：實測三份出貨 recipe 硬改成 `folder` —— die-to-die 要兩張圖、
+  rsem-worst-box 要 KLARF 欄。卡能不能用看「一顆幾張、有沒有 KLARF」，不看型別名。
+* **SEM image ＝ 名字表一列的 Patch**：在 folder／rsem 上像素與特徵逐一相同。
+* 使用者：「我想要一勞永逸的改法，Input 跟 Output 和 ADC card 這三張比較特別」、
+  「先從 input 開始」、「我想把入口簡單化」；同意合卡（推翻 F11 Input-4）、一顆 Open、
+  名字少於張數就讀第一張並警告、舊 recipe 自動升級；**DOE 先拿掉**（「我當初設計錯了」）。
+* 計畫書：[`docs/plans/F121-simple-input.md`](docs/plans/F121-simple-input.md)
+  —— 期 0 拿掉 DOE、期 1 recipe 不認型別（一條 route 就跑那條，不改格式）、
+  期 2 一張 Input 卡（key 留 `load_patch`）、期 3 Input 卡看資料、期 4 一顆 Open。
+
+---
+
 ## 專案評價之後的「嚴重～高」那一批（2026-09-24）
 
 使用者：「7 先不要做，按順序做 4 5 6 2 1，6 要有一個切換的按鈕」。#3 量過之後撤回

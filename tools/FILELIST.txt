@@ -7,7 +7,7 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 603fe90b9832f4e03541c4bcebb994301cfea80b README.md
-4a5092ceeca8df9b0d854e924b5ab344e06b77c0 SESSION_LOG.md
+4e172c6f255d3d312b7604b296cc56caf72dedb1 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
 6fbcb70c28188602452885aa514d53cdab854e5a d4t/__main__.py
@@ -201,6 +201,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 00f08896560102bf52d194637171001961734d18 docs/USING-UNIFORMITY.md
 c02b5ed1aa8d2c33e7bfa8a9ca830a324fbd0cb4 docs/plans/F117-ui-review.md
+3dbe09278a1161c361e01abccd18b2a513bffb5c docs/plans/F121-simple-input.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
