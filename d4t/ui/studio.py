@@ -776,9 +776,7 @@ class StudioWindow(QMainWindow):
         self.trial_worker.done.connect(self.run_ctl._on_trial_done_async)
         self.output_worker.done.connect(self.run_ctl._on_outputs_done)
         self.output_worker.failed.connect(self.run_ctl._on_outputs_failed)
-        self.trial_worker.failed.connect(
-            lambda msg: (self._progress_done(),
-                         self._status("Trial run failed: %s" % msg, "error")))
+        self.trial_worker.failed.connect(self.run_ctl._on_trial_failed)
 
 
     # ==================================================================== #

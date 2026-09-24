@@ -30,6 +30,10 @@ def _no_modal_dialogs_in_tests():
     tpl = sys.modules.get("d4t.ui.template_dialog")
     if tpl is not None:
         tpl.ASK_WHERE = False
+    # 評價清單 #5：Run all／寫出失敗的對話框。要驗它的測試自己打開。
+    fd = sys.modules.get("d4t.ui.failure_dialog")
+    if fd is not None:
+        fd.SHOW = False
     yield
 
 
