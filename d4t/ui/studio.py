@@ -100,7 +100,7 @@ from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline import sampling
 from d4t.core.pipeline.step import SCALE_DEFECT, SCALE_LOT
 from d4t.core.pipeline.recipe import (
-    describe_migration, version_skew,
+    describe_migration, route_for, version_skew,
 )
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
@@ -1256,7 +1256,7 @@ class StudioWindow(QMainWindow):
         out: Dict[str, Any] = {}
         if issues is None:
             try:
-                issues = self.model.validate()
+                issues = self.model.validate(getattr(self.dataset, "kind", None))
             except Exception:  # 顯示用，壞了就沒標記
                 return out
         rank = {"error": 0, "warning": 1, "info": 2}
@@ -1277,7 +1277,7 @@ class StudioWindow(QMainWindow):
         # ⚠ **lint 只跑一次**，畫布的警示點與 Problems 列吃同一份（U2）。
         # 各算一次的那天，畫面上會有一張卡是紅的而清單說沒有問題。
         try:
-            issues: Sequence[Any] = self.model.validate()
+            issues: Sequence[Any] = self.model.validate(getattr(self.dataset, "kind", None))
         except Exception:  # 顯示用
             issues = []
         self.problems.set_issues(issues, self.model)
@@ -1473,7 +1473,7 @@ class StudioWindow(QMainWindow):
         from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
 
         try:
-            issues = self.model.validate()
+            issues = self.model.validate(getattr(self.dataset, "kind", None))
         except Exception:  # 顯示用
             return ("", "")
         rank = {"error": 0, "warning": 1, "info": 2}
@@ -3059,30 +3059,30 @@ class StudioWindow(QMainWindow):
 
         warn = list(getattr(dataset, "warnings", []) or [])
 
-        # route 型別跟著資料走 —— **但只在使用者還沒動過 pipeline 的時候**
-        # （F11 Input-3）。以前這裡的條件是「畫布是空的」，而 F7-9 之後開窗就有
-        # 一張起手卡，所以那個條件**永遠是 False** —— 在只支援一種輸入的時候看
-        # 不出來，四種輸入之後就會：載一份 rsem 資料，pipeline 還留在 ebi_patch
-        # 那條 route 上，於是 lint 以為有 `ref`（kind-aware 宣告）而執行期才發現
-        # 沒有。判準改成 `dirty`（`RecipeModel.starter()` 特意把它設 False）。
+        # route 鍵跟著資料走 —— **只在畫布是空的時候**（F121 期 1）。
+        #
+        # 以前的條件是「使用者還沒動過」（`not dirty`），而一份**剛開的 recipe**
+        # 也是沒動過 —— 於是先開 recipe 再開資料，它那條 route 會被**默默改名**
+        # 成資料的型別，`Ctrl+S` 就改寫了原檔。現在 route 鍵只是標籤
+        # （`route_for`：只有一條就跑那一條），所以畫布上有卡的時候一個字都
+        # 不動；空白畫布才順手把鍵名改成資料的型別（存出去的 JSON 讀起來對）。
         ds_kind = str(getattr(dataset, "kind", self.model.kind))
         if ds_kind != self.model.kind:
-            if not self.model.dirty or not self.model.node_order:
+            if not self.model.node_order:
                 self.model.kind = ds_kind
                 self.model.dirty = False      # 換 route 不算「使用者改過」
-                # ⚠ **換 kind 必須重畫**。`model.kind` 是直接設的屬性，不會通知
-                # listener，而畫布的輸出埠是照 kind 算的（`resolve_writes_for_kind`）
-                # —— 少了這一行，載一份 rsem 資料之後畫布上還是 patch 的
-                # `test` / `ref` 兩顆埠，而資料只有一條 `single`。
-                # 使用者回報的「畫布跟實際對不起來」第一層就是這個。
+                # ⚠ **換 kind 必須重畫**：`model.kind` 是直接設的屬性，不會
+                # 通知 listener（「畫布跟實際對不起來」的第一層就是少了這一行）。
                 self._refresh_all()
-            else:
-                # 使用者已經蓋了一條 pipeline，那是他的東西 —— 不要偷偷改掉它，
-                # 但要講出這個組合跑不起來。
+            elif (getattr(self.model, "route_by", None) is None
+                  and route_for(self.model.to_recipe(), ds_kind) is None):
+                # 只剩手寫的多型別 recipe 走得到這裡：它的每一條都綁著一種資料，
+                # 而這一種沒有。
                 warn.insert(0, (
-                    "this pipeline is written for %s data and you just opened "
-                    "%s data; open a recipe for %s, or start a new pipeline."
-                    % (self.model.kind, ds_kind, ds_kind)))
+                    "this recipe has a separate pipeline for each kind of data "
+                    "(%s) and none for %s data; open a recipe for it, or start "
+                    "a new pipeline."
+                    % (", ".join(self.model.route_keys()), ds_kind)))
         added = self._adopt_source_for(ds_kind)
 
         # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11）。
@@ -3248,10 +3248,9 @@ class StudioWindow(QMainWindow):
         # 而使用者只會看到「這跟我上次存的不一樣」。讀原始 JSON 再比一次是為了
         # 拿到 `Recipe.load` 已經丟掉的那一半（版本號與原本的線）。
         upgraded = self._describe_upgrade(path, recipe)
-        kind = None
         ds_kind = str(getattr(self.dataset, "kind", "")) if self.dataset else ""
-        if ds_kind and ds_kind in recipe.routes:
-            kind = ds_kind
+        # 編哪一條：資料會跑的那一條（`route_for`，F121 期 1）；挑不到退回第一條。
+        kind = route_for(recipe, ds_kind) if ds_kind else None
         self._apply_model(RecipeModel.from_recipe(recipe, kind=kind))
         converted = self._adopt_threshold_as_a_tree()
         self.recipe_path = path
@@ -3285,7 +3284,7 @@ class StudioWindow(QMainWindow):
                          % (self.model.recipe_id, n, self.model.kind))
         # route_by 存在時 route 鍵是任意字串、覆蓋 kind 選路（F23 §4.2）——
         # 「沒有這個 kind 的 route」對它不是問題，別嚇人。
-        if ds_kind and ds_kind not in recipe.routes \
+        if ds_kind and route_for(recipe, ds_kind) is None \
                 and getattr(recipe, "route_by", None) is None:
             self._status("Loaded recipe “%s”, but it has no '%s' route — "
                          "preview and trial runs will fail."
@@ -3433,14 +3432,11 @@ class StudioWindow(QMainWindow):
         upto = self.selected_node if self.selected_node in self.model.nodes else None
         if self._preview_whole_route():
             upto = None                  # Output 卡／判定樹：跑到底，連判定
-        # 分流（F23 期2）：`kind` 是**資料的身分**（load 卡讀
-        # `meta["_dataset_kind"]`），route 由 `run_defect` 逐顆自己解。
-        # route_by 存在時 model.kind 是一個 route 鍵（"particle_route"），
-        # 把它當 kind 傳會讓 load 卡把資料認成不存在的型別。
-        kind = self.model.kind
-        if getattr(self.model, "route_by", None) is not None \
-                and self.dataset is not None:
-            kind = str(getattr(self.dataset, "kind", "") or kind)
+        # `kind` 是**資料的身分**（load 卡讀 `meta["_dataset_kind"]`），route 由
+        # `run_defect` 自己解（有 `route_by` 逐顆看欄位，沒有就 `route_for`）——
+        # 所以一律傳資料的型別，不傳正在編的 route 鍵（F23 期2；F121 期 1 起
+        # 沒有 `route_by` 的也一樣：鍵名只剩標籤，跟整批跑的是同一條）。
+        kind = str(getattr(self.dataset, "kind", "") or self.model.kind)
         if sync:
             try:
                 result = PreviewWorker.run_sync(recipe, item, kind,

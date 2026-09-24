@@ -35,7 +35,7 @@ from .engine import (
     _eval_score, _safe_num, result_to_json_dict, run_defect,
     run_defect_cached,
 )
-from .recipe import Recipe, execution_order
+from .recipe import Recipe, execution_order, route_for
 
 __all__ = ["run_batch", "apply_lot_scaling", "redecide",
            "rerun_decision", "measurement_signature",
@@ -732,7 +732,8 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
     # 只跑一次：Output 卡寫檔是不可逆的，寫兩次不是「再保險一次」是覆寫）。
     rb = getattr(recipe, "route_by", None)
     if rb is None:
-        route_keys = [k]
+        # 跟逐顆那一層同一支（`route_for`）：只有一條 route 就是那一條。
+        route_keys = [route_for(recipe, k) or k]
     else:
         route_keys = sorted({str(v) for v in rb.map.values()}
                             | ({str(rb.default).strip()}

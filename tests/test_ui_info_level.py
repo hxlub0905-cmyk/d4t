@@ -50,7 +50,9 @@ def test_node_problems_rank_error_over_warning_over_info(qapp=None):
     class _Model:
         dirty = False        # 關窗提示會問（PROMPT_ON_CLOSE 之外的那條路）
 
-        def validate(self):
+        # 簽名跟 `RecipeModel.validate` 一樣（F121 期 1：Studio 會傳開著的
+        # 資料的型別進來）。
+        def validate(self, data_kind=None):
             return [_Issue("info", "n1", "fyi"),
                     _Issue("warning", "n1", "careful"),
                     _Issue("info", "n2", "fyi only"),

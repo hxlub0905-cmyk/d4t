@@ -528,7 +528,7 @@ class RouteBy:
 
 
 def _route_by_from_json(raw: Any) -> Optional["RouteBy"]:
-    """讀 ``route_by`` 區塊。**沒有就回 None** —— 那份 recipe 照舊用 kind 選路。
+    """讀 ``route_by`` 區塊。**沒有就回 None** —— 那份 recipe 照舊由 `route_for` 選路。
 
     格式錯**當場講**而不是安靜地退回老路（同 `_decide_from_json` 的理由）：
     安靜退回的話，一份打錯字的分流 recipe 會整批走同一條路 —— 跑得完、有數字、
@@ -555,14 +555,44 @@ def _route_by_from_json(raw: Any) -> Optional["RouteBy"]:
     )
 
 
+def route_for(recipe: "Recipe", kind: str) -> Optional[str]:
+    """**沒有 ``route_by`` 時**，一批 ``kind`` 資料走哪一條 route（F121 期 1）。
+
+    * recipe **只有一條** route → 就是那一條，**不管資料是哪一種**。鍵名只剩
+      標籤：一條 pipeline 能不能吃這份資料，是 Input 卡看資料回答的事
+      （「一顆幾張」「有沒有 KLARF」），不是鍵名跟 ``dataset.kind`` 字面上
+      對不對得上。
+    * 好幾條（只有手寫 JSON 做得出來的舊式多型別 recipe，例：
+      `tests/fixtures/recipes/dual_route_basic.json`）→ 照舊挑跟 ``kind``
+      同名的那一條；沒有就回 ``None``。
+    * 沒有 route → ``None``。
+
+    為什麼（使用者回報 2026-09-24）：一份 `ebi_patch` 的 recipe 開在一個影像
+    資料夾（`folder`）上，**每一顆**都在第一步報 ``unknown input-type route
+    'folder'``。鍵名是一個使用者看不到的屬性，而它擋掉的是一件本來可能跑得
+    動的事（`rsem` 與 `folder` 在卡片這一層一模一樣）。
+
+    ⚠ **型別跟鍵名對得上時，選到的 route 跟以前逐字相同** —— 所以黃金值與
+    快取簽章（簽章裡帶的是 route 鍵）一個位元都不動。
+    ⚠ **一個判準一個家**：引擎（:func:`resolve_route`）、整批那一層
+    （`batch.run_batch`）、lint（`validate`）、CLI、Studio 都叫這一支。
+    """
+    routes = getattr(recipe, "routes", None) or {}
+    if len(routes) == 1:
+        return next(iter(routes))
+    k = str(kind or "")
+    return k if k in routes else None
+
+
 def resolve_route(recipe: "Recipe", item: Any, kind: str
                   ) -> Tuple[Optional[str], str, str]:
     """這一顆走哪條 route：``(route 鍵, 欄位值, 決定的來源)``。
 
-    來源三種：``"kind"``（沒有 ``route_by``，維持舊語意 —— route 鍵就是
-    dataset kind）、``"map"``（值對上了對照表）、``"default"``（沒對上、走
-    預設路）。對不上而且 ``default`` 留空時 route 鍵是 **None** ——
-    呼叫端把那一顆判失敗（訊息用 :func:`route_miss_message`）。
+    來源三種：``"kind"``（沒有 ``route_by``：由 :func:`route_for` 決定 ——
+    只有一條就是那一條，好幾條就挑跟 dataset kind 同名的）、``"map"``（值對上
+    了對照表）、``"default"``（沒對上、走預設路）。對不上而且 ``default`` 留空
+    時 route 鍵是 **None** —— 呼叫端把那一顆判失敗（訊息用
+    :func:`route_miss_message`）。
 
     欄位值從 ``item.fields`` 讀（`ingest.dataset.fill_fields` 填的那一份，
     大寫欄名）—— **這一支不碰 KLARF**，跟卡片同一條規矩（鐵則：讀檔在 ingest
@@ -570,7 +600,9 @@ def resolve_route(recipe: "Recipe", item: Any, kind: str
     """
     rb = getattr(recipe, "route_by", None)
     if rb is None:
-        return kind, "", "kind"
+        # 挑不到（舊式多型別 recipe、沒有這種資料的那一條）時照舊回 ``kind``：
+        # `execution_order` 會用它原本那一句 unknown-route 講出來。
+        return route_for(recipe, kind) or kind, "", "kind"
     fields = getattr(item, "fields", None) or {}
     raw = fields.get(str(rb.column).strip().upper())
     value = str(raw).strip() if raw is not None else ""

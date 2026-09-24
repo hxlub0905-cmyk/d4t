@@ -43,7 +43,7 @@ from .step import (  # noqa: F401  有人從 recipe 拿 REGISTRY／Step 等（�
 
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
-    "RouteBy", "resolve_route", "route_miss_message",
+    "RouteBy", "resolve_route", "route_for", "route_miss_message",
     "Issue", "execution_order", "validate", "is_region_edge",
     "region_edge_values", "hydrate_regions", "RECIPE_VERSION",
     "describe_migration",
@@ -86,6 +86,7 @@ from .recipe_schema import (  # noqa: F401
     let_names_written,
     region_edge_values,
     resolve_route,
+    route_for,
     route_miss_message,
     rules_to_tree,
     version_skew,
@@ -156,7 +157,7 @@ def _region_line_says(recipe: "Recipe", nid: str, param: str) -> Any:
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
     recipe_id: str
-    routes: Dict[str, List[str]]      # dataset kind → 依序的節點 id（v1 線性）
+    routes: Dict[str, List[str]]      # route 鍵 → 節點 id（只有一條時鍵只是標籤，見 route_for）
     nodes: Dict[str, RecipeNode]
     score: ScoreSpec
     #: 這份 recipe 的形狀版本（見 :data:`RECIPE_VERSION`）。**預設是現在這一版**
@@ -179,7 +180,7 @@ class Recipe:
     #: 多類別判定（F21-D）。``None`` = 這份 recipe 走 ``score`` 那條老路
     #: （一個位元都不動）。兩個都寫是 ``ambiguous-decision`` 的 error。
     decide: Optional["DecideSpec"] = None
-    #: 分流（F23）。``None`` = 照舊用 dataset kind 選 route（一個位元都不動）。
+    #: 分流（F23）。``None`` = 由 `route_for` 選 route（一條就是那一條，見那一支）。
     #: 有它時每一顆逐顆看 KLARF 的一欄決定走哪條 route（:func:`resolve_route`）。
     route_by: Optional["RouteBy"] = None
 

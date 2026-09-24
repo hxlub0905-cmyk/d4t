@@ -181,10 +181,20 @@ def test_step_failure_isolated(dummy_steps):
 
 
 def test_unknown_route_kind_captured_not_raised(dummy_steps):
-    r = run_defect(make_recipe(), make_item(), "no_such_kind")
+    # F121 期 1：只有一條 route 的 recipe 不看鍵名（`route_for`），所以「不認得
+    # 的 kind」要用**兩條**的 recipe 才造得出來 —— 那也是現在唯一走得到它的形狀。
+    rec = make_recipe()
+    rec.routes["rsem"] = list(rec.routes["ebi_patch"])
+    r = run_defect(rec, make_item(), "no_such_kind")
     assert r.ok is False
     assert "no_such_kind" in r.error
     assert r.traces == []
+
+
+def test_one_route_runs_whatever_the_kind_is(dummy_steps):
+    """F121 期 1 的正向（真資料那一面在 `tests/test_route_for.py`）。"""
+    r = run_defect(make_recipe(), make_item(), "no_such_kind")
+    assert r.ok is True, r.error
 
 
 def test_unknown_step_captured(dummy_steps):

@@ -67,6 +67,15 @@ cycle 錯誤，現在照線跑。
 
 `routes` 因此退化成「**這條 route 有哪些卡**」＋ 一個穩定的排序依據。
 
+**鍵名也退化了**（F121 期 1，2026-09-24）：沒有 `route_by` 時由
+`recipe_schema.route_for` 挑 —— **只有一條 route 就跑那一條，不管資料是哪一種**；
+好幾條（只有手寫 JSON 做得出來的舊式多型別 recipe）才照舊挑跟 `dataset.kind` 同名
+的那一條。引擎、整批那一層、`validate`、CLI、Studio 都叫這一支。起因是一份
+`ebi_patch` 的 recipe 開在影像資料夾（`folder`）上，每一顆都在第一步報
+`unknown input-type route`，而開跑前的健檢拿畫布的鍵去比所以沒擋下。
+「這條 pipeline 吃不吃得下這份資料」要由 Input 卡看資料回答（一顆幾張、有沒有
+KLARF），見 [`docs/plans/F121-simple-input.md`](plans/F121-simple-input.md)。
+
 ⚠ 順序有**兩份**（`step.py` 的 `GROUP_ORDER` 與 `ui/widgets.py` 的
 `LibraryPanel.GROUPS`，後者多帶標題與副標），`tests/test_ui_f16_stages.py`
 把它們綁在一起。

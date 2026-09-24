@@ -1788,8 +1788,16 @@ class RecipeModel:
         self.route_by = None
         self._changed()
 
-    def validate(self):
-        return validate(self.to_recipe(), kind=self.kind)
+    def validate(self, data_kind: Optional[str] = None):
+        """健檢。``data_kind`` ＝ **現在開著的資料**是哪一種（F121 期 1）。
+
+        給了就照「這份 recipe 在這份資料上會跑哪一條、那條上的卡對這種資料
+        講不講得通」來檢查 —— 那正是開跑前要問的。以前這裡一律拿
+        ``self.kind``（正在編的 route 鍵），於是一份 `ebi_patch` 的 recipe 開在
+        一個影像資料夾上時健檢說「沒問題」，跑下去每一顆都錯。沒有資料時退回
+        ``self.kind``。
+        """
+        return validate(self.to_recipe(), kind=data_kind or self.kind)
 
 
 # ---------------------------------------------------------------------------

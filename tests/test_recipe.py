@@ -349,9 +349,14 @@ def test_validate_unknown_node_in_route():
 
 
 def test_validate_unknown_route_kind():
-    r = make_recipe()
+    # F121 期 1：只有一條 route 時不看鍵名，所以要兩條才有「不認得的 kind」。
+    r = make_recipe(routes={"ebi_patch": ["load", "sub", "snr"],
+                            "rsem": ["load", "sub", "snr"]})
     issues = validate(r, kind="no_such_kind", registry=REG)
     assert "unknown-route" in codes(issues)
+    one = make_recipe()
+    assert "unknown-route" not in codes(
+        validate(one, kind="no_such_kind", registry=REG))
 
 
 def test_validate_cycle():

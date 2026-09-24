@@ -21,6 +21,7 @@ from .recipe_schema import (
     _tree_whens,
     is_region_edge,
     let_names_written,
+    route_for,
     version_skew,
 )
 from .step import (
@@ -1139,11 +1140,18 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     # （``particle_route``），dataset kind 本來就不該在 routes 裡 —— 對它報
     # `unknown-route` 等於「recipe 是對的，但健檢說它壞了」。所以這時一律檢查
     # **全部** route（每一條都可能被某個 class 走到）。
+    #
+    # 沒有 ``route_by`` 時由 `route_for` 挑（F121 期 1）：只有一條 route 就是那一條，
+    # 不管 ``kind`` 是什麼 —— 跟引擎同一支，所以健檢說「會跑哪一條」跟真的跑
+    # 的那一條不可能不一樣。挑不到的只剩手寫的多型別 recipe。
     if route_by is not None:
         kinds = list(recipe.routes)
     elif kind is not None:
-        if kind not in recipe.routes:
-            advice = ("This recipe only defines %s."
+        picked = route_for(recipe, kind)
+        if picked is None:
+            advice = ("This recipe has a separate pipeline for each kind of "
+                      "data, and none of them is for this one. It only "
+                      "defines %s."
                       % (", ".join("'%s'" % r for r in sorted(recipe.routes))
                          or "no routes at all"))
             issues.append(Issue(
@@ -1153,9 +1161,15 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 suggest=closest(kind, recipe.routes), advice=advice))
             kinds: List[str] = []
         else:
-            kinds = [kind]
+            kinds = [picked]
     else:
         kinds = list(recipe.routes)
+
+    def data_kind(route_key: str) -> str:
+        """「這一條 route 上跑的是哪一種資料」—— kind 相依的宣告與 lint 要問的
+        是**資料**，不是 route 的鍵名（F121 期 1：鍵名只剩標籤）。呼叫端沒給
+        ``kind``（例：`d4t validate` 不帶 ``--kind``）時才退回鍵名。"""
+        return str(kind) if kind is not None else str(route_key)
 
     # ---- 每個節點：step 存在？參數合法？----
     # 認不得的參數 / 認不得的卡片，最常見的原因是**這台的程式比較舊**。
@@ -1312,7 +1326,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             # 寧可漏報一條，也不要對一份在別條 route 上完全正確的線報錯。
             produced = set(src_cls.resolve_reads(sp))       # 原樣送出的
             for k in kinds:
-                produced |= set(src_cls.resolve_writes_for_kind(sp, k))
+                produced |= set(src_cls.resolve_writes_for_kind(
+                    sp, data_kind(k)))
             if not kinds:
                 produced |= set(src_cls.resolve_writes(sp))
             what, a_what, port = "image stream", "an image stream", "dot"
@@ -1466,8 +1481,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 # requires_ref 不檢查，因為它的資料不是從別張卡來的。
                 # 一份 recipe 可以有好幾張，每一張都拿 kind-aware 的 writes
                 # 宣告（load 卡依資料型別決定會有哪些流）。
-                avail |= set(step_cls.resolve_writes_for_kind(p, k))
-                from_input |= set(step_cls.resolve_writes_for_kind(p, k))
+                wrote = set(step_cls.resolve_writes_for_kind(p, data_kind(k)))
+                avail |= wrote
+                from_input |= wrote
                 # **撞名檢查對入口卡也要跑**（F11 Input-0）。以前這一段沒有它，
                 # 因為「入口」只有一張所以撞不起來 —— 現在兩張 load 卡都寫
                 # n_channels，後面那張會安靜地蓋掉前面那張。
@@ -1602,7 +1618,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             # （`Step.kind_issues`）：`configuration_issues` 看不到 kind，
             # 而「這組設定對不對」有時取決於一顆 defect 拿到的是置中的
             # patch 還是一張大圖。
-            for code, level, title, detail in step_cls.kind_issues(p, str(k)):
+            for code, level, title, detail in step_cls.kind_issues(
+                    p, data_kind(k)):
                 # 句子是卡片寫的（它才知道 patch 與一張大圖差在哪），所以這裡
                 # 只補**畫面自己答得出來的那一件**：單 route 就不要講 route。
                 issues.append(Issue(

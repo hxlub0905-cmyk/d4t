@@ -28,6 +28,27 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F121 期 1：recipe 不再以資料型別當鑰匙（2026-09-24）
+
+使用者回報的那一句（`unknown input-type route 'folder'; this recipe only defines
+['ebi_patch']`）從這一期起不會再出現在單 route 的 recipe 上。
+
+* **一個判準一個家**：`recipe_schema.route_for(recipe, kind)` —— 只有一條 route 就是
+  那一條（不管資料），好幾條才挑同名的。引擎（`resolve_route`）、整批那一層
+  （`run_batch_steps`）、`validate`、CLI、Studio 都叫它。型別與鍵名對得上時選到的
+  跟以前逐字相同 → 黃金值三份逐項相同。
+* `validate` 的 kind 相依 lint（GLV `_center` 那兩條）問的是**資料**的型別，不是鍵名。
+* Studio：開資料**只在空白畫布**時改 `model.kind`（先開 recipe 再開資料不再默默改名、
+  不再讓存檔改寫原檔）；健檢（Problems 列、畫布警示點、開跑前兩道關）傳
+  `dataset.kind`；預覽、區域檢查、校正傳資料的型別。
+* **沒照計畫的一件**：`model.kind` 沒改名成 `model.route`（理由在計畫書期 1）。
+* 反向還在：手寫的多型別 recipe 碰到沒有的那一種 → 開跑**之前**擋下（以前是跑完
+  每一顆都錯）。
+* 還沒解的（期 3）：一條 Patch 的 pipeline 開在單張影像上，還是每一顆報「Patch 要 ≥2
+  張」—— 講的是真正的原因了，但要提前到開跑之前、掛在 Input 卡上。
+
+---
+
 ## F121 期 0：拿掉 DOE 入口（2026-09-24）
 
 使用者：「DOE 的相關都先拿掉……（我當初設計錯了）。DOE 更像是一個資料夾內有多張

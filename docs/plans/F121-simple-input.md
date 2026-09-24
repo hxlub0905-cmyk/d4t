@@ -1,6 +1,6 @@
 # F121 — 入口簡單化：一顆 Open、一張 Input 卡、recipe 不認資料型別
 
-狀態：**進行中（2026-09-24）—— 期 0（拿掉 DOE 入口）做完了；下一步期 1。**
+狀態：**進行中（2026-09-24）—— 期 0（拿掉 DOE）、期 1（recipe 不認型別）做完了；下一步期 2。**
 方向與四項做法使用者已同意（「好 開始做」）。
 
 同一系列的後續：ADC 與 Output 那兩張「特別的卡」各自另開一份（見 §6）。
@@ -158,7 +158,24 @@ GLV「參照只有一個框」、三條以上的流時特徵名帶流名前綴�
 **就是今天的 `folder`**：用 Open images… 開那個資料夾即可。之後要不要多做什麼
 （例如「同一個條件的幾張放在一起比」）另外討論。
 
-### 期 1 — recipe 不再以資料型別當鑰匙
+### 期 1 — recipe 不再以資料型別當鑰匙 ✅ 2026-09-24
+
+**做完時跟計畫不一樣的一件**：`model.kind` **沒有改名**成 `model.route`。量過：
+`d4t/ui` 裡 41 處、測試裡 13 支檔案 26 處，而測試裡有一半是**拿它當資料型別**
+傳給 `run_defect`／`region_check` —— 改名等於在同一個 commit 裡把兩種意思重新分
+一次家，風險比收穫大。真正的病（把資料的型別寫進 `model.kind`、拿 `model.kind`
+當資料的型別）改成：`model.kind` 只在**空白畫布**時跟著資料；會跑 defect 的地方
+（預覽、區域檢查、校正）與健檢一律傳 `dataset.kind`（`RecipeModel.validate(data_kind)`）。
+`model.kind` 的意思因此只剩「正在編哪一條 route」，名字之後要不要換另外談。
+
+守門：`tests/test_route_for.py`（核心：判準、引擎／整批／健檢同一支、kind lint 問
+資料、多型別 recipe 的反向）與 `tests/test_ui_route_is_a_label.py`（Studio 的三條
+路＋反向）。兩支在改之前的程式上各自紅（UI 那支 6 條紅 5 條；剩下那條守的是
+「空白畫布照舊跟著資料」，本來就該前後都綠）。改掉的三條舊測試
+（`test_route_by`、`test_engine`、`test_recipe` 各一條）鎖的正是「單 route ＋
+別的 kind → unknown-route」，現在改用兩條 route 的 recipe 守同一個反向；
+`test_ui_info_level` 裡那個假 model 的 `validate` 簽名跟著多收一個 ``data_kind``。
+全套 `run_tests.py` 297 個檔案全綠、黃金值三份逐項相同。
 
 **規則只改一行的意思**：沒有 `route_by`、而且 recipe **只有一條 route** 時，不管
 資料是哪種都跑那一條（鍵名只剩標籤）。有兩條以上且沒有 `route_by` 的舊檔

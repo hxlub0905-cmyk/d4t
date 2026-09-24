@@ -168,7 +168,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     import d4t.core.steps  # noqa: F401
     from d4t.core.ingest.dataset import load_dataset
-    from d4t.core.pipeline import run_batch, validate
+    from d4t.core.pipeline import route_for, run_batch, validate
 
     recipe = _load_recipe(args.recipe)
     if recipe is None:
@@ -247,8 +247,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         tail = ("；其他走 %s" % rb.default.strip()) if rb.default.strip() \
             else "；對不上＝那一顆失敗"
         print(f"分流：{rb.column}（{mapping}{tail}）")
-    elif ds.kind not in recipe.routes:
-        print(f"[錯誤] recipe 沒有 '{ds.kind}' 的 route（有：{sorted(recipe.routes)}）", file=sys.stderr)
+    elif route_for(recipe, ds.kind) is None:
+        # 只有一條 route 的 recipe 不看鍵名（F121 期 1）—— 走得到這裡的只剩
+        # 手寫的多型別 recipe 沒有這種資料的那一條。
+        print(f"[錯誤] recipe 有好幾條 route，沒有一條給 '{ds.kind}'（有：{sorted(recipe.routes)}）", file=sys.stderr)
         return 2
 
     print(f"\nRecipe 健檢（{ds.kind}）：")

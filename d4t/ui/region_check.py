@@ -418,7 +418,10 @@ def open_region_check(win: "StudioWindow", n: Optional[int] = None,
     limit = max(1, min(limit, MAX_CHECK, len(items)))
     node = win.model.nodes[win.selected_node]
     source = str(node.params.get("source", "") or "") or None
-    args = (win.model.to_recipe(), items[:limit], win.model.kind,
+    # 第三格是**資料**的型別，不是正在編的 route 鍵（F121 期 1）—— 引擎用它
+    # 挑 route（`route_for`）並交給載入卡；兩者只在舊式多型別 recipe 上不同。
+    args = (win.model.to_recipe(), items[:limit],
+            str(getattr(win.dataset, "kind", "") or win.model.kind),
             win.selected_node, regions, REGION_THUMB, source,
             win.sources_for_run())
 

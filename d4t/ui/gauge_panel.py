@@ -149,7 +149,9 @@ class GaugePanel(QObject):
             return
         if not self.w.calibrate_worker.start(
                 self.w.model.to_recipe(), items[:self.CALIBRATE_LIMIT],
-                self.w.model.kind, nid, dict(node.params),
+                # 資料的型別，不是 route 鍵（同 `region_check`，F121 期 1）
+                str(getattr(self.w.dataset, "kind", "") or self.w.model.kind),
+                nid, dict(node.params),
                 sources=self.w.sources_for_run()):
             self.w._status("Still measuring - please wait.")
             return
