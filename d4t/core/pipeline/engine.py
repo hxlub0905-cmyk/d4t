@@ -651,11 +651,12 @@ def _eval_decision(recipe: Recipe,
     # ⚠ 它是判定跑完**之後**才寫的，所以樹上問不到自己。要把「有沒有量到」
     # 當成一個明講的問題來問，走 `let` 的「missing ⇒ 用 __」（F24 ⑤）。
     ctx.features["decide_unanswered"] = float(len(unanswered))
-    routed = bool(unanswered) and recipe.decide.unanswered_bin is not None
-    if routed:
+    ub = getattr(recipe.decide, "unanswered_bin", None)
+    routed = bool(unanswered) and ub is not None
+    if routed and ub is not None:
         # 評價清單 #1：recipe 說「問不出來的送去 bin N」—— 不管樹走到哪。
-        chosen_bin = int(recipe.decide.unanswered_bin)
-        chosen_label = str(recipe.decide.unanswered_label or "")
+        chosen_bin = int(ub)
+        chosen_label = str(getattr(recipe.decide, "unanswered_label", "") or "")
         chosen_rule = -1
     if unanswered:
         names = sorted(set(unanswered))

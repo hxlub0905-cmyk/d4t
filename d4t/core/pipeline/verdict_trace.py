@@ -201,9 +201,10 @@ def verdict_trace(recipe: Recipe, route: str,
         leaf_bin, leaf_label = int(leaf.bin), str(leaf.label)
     # 跟引擎同一條規則（`engine._eval_decide`）：有題目答不出來、recipe 又設了
     # 「送去 bin N」，這一顆就在那個 bin —— 回溯面板不准講一個它沒去的 leaf。
-    routed = bool(step_missing) and decide.unanswered_bin is not None
-    if routed:
-        leaf_bin = int(decide.unanswered_bin)
+    ub = decide.unanswered_bin
+    routed = bool(step_missing) and ub is not None
+    if routed and ub is not None:
+        leaf_bin = int(ub)
         leaf_label = str(decide.unanswered_label or "")
 
     mode = "tree" if decide.tree is not None else "rules"
