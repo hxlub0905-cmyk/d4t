@@ -218,7 +218,7 @@ def owned_workers(win: Any) -> List["_ThreadedWorker"]:
 def window_children(win: Any) -> List[Any]:
     """關窗要一起關掉的子視窗。
 
-    ``_open_windows()`` 是「Windows 下拉列上那幾個」的**唯一**一份名單
+    ``_open_windows()`` 是頂層子視窗的**唯一**一份名單
     （U15），所以這裡讀它而不是再抄一份 —— 抄第二份出來的那份一定會漂。
     """
     out = [getattr(win, "welcome_dialog", None),

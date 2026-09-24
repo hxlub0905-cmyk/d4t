@@ -2828,7 +2828,7 @@ class StudioWindow(QMainWindow):
         """ParamForm 的唯一出口：驗證通過才寫回 model，失敗就把那列變紅字。"""
         node_id = self.selected_node
         if node_id is None or node_id not in self.model.nodes:
-            self._status("Select a step in the pipeline before editing parameters.", "error")
+            self._status("Select a card on the canvas before editing its settings.", "error")
             return
         try:
             says = self.model.set_param(node_id, str(name), value)
@@ -3982,7 +3982,7 @@ class StudioWindow(QMainWindow):
     # 首次開啟導覽 + 範例 recipe 庫（M6）
     # ==================================================================== #
     def _open_windows(self):
-        """「Windows」下拉列的那幾個頂層視窗（U15 那張表上准開的）。"""
+        """Studio 的頂層子視窗（U15 那張表上准開的）—— 關窗時一起關。"""
         return [("Results", getattr(self, "results", None)),
                 ("Region check", getattr(self, "region_window", None)),
                 ("Uniformity charts",
@@ -3991,8 +3991,8 @@ class StudioWindow(QMainWindow):
     def show_welcome(self, force: bool = False) -> Optional[Any]:
         """開（或重開）首次導覽。
 
-        ``force=False`` 時尊重「不再顯示」（勾過就回 ``None``）；工具列的
-        「說明」一律 ``force=True``。對話框是**非 modal** 的，所以這個方法
+        ``force=False`` 時尊重「不再顯示」（勾過就回 ``None``）；``force=True``
+        不管那個勾（工具列的 Help 鈕 2026-09-24 拿掉了，現在只有測試這樣叫）。對話框是**非 modal** 的，所以這個方法
         永遠會馬上回來 —— 測試可以直接拿回傳值來按鈕。
         """
         if not force and welcome_disabled():

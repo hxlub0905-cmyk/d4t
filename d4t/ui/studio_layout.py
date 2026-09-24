@@ -44,7 +44,6 @@ from . import fit_screen
 from . import open_dialogs
 from . import scope
 from . import strings
-from . import windows_menu
 from .canvas import PipelineCanvas
 from .decide_panel import DecidePanel
 from .feature_panel import FeaturePanel
@@ -132,10 +131,11 @@ def build_toolbar(win: "StudioWindow") -> None:
     的東西，使用者得逐顆讀完才知道哪顆是自己要的。現在照**做什麼事**分四段，
     中間用分隔線：
 
-        檔案（開/存） │ 起手與輸出 │ 復原 │ ……… │ 說明・主題 │ 試跑
+        檔案（開/存） │ 起手與輸出 │ 復原 │ ……… │ 結果・主題 │ 試跑
 
-    `Help` 與主題移到右邊：它們是**隨時可用但不屬於流程**的東西，混在檔案
-    操作裡只會讓左邊那段變長。試跑仍然在最右邊 —— 它是這個畫面的主要動作。
+    Results 與主題在右邊：它們是**隨時可用但不屬於流程**的東西，混在檔案
+    操作裡只會讓左邊那段變長。（`Help` 鈕 2026-09-24 使用者要求拿掉 ——
+    連同它掛著的「開著哪些視窗」小箭頭。）試跑仍然在最右邊 —— 它是這個畫面的主要動作。
 
     **復原／重做這一輪才長出按鈕。** F7-16 給了 Ctrl+Z / Ctrl+Shift+Z，
     但工具列上沒有對應的鈕 —— 而目標使用者是不寫 code 的工程師，
@@ -210,7 +210,7 @@ def build_toolbar(win: "StudioWindow") -> None:
     # （而 `results.py` 的檔頭一直寫著「關掉它不會丟掉結果」：結果確實
     # 還在，只是沒有一顆鈕叫得出來，所以那句話描述著一個不存在的入口）。
     #
-    # **跟 Help／主題同一段**，而不是接在 `Run trial` 右邊。動線上「跑 →
+    # **跟主題同一段**，而不是接在 `Run trial` 右邊。動線上「跑 →
     # 看結果」確實是那個順序，但工具列的最後一格是留給那顆藍鈕的
     # （`test_the_toolbar_is_grouped_not_one_long_row` 守著：試跑在最後
     # 面）—— 而這一段的定義正好就是它：**不屬於流程、但要隨時找得到**。
@@ -222,12 +222,6 @@ def build_toolbar(win: "StudioWindow") -> None:
     # 跑完才 show，關掉不丟結果 —— 機制是對的，但使用者的心智模型裡「關掉
     # 視窗」通常等於「丟掉」，而鈕上沒有任何東西反駁那個猜測。
     win._refresh_results_button()
-    win.btn_help = _tool_button(win,
-        "Help", "Reopen the getting-started tour (includes “Try it with "
-                "sample data”)",
-        lambda: win.show_welcome(force=True))
-    # 那顆鈕的小箭頭：現在開著哪些視窗（F99 P2-6；內容在 `windows_menu`）。
-    windows_menu.attach(win.btn_help, win._open_windows)
     # 主題切換：一顆字元鈕，不佔位子也找得到（偏好存 QSettings）
     win.btn_theme = _tool_button(win,
         "", "Switch between the light and dark theme",
@@ -287,7 +281,6 @@ def build_toolbar(win: "StudioWindow") -> None:
 
     # 右邊：不屬於流程、但要隨時找得到的那幾顆。
     bar.addWidget(win.btn_results)
-    bar.addWidget(win.btn_help)
     bar.addWidget(win.btn_theme)
     bar.addSeparator()
 

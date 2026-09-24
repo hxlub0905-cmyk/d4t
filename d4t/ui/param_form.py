@@ -84,7 +84,7 @@ class ParamForm(QWidget):
     #: 表單不知道 preset 會動什麼 —— 動線動格的腦袋在 model。
     intent_chosen = Signal(str)
 
-    _EMPTY_TEXT = "(Pick a card from the library, or select a step in the pipeline)"
+    _EMPTY_TEXT = "(Pick a card from the library, or select a card on the canvas)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)

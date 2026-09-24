@@ -155,11 +155,13 @@ def feature_prefix(node_id: str, step_cls: Optional[Type[Step]],
     try:
         p = step_cls.validate_params(dict(params or {}))
     except Exception:  # 壞參數在執行時才該爆
+        swallowed("engine.feature_prefix")
         p = dict(params or {})
     for resolve in (step_cls.resolve_writes, step_cls.resolve_reads):
         try:
             names = [str(x) for x in resolve(p) if str(x).strip()]
         except Exception:
+            swallowed("engine.feature_prefix")
             return node_id
         if len(names) == 1:
             return names[0]
@@ -817,10 +819,12 @@ def _writes_an_image(step_cls: Optional[Type[Step]],
     try:
         p = step_cls.validate_params(dict(params or {}))
     except Exception:  # 壞參數在執行時才該爆
+        swallowed("engine._writes_an_image")
         p = dict(params or {})
     try:
         return bool(step_cls.resolve_writes(p))
     except Exception:
+        swallowed("engine._writes_an_image")
         return False
 
 
@@ -879,6 +883,7 @@ def image_segment_signature(recipe: Recipe, kind: str,
             try:
                 params = step_cls.validate_params(node.params)
             except Exception:
+                swallowed("engine.image_segment_signature")
                 params = dict(node.params)  # 壞參數：用原樣（執行時會爆，簽章仍穩定）
         items = sorted((str(k), v) for k, v in params.items())
         sig_nodes.append([nid, node.step, [list(kv) for kv in items]])
@@ -932,7 +937,7 @@ def _roi_snapshot(ctx: Context) -> List[Any]:
     for roi in (ctx.rois.rois if ctx.rois is not None else ()):
         try:
             rect = tuple(float(v) for v in roi.norm_rect)
-        except Exception:  # 快取是盡力而為
+        except (TypeError, ValueError, AttributeError):  # 快取是盡力而為
             swallowed("engine._roi_snapshot")
             continue
         out.append((str(roi.label), rect))
@@ -1049,6 +1054,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
     try:
         sig, ckpt = image_segment_signature(recipe, route, registry=registry)
     except Exception:
+        swallowed("engine.run_defect_cached")
         return run_defect(recipe, item, kind, keep_context=keep_context,
                           sources=sources, registry=registry)
     if cache is None or ckpt <= 0:
@@ -1062,6 +1068,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
         key = cache.make_key(str(dataset_token), defect_id, sig)
         snap = cache.get(key)
     except Exception:
+        swallowed("engine.run_defect_cached")
         snap = None  # 快取層出包 → 當作 miss
 
     order = execution_order(recipe, route)  # signature 已驗證過，不會再 raise
@@ -1073,6 +1080,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
         need = _streams_needed_across_checkpoint(recipe, order, ckpt,
                                                  registry, kind)
     except Exception:  # 算不出來就別用快取
+        swallowed("engine.run_defect_cached")
         need = None
 
     if snap is not None and need is not None:
@@ -1088,6 +1096,7 @@ def run_defect_cached(recipe: Recipe, item: Any, kind: str,
         try:
             ctx = _restore_context(item, kind, defect_id, snap, sources)
         except Exception:
+            swallowed("engine.run_defect_cached")
             ctx = None  # 快照壞掉 → 退回重算影像段
 
     if ctx is None:

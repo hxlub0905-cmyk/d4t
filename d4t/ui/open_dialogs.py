@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
 
-from PySide6.QtWidgets import QFileDialog, QInputDialog
+from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog
 
 if TYPE_CHECKING:                  # 只給型別看：這一支不 import studio
     from .studio import StudioWindow
@@ -35,9 +35,6 @@ RAW_FILTER = "Raw images (*.raw)"
 
 #: 「以上都不是，我自己填」那一項的字。
 OTHER_LAYOUT = "Something else - let me type it in"
-
-#: 手填寬高時的上限（純粹是個滑桿上界，不是產品限制）。
-_MAX_SIDE = 65536
 
 #: :func:`open_source` 認得的 key。**`scope.INPUT_SOURCES` 上的每一個 key 都要
 #: 在這裡**，不然那顆鈕按下去只會講一句「還沒有辦法開」——
@@ -108,41 +105,33 @@ def ask_raw_layout(parent: Any, probe: str) -> Optional[Any]:
     """
     import os
 
-    from d4t.core.ingest.rawfile import RawSpec, guess_layouts
+    from d4t.core.ingest.rawfile import guess_layouts
 
     size = os.path.getsize(probe)
     # ⚠ **要把檔案本身交出去**，不是只交大小（F115）：有一種 `.raw` 的檔頭裡
     # 就寫著寬高，而那個答案不必猜。只給 size 的話那條路永遠走不到。
     picks = guess_layouts(size, path=probe)
-    labels = [s.describe() for s in picks] + [OTHER_LAYOUT]
-    choice, ok = QInputDialog.getItem(
-        parent, "How is this .raw laid out?",
-        "%s is %d bytes.\n\nThese layouts fit exactly:"
-        % (os.path.basename(probe), size), labels, 0, False)
-    if not ok:
-        return None
-    if choice != OTHER_LAYOUT:
-        return picks[labels.index(choice)]
+    if picks:
+        labels = [s.describe() for s in picks] + [OTHER_LAYOUT]
+        choice, ok = QInputDialog.getItem(
+            parent, "How is this .raw laid out?",
+            "%s is %d bytes.\n\nThese layouts fit exactly:"
+            % (os.path.basename(probe), size), labels, 0, False)
+        if not ok:
+            return None
+        if choice != OTHER_LAYOUT:
+            return picks[labels.index(choice)]
 
-    w, ok = QInputDialog.getInt(parent, "Width", "Pixels across:", 1024, 1,
-                                _MAX_SIDE)
-    if not ok:
+    # 推不出來、或推出來的都不對 → **一張表單四格一起填**，底下即時講對不對得
+    # 上檔案大小、並畫出照這組設定讀出來的樣子（以前是連跳四個小對話框，填錯
+    # 一格就從頭來 —— 2026-09-24 使用者要求改）。
+    from .raw_dialog import RawLayoutDialog
+
+    dlg = RawLayoutDialog(probe, initial=picks[0] if picks else None,
+                          parent=parent)
+    if dlg.exec() != QDialog.Accepted:
         return None
-    h, ok = QInputDialog.getInt(parent, "Height", "Pixels down:", w, 1, _MAX_SIDE)
-    if not ok:
-        return None
-    hdr, ok = QInputDialog.getInt(
-        parent, "Header", "Bytes to skip before the pixels start:", 0, 0,
-        max(0, size), 1)
-    if not ok:
-        return None
-    bits, ok = QInputDialog.getItem(parent, "Bit depth",
-                                    "Bytes per pixel:", ["16-bit", "8-bit"],
-                                    0, False)
-    if not ok:
-        return None
-    return RawSpec(width=int(w), height=int(h), header=int(hdr),
-                   bits=16 if bits.startswith("16") else 8)
+    return dlg.spec()
 
 
 def open_source(window: Any, key: str) -> None:

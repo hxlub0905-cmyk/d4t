@@ -493,8 +493,6 @@ d4t/
     ├── attach_sources.py     #   **把第二份東西掛到已載入的這一份上**：配對卡的第二份 lot（F15）
     │                         #     與 GLAS 匯出的 layer 標註（F11 Region-3）（F116 第 4 步）
     │                         #   —— 加一個入口只要改 `scope.INPUT_SOURCES` 與這裡的 `OPENABLE`
-    ├── windows_menu.py       #   Help 鈕的小箭頭列出開著的頂層視窗（F99 P2-6）——
-    │                         #     工具列在 1366 上裝不下第十三顆鈕
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
 

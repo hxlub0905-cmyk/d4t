@@ -28,6 +28,32 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## 專案評價之後的「輕微」那一批（2026-09-24）
+
+使用者請我先評價整個專案、列出從嚴重到輕微的修改清單，然後說「先做輕微部分
+（.16 不要做，help 的按鈕跟功能幫我拿掉）」。
+
+* **工具列的 Help 鈕拿掉**（使用者選「只拿工具列 Help 鈕」）—— 連同它掛著的
+  「開著哪些視窗」小箭頭，`ui/windows_menu.py` 因此成了孤兒而刪掉。Welcome
+  導覽本身、卡片上的「Manual →」都還在；`show_welcome(force=True)` 留著給測試。
+  ⚠ 代價：勾過「不再顯示」的人再也叫不回 Welcome（範例資料那一顆在空狀態上還有）。
+* **`.raw` 的版面改成一張表單＋即時預覽**（新模組 `ui/raw_dialog.py`）。以前
+  選「Something else」之後是連跳四個小對話框（寬 → 高 → 檔頭 → 位元深度），
+  填錯一格就從頭來。現在四格一起填，底下常駐講「對不對得上檔案大小、差多少」，
+  對上了才准按 OK，並畫出照這組設定讀出來的縮圖（只讀縮圖要的那幾列，`memmap`）。
+  另有一顆「Height from file size」。推得出唯一解時的那一步選單照舊。
+* **提示字放大一號**：`font_tiny` 10 → 11、`font_small` 11 → 12（theme token）。
+* **用字**：設定區空狀態與狀態列上把管線上的卡叫 step 的兩句改成 card
+  （判定樹上的 step 是「一題」，那是對的，不動）。
+* **`engine.py` 的 `except Exception`**：`_roi_snapshot` 收窄到
+  `(TypeError, ValueError, AttributeError)`；其餘是刻意的退路（`feature_prefix`
+  「一定要有退路」、快取層出包當 miss），**不收窄**（收窄會讓 `run_defect`
+  有機會 raise，違反鐵則 7），改成補上 `swallowed()` —— 至少 `--log` 看得到。
+* **`strings.py` 檔頭說謊**（還寫著「沒有 tr() 也沒有 catalog」）→ 改成現況：
+  機制在、`install()` 還沒有人叫。
+
+---
+
 ## F120 收尾：Pitch helper 搬去自己的 repo，d4t 這邊移除乾淨（2026-09-23）
 
 使用者 2026-09-23：「我之後帶走後 d4t 會把 pitch helper 移除，就等於 pitch
