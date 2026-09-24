@@ -47,8 +47,8 @@ def _rich_recipe() -> Recipe:
         description="中文說明也要活得過一趟 utf-8",
         routes={"rsem": ["load", "pair", "h2h"], "spare": ["load", "glv"]},
         nodes={
-            "load": RecipeNode(id="load", step="load_single",
-                               params={"out": "single"}),
+            "load": RecipeNode(id="load", step="load_patch",
+                               params={"channel_map": "1:single"}),
             "pair": RecipeNode(id="pair", step="pair_source",
                                params={"source": "ebi", "out": "paired"}),
             "h2h": RecipeNode(id="h2h", step="align_to",

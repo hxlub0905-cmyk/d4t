@@ -128,10 +128,9 @@ class DefectItem:
     #: 目前只有一種 —— GLAS 的 ``layout_label``（GDS label map）。
     #:
     #: 為什麼**不放進 ``images``**：``images`` 的意思是「機台拍了幾張」，而
-    #: ``load_single`` 的契約就建立在那個計數上（一顆兩張它會拒絕載入，而且
-    #: 那個拒絕是對的 —— 見 `steps/load.py`）。把 label 混進去的話，每一顆
-    #: RSEM defect 都會突然變成「兩張」而載不進來，而錯誤訊息會說謊
-    #: （「這顆有 2 張影像」——不，它有 1 張影像跟 1 個附加檔）。
+    #: Input 卡的名字表就是照那個計數排的（`steps/load.channel_map_for`）。
+    #: 把 label 混進去的話，每一顆 RSEM defect 都會突然變成「兩張」，而畫布
+    #: 與錯誤訊息都會說謊（「這顆有 2 張影像」——不，它有 1 張影像跟 1 個附加檔）。
     sidecars: Dict[str, ImageRef] = field(default_factory=dict)
     #: 這一顆在 ``Dataset.items`` 裡的位置（由 :class:`Dataset` 自己編號）。
     #:

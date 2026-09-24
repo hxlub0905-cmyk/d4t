@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import first_source, wire_up  # noqa: E402
+from conftest import first_source, wire_up, first_single_source, add_single_input  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -71,12 +71,12 @@ def region_lines(model) -> list:
 
 
 def _gds_route(model: RecipeModel):
-    """``load_single → load_sidecar → roi_reference → glv_stats``（GDS 那條路）。
+    """``Input（1:single）→ load_sidecar → roi_reference → glv_stats``（GDS 那條路）。
 
     這正是 `docs/GLAS-INTERFACE.md` 講的接法，也是使用者問「某個 layer 的 GLV
     要怎麼設定」時得到的那張圖。
     """
-    img = model.add_step("load_single")
+    img = add_single_input(model)
     lbl = model.add_step("load_sidecar")
     gds = model.add_step("roi_reference")
     glv = model.add_step("glv_stats")
@@ -132,7 +132,7 @@ def test_no_card_takes_a_region_name_as_free_text():
 
 def test_the_region_field_is_read_only_in_the_panel(window):
     """來源只在畫布上決定（同 F9-6 對影像做的事）。"""
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     glv = window.add_card_after(src, "glv_stats")
     window._on_edge_added(src, glv, "single", "source")
     window.select_node(glv)
@@ -200,7 +200,7 @@ def test_a_region_nobody_defines_draws_no_line():
 # 3. 拉線、剪線、刪卡
 # --------------------------------------------------------------------------- #
 def test_dragging_a_line_picks_the_region(window):
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -224,7 +224,7 @@ def test_a_measure_card_takes_more_than_one_region(window):
     規則跟影像逐字相同（F7-19）：``region_keys``（一串）**累加**，
     ``region_key``（單一角色）**取代**。
     """
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -256,7 +256,7 @@ def test_a_measure_card_takes_more_than_one_region(window):
 def test_a_name_the_user_typed_is_not_taken_back(window):
     """只收回**自動填的那個值**（正好等於原本那一個區域的名字）。
     使用者自己打的字被收掉，比沒有這個功能更糟。"""
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -279,7 +279,7 @@ def test_a_role_region_port_is_still_replaced(window):
     F18 再變成 `reference` 那一格，F67 連那一格都拿掉了 —— 接了這顆埠就是
     在比。這條測的東西一路上一個字都沒變。）
     """
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     cmp_ = window.add_card_after(gds, "glv_stats")
@@ -304,7 +304,7 @@ def test_a_region_goes_in_one_side_and_out_the_other(window):
     副標**不跟著變**：它印的是「這張卡真的產出什麼」，而量測卡沒有定義任何
     區域。混在一起的話，一張 Gray-level stats 在畫布上會讀起來像 Region 卡。
     """
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     a = window.add_card_after(gds, "glv_stats")
@@ -326,7 +326,7 @@ def test_a_region_goes_in_one_side_and_out_the_other(window):
 
 
 def test_cutting_the_line_clears_the_field(window):
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -342,7 +342,7 @@ def test_cutting_the_line_clears_the_field(window):
 
 def test_removing_the_region_card_empties_the_field(window):
     """畫面上線沒了、卡片卻還指著一個再也沒有人定義的區域 —— 那是同一種說謊。"""
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -363,7 +363,7 @@ def test_several_regions_accumulate_on_a_region_keys_field(window):
     2026-09-02 刪掉了。``roi`` 是同一個型別（``region_keys``）、走同一條路，
     所以規矩一個字都沒有變 —— 換的只是誰站在那裡。
     """
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     tpl = window.add_card_after(src, "roi_reference")
     # F30：一張卡好幾個 method，而 `regions` 只在「我自己標的那一格」上算數。
     window.model.set_param(tpl, "method", "a cell I mark myself")
@@ -388,7 +388,7 @@ def test_several_regions_accumulate_on_a_region_keys_field(window):
 def test_an_image_line_cannot_land_on_a_region_port(window):
     """放行的話那一格會變成一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，
     而畫面上那條線看起來完全正常。"""
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     glv = window.add_card_after(src, "glv_stats")
     window._on_edge_added(src, glv, "single", "source")
 
@@ -411,7 +411,7 @@ def test_a_region_defined_later_is_now_allowed_and_reorders(window):
     所以現在它接得起來，而且排版跟著線走。真正會壞的那一種（成環）由
     `add_edge` 擋，那擋的是事實不是排版。
     """
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     glv = window.add_card_after(src, "glv_stats")
     window._on_edge_added(src, glv, "single", "source")
     gds = window.add_card_after(glv, "roi_reference")
@@ -429,7 +429,7 @@ def test_a_region_defined_later_is_now_allowed_and_reorders(window):
 # 5. 畫布真的畫得出來
 # --------------------------------------------------------------------------- #
 def test_the_canvas_draws_the_region_line_as_a_region_line(window):
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -450,7 +450,7 @@ def test_the_canvas_draws_the_region_line_as_a_region_line(window):
 
 def test_ports_never_pile_up_on_a_card_with_many_regions(window):
     """埠多就長高 —— 疊在一起的埠是**點不到**的（取最近的那一顆）。"""
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     window._on_edge_added(src, gds, "single", "label_source")
@@ -475,7 +475,7 @@ def test_pick_none_folds_a_family_into_one_port(window):
     埠的數量走 `resolve_regions_out`，所以宣告變了畫布就跟著變 ——
     畫著一顆沒有人產出的 `_center` 埠，跟少畫一顆真的產出的埠一樣是說謊。
     """
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     window._on_edge_added(src, gds, "single", "label_source")

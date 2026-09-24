@@ -65,7 +65,8 @@ def recipe_for(folder, glv=None, **over):
         recipe_id="unif_demo",
         routes={KIND: ["load", "roi", "glv", "out"]},
         nodes={
-            "load": RecipeNode("load", "load_single", {"out": "single"}),
+            "load": RecipeNode("load", "load_patch",
+                               {"channel_map": "1:single"}),
             "roi": RecipeNode("roi", "roi_reference", {
                 "method": "stripes in the image", "source": "single",
                 # ⚠ **不填 `output_prefix`**（F117 F5）。這份 fixture 本來

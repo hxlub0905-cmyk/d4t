@@ -83,10 +83,8 @@ KIND = "ebi_patch"
 #: ``method="a cell I mark myself"``）與 ``roi_from_mask``（F74 刪掉），
 #: 兩列都指著不存在的卡。
 NEEDS_MORE_SETUP = {
-    # 這一套 harness 餵的是 ebi_patch（一顆兩張），而這張卡承諾「一顆一張」——
-    # 它對多張資料的正確行為就是**擋下來**（見 steps/load.py）。專屬驗收在
-    # tests/test_f11_split_load_cards.py。
-    "load_single": "需要「一顆一張」的資料集（harness 餵的是 patch）",
+    # （F11 的 `load_single` 在這裡有過一列 —— 它在一顆兩張的 harness 上正確的
+    # 行為是擋下來。F121 期 2 併回 Input 了，那一列跟著拿掉。）
     # 它讀的是 GLAS 匯出掛上來的附加檔（`DefectItem.sidecars`），而這個 harness
     # 的 lot 沒有掛。沒掛的時候這張卡**正確的行為就是擋下來並講出兩種原因**
     # （見 steps/load_sidecar.py）。專屬驗收在 tests/test_glas_sidecar.py。

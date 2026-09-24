@@ -1,6 +1,6 @@
 # F121 — 入口簡單化：一顆 Open、一張 Input 卡、recipe 不認資料型別
 
-狀態：**進行中（2026-09-24）—— 期 0（拿掉 DOE）、期 1（recipe 不認型別）做完了；下一步期 2。**
+狀態：**進行中（2026-09-24）—— 期 0（拿掉 DOE）、期 1（recipe 不認型別）、期 2（一張 Input 卡）做完了；下一步期 3。**
 方向與四項做法使用者已同意（「好 開始做」）。
 
 同一系列的後續：ADC 與 Output 那兩張「特別的卡」各自另開一份（見 §6）。
@@ -201,7 +201,30 @@ GLV「參照只有一個框」、三條以上的流時特徵名帶流名前綴�
 做完這一期，原始回報的那句 `unknown input-type route` 就不會再出現；取而代之的是
 Patch 卡的「要 ≥2 張」—— 還是一顆一顆報，那是期 3 的事。
 
-### 期 2 — 一張 Input 卡
+### 期 2 — 一張 Input 卡 ✅ 2026-09-24
+
+**做完時補的三件**：
+
+1. **F11 拆卡那一道遷移加了版本閘**（只對第 1 版）。它的判準「單張 route 上有一張
+   `load_patch`」在合卡之後變成**新檔案的正常樣子** —— 不擋的話每一次
+   `to_json_dict → from_json_dict` 都會把 ``1:single`` 換成 ``1:test``（鐵則 9）。
+   拆卡（08-17）早於第 2 版（F42 B3，08-27），所以第 2 版以上一定拆過了。
+   反向測試：`test_f11_split_load_cards.py::test_a_current_single_image_input_card_is_left_alone`。
+2. **`describe_migration` 的「換了哪張卡」不再看版本號**：`load_single` → Input 是
+   「舊東西在不在」的遷移，對第 5 版的檔案一樣會動手，以前那一段整個被「目前版本
+   不用講」擋掉。講的字改成**使用者看過的卡片名**（「“SEM image” → “Input”」），
+   退役的 key 查 `_RETIRED_CARD_LABELS`。補線／拆卡那兩句仍然只對舊版本講。
+3. **兩份出貨 recipe 直接改成新格式**（不靠載入時遷移）；`one-image-uniformity`
+   說明裡的「Open image…」順手改成真的那顆鈕「Open images…」。
+
+**還沒做、留給期 3**：資料已經開著時從卡片庫**手動**加一張 Input 卡，名字表是卡片
+預設的 ``1:test, 2:ref``，不是照資料填（只有空白畫布開資料時那一張照資料填）。
+要改的地方在 `studio._on_add_requested`，而 `studio.py` 只准變短 —— 跟期 3 的
+「一鍵照這份資料重填」是同一件事，一起做。
+
+黃金值三份逐項相同（含 `dual_route_basic` 裡用舊 `load_single` 寫的那一條 rsem
+route）；規模尺：遷移 22 → 23、`recipe.py` 648 → 650（各寫了為什麼）、UI 按卡片名
+分支 23 → 20（跟著降）。
 
 * **key 留 `load_patch`**，`label` 改成「Input」（`CLAUDE.md` §5：只改 label 零代價；
   key 是 recipe 的鍵不是給人看的字）。出貨 recipe、黃金值裡的 `load_patch` 一個字都不動。

@@ -162,6 +162,10 @@ def test_the_engine_reports_two_lines_into_one_input(window):
     assert issues[0].level == "error"
     # ⚠ 講出來的是**卡片名**不是 node id（F118）：``load`` / ``dn`` 是自動產
     # 的，不是使用者取的名字 —— 他要照著這句話去畫布上找那兩張卡。
-    assert "“Patch”" in issues[0].detail and "“Denoise”" in issues[0].detail, \
+    # 卡片名**不寫死**：F121 期 2 把「Patch」改叫「Input」，這一條當場紅了 ——
+    # 紅得沒道理，壞掉的不是「講得出是哪兩張卡」這件事（同 `test_steps` 的教訓）。
+    from d4t.core.pipeline.step import get_step
+    patch = "“%s”" % get_step("load_patch").label
+    assert patch in issues[0].detail and "“Denoise”" in issues[0].detail, \
         "沒有講出是哪兩條線在搶（使用者要照著這句話去刪線）"
     assert issues[0].node_id == tone        # 被搶的那張卡，點清單會選到它

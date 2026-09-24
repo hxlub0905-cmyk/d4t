@@ -265,9 +265,9 @@ git add -A && python tools/release.py && git add -A
 
 ## 5. 產品範圍開關
 
-**一種 source 一張載入卡**：`load_patch`「Patch」（一顆好幾張）與 `load_single`
-「SEM image」（一顆一張），**兩張都不看資料型別**（2026-09-18 使用者改的名；
-`key` 與 feature 名一個都沒動）。三種 source：
+**一張載入卡**：`load_patch`「Input」，一張或好幾張都吃，**名字表開資料時照資料填**
+（F121 期 2 把 `load_single`「SEM image」併回來了，舊 recipe 由遷移換卡；key 沒動）。
+三種 source：
 
 | kind | 什麼樣的資料 | 入口 |
 |---|---|---|

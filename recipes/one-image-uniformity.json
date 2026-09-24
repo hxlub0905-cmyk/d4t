@@ -3,7 +3,7 @@
   "version": 5,
   "app_version": "0.1.0.dev0",
   "author": "",
-  "description": "One image on its own - is the gray level even across the field? Open it with “Open image…” (no KLARF needed), and this recipe lays a grid of measurement boxes over the pattern, measures every box on its own, and reports how alike they are: CV %, and the tilt from left to right and top to bottom as a slope per 100 pixels. “Write charts” then draws four ready-made charts - a box plot, a histogram, a position profile and a heat map, one point per box, so a gradient across the field reads as a gradient and you can see where it is. There is a fifth slot on that card you can build yourself (pick which two columns go on the axes), left unticked here.\n\n“Write report” beside it puts the same numbers in a spreadsheet (defects.csv) and drops a copy of this recipe in, so the run can be reproduced later - the charts are for looking at, the CSV is for keeping.\n\nIt deliberately hands you numbers, not a verdict: there is no threshold in here that says a field is good or bad, because that number is yours and it is different on every layer. Put your own limit into the decision if you want one - the tree below only separates “nothing was measured” from “measured” so that a picture with no pattern to find cannot be mistaken for a perfectly flat one.",
+  "description": "One image on its own - is the gray level even across the field? Open it with “Open images…” (no KLARF needed), and this recipe lays a grid of measurement boxes over the pattern, measures every box on its own, and reports how alike they are: CV %, and the tilt from left to right and top to bottom as a slope per 100 pixels. “Write charts” then draws four ready-made charts - a box plot, a histogram, a position profile and a heat map, one point per box, so a gradient across the field reads as a gradient and you can see where it is. There is a fifth slot on that card you can build yourself (pick which two columns go on the axes), left unticked here.\n\n“Write report” beside it puts the same numbers in a spreadsheet (defects.csv) and drops a copy of this recipe in, so the run can be reproduced later - the charts are for looking at, the CSV is for keeping.\n\nIt deliberately hands you numbers, not a verdict: there is no threshold in here that says a field is good or bad, because that number is yours and it is different on every layer. Put your own limit into the decision if you want one - the tree below only separates “nothing was measured” from “measured” so that a picture with no pattern to find cannot be mistaken for a perfectly flat one.",
   "routes": {
     "folder": [
       "load",
@@ -15,9 +15,9 @@
   },
   "nodes": {
     "load": {
-      "step": "load_single",
+      "step": "load_patch",
       "params": {
-        "out": "single",
+        "channel_map": "1:single",
         "nm_per_px": 0.0,
         "carry": ""
       },

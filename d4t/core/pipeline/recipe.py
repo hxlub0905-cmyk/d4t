@@ -126,6 +126,7 @@ from .recipe_migrations import (  # noqa: F401
     _migrate_rescued_feature_names,
     _migrate_roi_compare_into_glv_stats,
     _migrate_roi_from_mask_into_roi_reference,
+    _migrate_single_into_input,
     _migrate_split_load_cards,
     _migrate_split_out_combine,
     _migrate_template_regions,
@@ -364,8 +365,9 @@ class Recipe:
         _migrate_merged_cards(nodes)
         # 最後把改過名的**參數值**換掉（F8：兩層的 dark/bright → 排名）。
         _migrate_renamed_values(nodes)
-        # Input 卡按 source 拆成兩張之後，單張影像那條 route 要換卡（F11 Input-4）。
-        _migrate_split_load_cards(nodes, routes)
+        # Input 卡：F11 拆卡（只對第 1 版，見那一支）→ F121 期 2 把 `load_single` 併回。
+        _migrate_split_load_cards(nodes, routes, d.get("version", 1))
+        _migrate_single_into_input(nodes)
         # roi_template 的一框一區域 → regions 字串（F11 Region-1）。
         _migrate_template_regions(nodes)
         # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。

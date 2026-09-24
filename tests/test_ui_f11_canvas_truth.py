@@ -59,11 +59,12 @@ def lot(tmp_path):
 # --------------------------------------------------------------------------- #
 # 1. 開窗是空白畫布，載入資料才補上「這種資料該用的那一張」
 # --------------------------------------------------------------------------- #
-def test_the_canvas_starts_empty_and_offers_both_load_cards(window):
+def test_the_canvas_starts_empty_and_offers_the_input_card(window):
+    """F11 那時卡片庫有兩張載入卡；F121 期 2 合回一張「Input」。"""
     assert window.model.node_order == []
     assert window.selected_node is None
-    for key in ("load_patch", "load_single"):
-        assert window.library.entry(key) is not None, key
+    assert window.library.entry("load_patch") is not None
+    assert window.library.entry("load_single") is None
 
 
 def test_loading_patch_data_brings_in_load_images(window, lot):
@@ -75,19 +76,26 @@ def test_loading_patch_data_brings_in_load_images(window, lot):
     assert window.model.dirty is False and window.model.can_undo() is False
 
 
-def test_loading_single_image_data_brings_in_load_one_image(window, tmp_path):
-    """一顆一張的資料要補的是**另一張**卡 —— 而那正是預先放一張會猜錯的一半。"""
+def test_loading_single_image_data_brings_in_one_port(window, tmp_path):
+    """一顆一張的資料 → Input 卡的名字表**一列**，畫布上**一顆**埠。
+
+    F11 那時補的是另一張卡（`load_single`）；F121 期 2 合回一張之後，「預先放
+    一張會猜錯的那一半」改由名字表照資料填來擋 —— 猜錯的樣子正是 patch 的
+    `test` / `ref` 兩顆埠掛在一張只有一張圖的資料上。"""
     from make_sample_rsem import generate
 
     out = generate(str(tmp_path / "lotR"), n=4, seed=92)
     window.load_dataset_path(out["klarf"], sync=True)
     steps = [window.model.nodes[n].step for n in window.model.node_order]
-    assert steps == ["load_single"], steps
+    assert steps == ["load_patch"], steps
+    nid = window.model.node_order[0]
+    assert window.model.nodes[nid].params["channel_map"] == "1:single"
+    assert window.pipeline.node_item(nid).out_names() == ["single"]
 
 
 def test_a_pipeline_the_user_built_is_never_touched(window, lot):
     """使用者已經放了東西 → 這一段一個字都不准動它。"""
-    window._on_add_requested("load_single")     # 他自己挑的（就算跟資料不合）
+    window._on_add_requested("glv_stats")       # 他自己放的（就算跟資料不合）
     before = list(window.model.node_order)
     window.load_dataset_path(lot["klarf"], sync=True)
     assert window.model.node_order == before

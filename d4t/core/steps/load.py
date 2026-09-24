@@ -1,33 +1,37 @@
 # d4t step-card library — authored 2026-07-28 (M1).
-"""載入影像的卡 —— **一種 source 一張卡**（F11 Input-4）。
+"""載入影像的卡 —— **一張 Input 卡**（F121 期 2，2026-09-24）。
 
 從 ``ctx.meta["_defect_item"]``（ingest 層的 DefectItem，由引擎放入）讀出
 這顆 defect 的像素並寫進 ``ctx.images``。
 
 | 卡 | 一顆給什麼 | 吐什麼 |
 |---|---|---|
-| ``load_patch``「Patch」| 好幾張（EBI patch、多通道）| ``channel_map`` 表格裡的名字 |
-| ``load_single``「SEM image」| 一張（RSEM、資料夾）| 一條，名字由 ``out`` 決定 |
+| ``load_patch``「Input」| 一張或好幾張（RSEM、影像資料夾、EBI patch、多通道）| ``channel_map`` 表格裡的名字 |
 
-為什麼要拆（使用者回報 2026-08-17）
------------------------------------
-> 我還是傾向不同資料流（IMAGE SOURCE）卡片要拆分不要放在一起，這樣放在一起反而
-> 變得很複雜。例如我現在 load 一張 RSEM image 他就是單張的，但其後的 NODE 節點會
-> 有 TEST 跟 REF？但實際上是 Single。**這樣畫布跟實際對不起來。**
+**key 留 `load_patch`**：它是 recipe 的鍵，不是給人看的字（`CLAUDE.md` §5：只改
+``label`` 零代價）—— 出貨 recipe 與黃金值裡的那個字一個都不動。
 
-拆之前這裡是**一張卡服務四種 kind**，而它的宣告隨 kind 改變
-（``resolve_writes_for_kind``）。量出來的後果是同一個問題有**三個不同的答案**：
-``resolve_writes`` 說 ``["test"]``、``resolve_writes_for_kind("rsem")`` 說
-``["single", "test"]``、畫布畫的是 ``["test", "ref"]``，而資料真的只有
-``["single"]``。
+為什麼又合回一張（使用者 2026-09-24）
+-------------------------------------
+F11 Input-4（2026-08-17）照使用者的話拆成兩張 —— `load_patch`「Patch」與
+`load_single`「SEM image」：
 
-拆完之後**兩張卡都不需要知道 kind**：`load_patch` 的 writes 只看 `channel_map`、
-`load_single` 的 writes 只看 `out` —— **宣告從「隱形的資料型別」變成「使用者看得到
-的值」**，那正是畫布不說謊的條件。``resolve_writes_for_kind`` 因此沒有人覆寫它了。
+> 我現在 load 一張 RSEM image 他就是單張的，但其後的 NODE 節點會有 TEST 跟 REF？
+> 但實際上是 Single。**這樣畫布跟實際對不起來。**
 
-拆的軸是「**一顆長什麼樣**」而不是檔案格式：`rsem` 與 `folder` 在卡片這一層一模
-一樣（都是一顆一張），做成兩張會是兩份會各自長歪的程式碼；檔案格式的差別在
-Studio 的三個 Open 入口就分完了。
+那一刀解掉的是「**宣告跟著隱形的資料型別變**」（拆之前 ``resolve_writes`` 說
+``["test"]``、``resolve_writes_for_kind("rsem")`` 說 ``["single", "test"]``、畫布
+畫 ``["test", "ref"]``，而資料只有 ``["single"]``）。拆完之後兩張卡的宣告都只看
+使用者看得到的值 —— 而**那個條件合回一張也成立**：埠＝名字表，名字表在開資料時
+照資料填（一顆一張就是一列 ``1:single``，見 :func:`channel_map_for`）。
+
+合的理由是使用者要的「入口簡單化」（`docs/plans/F121-simple-input.md`）：兩張卡
+要使用者先選對，而選錯的下場是每一顆都報錯。實測 `load_single(out="x")` 與
+`load_patch(channel_map="1:x")` 在一顆一張的資料上**像素與特徵逐一相同** —— 兩張卡
+差的只是預設值。舊 recipe 的 `load_single` 由 `recipe_migrations` 換成這一張。
+
+⚠ **合完之後差的那一格是使用者同意過的**：一顆好幾張、名字表只寫一列時讀第一張，
+並警告其餘沒載入（以前 `load_single` 會拒絕）。
 """
 from __future__ import annotations
 
@@ -74,15 +78,17 @@ DEFAULT_CHANNEL_MAP = "1:test, 2:ref"
 
 @register_step
 class LoadPatchStep(Step):
-    """把 DefectItem 的**好幾張**影像載入成 Context 影像流（一律 uint8 灰階）。"""
+    """把 DefectItem 的影像（一張或好幾張）載入成 Context 影像流（一律 uint8 灰階）。"""
 
     key = "load_patch"
-    label = "Patch"
+    label = "Input"
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
-    help = ("Load this defect's images into the pipeline (a test/reference pair, "
-            "or several detector channels), always converted to 8-bit "
-            "grayscale. One image per defect? Use “SEM image” instead.")
+    help = ("Load this defect's images into the pipeline, always converted to "
+            "8-bit grayscale - one image (Review SEM, a folder of images) or "
+            "several (a test/reference pair, detector channels). The table "
+            "names each image; the names are the streams on the canvas, and "
+            "opening data fills it in for you.")
     params = [
         ParamSpec(
             name="channel_map", type="channel_map", default=DEFAULT_CHANNEL_MAP,
@@ -172,15 +178,14 @@ class LoadPatchStep(Step):
         if pairs:
             need = highest_image_number(pairs)
             if need > len(order):
-                hint = ("Use “SEM image” for data with one image per "
-                        "defect. " if len(order) == 1 else "")
                 raise StepError(
                     self.key,
                     "the image names say there are at least %d images per "
-                    "defect, but defect %s has %d (%s). %sFix “Name the "
-                    "images” or open the data this recipe was written for."
+                    "defect, but defect %s has %d (%s). Fix “Name the "
+                    "images” to match this data, or open the data this "
+                    "recipe was written for."
                     % (need, getattr(item, "defect_id", "?"), len(order),
-                       ", ".join(order), hint))
+                       ", ".join(order)))
             src_of = {name: order[page - 1] for page, name in pairs}
             unnamed = [k for k in order if k not in set(src_of.values())]
             if unnamed:
@@ -221,8 +226,8 @@ class LoadPatchStep(Step):
 
         # ⚠ 這裡以前有一段「``single`` 順手鏡射成 ``test``」（讓單張資料的下游用
         # 預設參數就吃得到圖）。**F11 Input-4 拿掉了** —— 那是「宣告比現實多」的
-        # 一個實例：資料只有一張圖，畫布上卻有兩顆埠。單張資料現在走
-        # :class:`LoadSingleStep`，它吐**一條**流、名字由使用者決定。
+        # 一個實例：資料只有一張圖，畫布上卻有兩顆埠。單張資料的名字表就是一列
+        # （開資料時 :func:`channel_map_for` 填的），吐**一條**流。
 
         _apply_nm_per_px(ctx, p, loaded)
         _write_input_panel(ctx, item, kind, loaded, images)
@@ -231,101 +236,16 @@ class LoadPatchStep(Step):
         return ctx
 
 
-@register_step
-class LoadSingleStep(Step):
-    """一顆一張影像的資料（RSEM、資料夾）→ **一條**具名影像流（F11 Input-4）。
+def channel_map_for(item: Any) -> str:
+    """**這一顆的影像**照順序排成一張名字表（開資料時填 Input 卡用，F121 期 2）。
 
-    為什麼它是自己一張卡，見模組說明：一張卡服務四種 source 的時候，「這張卡吐
-    哪幾條流」有三個不同的答案，而畫布拿到的是錯的那一個。這張卡的宣告只看一個
-    使用者看得到的值 —— ``out``。
+    名字就是 ingest 給的 channel 名（patch 是 ``test`` / ``ref`` / ``img3``…，
+    一顆一張是 ``single``），所以 EBI patch 填出來正好是
+    :data:`DEFAULT_CHANNEL_MAP`，而 RSEM／影像資料夾是 ``1:single`` —— 畫布上的埠
+    因此一開始就等於資料真的有的那幾張（畫布不說謊）。沒有影像回空字串。
     """
-
-    key = "load_single"
-    label = "SEM image"
-    category = CATEGORY_IMAGE
-    group = GROUP_INPUT
-    help = ("Load this defect's single image into the pipeline (Review SEM, or "
-            "a folder of images), converted to 8-bit grayscale. Several images "
-            "per defect? Use “Patch” instead.")
-    params = [
-        ParamSpec(
-            name="out", type="image_key", direction="out", default="single",
-            label="Name this image",
-            help=("Name of the image stream this card produces. It is what the "
-                  "next card connects to, and the prefix on this image's "
-                  "features."),
-        ),
-        nm_per_px_spec(),
-        carry_spec(),
-    ] + only_code_specs()
-    reads: List[str] = []
-    writes = ["single"]
-    #: 永遠是 1。留著它是為了**特徵表的名字不因為換一張卡而消失** —— 舊的 rsem
-    #: recipe 匯出過含 `n_channels` 的 CSV，而分數表達式指得到它。一個常數特徵
-    #: 的資訊量是零，但「同一份資料換一張卡就少一欄」的代價不是零。
-    features_out = ["n_channels"]
-    FEATURE_HELP = {"n_channels": "how many images this defect had"}
-
-    @classmethod
-    def item_filter(cls, params):
-        """只跑 KLARF 某一欄符合的那幾顆（F50）—— 見 `Step.item_filter`。"""
-        return parse_only_codes(params)
-
-    @classmethod
-    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
-        return only_code_hints(params)
-
-    @classmethod
-    def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        name = str(params.get("out", "single") or "").strip()
-        return [name] if name else []
-
-    @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        """``n_channels`` ＋ ``carry`` 點名的那幾欄（F16）。
-
-        **宣告要跟著參數走**，不然那幾欄在 `available_features` 的下拉裡不存在
-        —— 使用者就得用打的，而打錯只會得到一條 `unknown-feature` 警告。
-        非數字的欄位仍然宣告：卡片手上沒有 KLARF，分不出哪一欄是數字，而
-        「宣告」的意思是「可能會碰到的」（同 `MultiSourceStep` 的 nm 那一份）。
-        """
-        return ["n_channels"] + _carry_names(params)
-
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
-        item = ctx.meta.get("_defect_item")
-        kind = ctx.meta.get("_dataset_kind")
-        if item is None:
-            raise StepError(self.key, "no defect data in the Context "
-                            "(meta['_defect_item']); this card must be run by "
-                            "the engine after a dataset is loaded.")
-        images = getattr(item, "images", None) or {}
-        order = _in_defect_order(images)
-        if not order:
-            raise StepError(
-                self.key,
-                "defect %s has no image to load." % getattr(item, "defect_id", "?"))
-        if len(order) > 1:
-            # **不偷偷拿第一張。** 這張卡承諾「一顆一張」，而這份資料一顆有好幾張
-            # —— 那是選錯卡，不是需要幫忙猜的情況（畫布不能說謊）。
-            raise StepError(
-                self.key,
-                "defect %s has %d images (%s), and this card loads exactly one. "
-                "Use “Patch” — it names each image and gives you one "
-                "output per name."
-                % (getattr(item, "defect_id", "?"), len(order), ", ".join(order)))
-
-        name = str(p["out"]).strip()
-        try:
-            arr = item.load(order[0])
-        except Exception as e:      # 檔案毀損 / 位元深度不對等
-            raise StepError(self.key, "could not read the image: %s" % e) from e
-        ctx.set_image(name, to_uint8(ensure_gray(arr)))
-        _apply_nm_per_px(ctx, p, [name])
-        _write_input_panel(ctx, item, kind, [name], {name: images[order[0]]})
-        ctx.add_feature("n_channels", 1.0)
-        _carry_features(ctx, item, p, self.key)
-        return ctx
+    order = _in_defect_order(dict(getattr(item, "images", None) or {}))
+    return ", ".join("%d:%s" % (i + 1, name) for i, name in enumerate(order))
 
 
 def _carry_names(params: Dict[str, Any]) -> List[str]:
@@ -354,7 +274,7 @@ def columns_for_main(nodes: Any) -> List[str]:
     out: List[str] = []
     for node in (nodes or ()):
         step = str(getattr(node, "step", "") or "")
-        if step not in ("load_patch", "load_single"):
+        if step != "load_patch":
             continue
         params = dict(getattr(node, "params", None) or {})
         for col in _carry_names(params):
@@ -426,7 +346,7 @@ def _write_input_panel(ctx: Context, item: Any, kind: Any,
     或 ``channel_map`` 改過名字的資料集，只有這份 meta 講得出實際載進來的是什麼。
     平均灰階則是拿來判「這兩張比得起來嗎」。
 
-    兩張 Input 卡共用它 —— 抄兩份的話，總有一份會長歪（這個 repo 記過三次）。
+    F11 那兩張 Input 卡共用過它（抄兩份的話總有一份會長歪）；F121 合回一張。
     """
     pages = []
     for ch in loaded:

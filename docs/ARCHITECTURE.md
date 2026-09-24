@@ -330,9 +330,9 @@ d4t/
 │   │                         #     `chart_style` 分家：畫什麼 vs 長什麼樣。
 │   │                         #     ⚠ 驗的是形狀，**不驗欄位存不存在**（存 recipe
 │   │                         #     的時候沒有資料）
-│   ├── steps/                # 步驟卡片 —— **註冊 20 張，卡片庫可見 20 張**（`HIDDEN_STEPS` 空著）
+│   ├── steps/                # 步驟卡片 —— **註冊 19 張，卡片庫可見 19 張**（`HIDDEN_STEPS` 空著）
 │   │                         #   ⚠ 卡片庫由上而下的順序 ＝ `__init__.py` 的 import 順序
-│   │   ├── load.py           #   load_patch／load_single（**一種 source 一張卡**）
+│   │   ├── load.py           #   load_patch「Input」（F121 起一張；名字表照資料填）
 │   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
 │   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
 │   │   ├── align.py arith.py combine.py align_to.py    #   Compare 段（align 整數平移裁重疊區、

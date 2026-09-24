@@ -284,7 +284,11 @@ FILE_CEILINGS = {
     # 擋得住每一張卡，不只被走查點到的那一張。
     # 2026-09-24：4,522 → 648。拆成四支（schema／migrations／validate 與留下來的
     # `Recipe`＋執行順序），另外三支都在一般上限底下。
-    "d4t/core/pipeline/recipe.py": 648,
+    # 2026-09-24（F121 期 1＋2）：648 → 650（+2）。`route_for` 的轉出口一行、
+    # `load_single` → Input 那一道的呼叫一行。**遷移的呼叫順序只住在
+    # `from_json_dict`**（`recipe_migrations` 的檔頭這樣規定），所以這一行只能加
+    # 在這裡；F11 那一道的版本閘收進那一支自己的參數，沒有在這裡多長一段 if。
+    "d4t/core/pipeline/recipe.py": 650,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右
@@ -465,8 +469,10 @@ COUNT_CEILINGS = {
     # 2026-09-08 的 23 個：viewmodel 8、studio 10、inspectors 3、scope 1、
     # canvas 1。要加第 24 個之前先問：這件事能不能改成問卡片自己
     # （`Step` 上多一個宣告），而不是在 UI 裡問「你是不是那張卡」。
+    # 2026-09-24（F121 期 2）：23 → 20。`load_single` 併回 Input，問「你是
+    # `load_patch` 還是 `load_single`」的那三處只剩一個答案。
     "ui_card_key_coupling": (
-        23,
+        20,
         "d4t/ui 裡按卡片名字分支的地方（不含 INSPECTORS/BY_METHOD 兩張註冊表）",
         lambda: len(card_key_couplings()),
     ),
@@ -615,8 +621,12 @@ COUNT_CEILINGS = {
     # 用著 align 而且撐著三組黃金值裡的兩組，出貨的 recipe 也可能帶著舊參數 ——
     # 不寫這道遷移，那些檔案開起來是一張參數全空的卡，跑出來的數字跟以前不一樣
     # **而且不會報錯**。那正是這個 repo 最貴的失敗（「跑得完、有數字、而且是錯的」）。
+    # 2026-09-24（F121 期 2）：22 → 23。`load_single`「SEM image」併回
+    # `load_patch`「Input」（使用者同意合卡、舊 recipe 自動升級）。**這一格問的
+    # 那句話有答案**：兩份出貨 recipe 與 `dual_route_basic.json` 都寫著
+    # `load_single`，不遷移的話它們開起來是一條 `unknown-step`。
     "recipe_migrations": (
-        22,
+        23,
         "recipe_migrations.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 5）",
         _migration_count,
     ),

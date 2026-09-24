@@ -5,8 +5,9 @@ KLARF 列尾用 `Images 1 { "檔名" … }` 指到那個檔。這裡驗證：
   1. KLARF 解得開、`load_dataset` 判成 rsem、每顆只有 single channel；
   2. 像素形狀／dtype、ground truth key 與 defect id 對得起來；
   3. 同 seed → 位元組完全相同（KLARF 與影像）；
-  4. 單張影像走 `load_single` 卡，它吐**一條**具名流（F11 Input-4 起；
-     在那之前是 `load_patch` 把 single **鏡射**成 test，而那讓畫布上多一顆假的埠）；
+  4. 單張影像只吐**一條**具名流（F11 Input-4 起是 `load_single` 卡，F121 期 2 起
+     是 Input 卡名字表的一列；在那之前是 `load_patch` 把 single **鏡射**成 test，
+     而那讓畫布上多一顆假的埠）；
   5. 這份合成資料**真的是週期性的、而且真的種了缺陷** —— 用 `algo/golden.py`
      疊一張參考圖出來直接量殘差。（以前這一段走的是 `cell_period` → `golden_cell`
      兩張卡。2026-08-18 那兩張一張刪掉、一張改名成 `pattern_ref` —— 而這裡要測的
@@ -146,8 +147,8 @@ def test_same_seed_identical_bytes(tmp_path):
 
 # ------------------------------------------------------------ 4. 單張影像的 Input 卡
 
-def test_load_single_gives_one_stream(ds):
-    """一顆一張 → **一條流**（F11 Input-4）。
+def test_one_image_gives_one_stream(ds):
+    """一顆一張 → **一條流**（F11 Input-4；F121 期 2 起是 Input 卡名字表的一列）。
 
     這兩條測試以前斷言的是 `load_patch` 會把 `single` 鏡射一份到 `test`。
     那個鏡射拿掉了：使用者回報「load 一張 RSEM image 他就是單張的，但其後的
@@ -155,17 +156,18 @@ def test_load_single_gives_one_stream(ds):
     """
     it = ds.items[0]
     ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds.kind})
-    run_step("load_single", ctx, out="test")
+    run_step("load_patch", ctx, channel_map="1:test")
     assert set(ctx.images) == {"test"}                # 一條，不是兩條
     assert ctx.features["n_channels"] == 1.0
 
 
 def test_the_declared_stream_is_the_name_the_user_gave():
-    cls = REGISTRY["load_single"]
-    assert cls.resolve_writes({"out": "test"}) == ["test"]
+    cls = REGISTRY["load_patch"]
+    assert cls.resolve_writes({"channel_map": "1:test"}) == ["test"]
     # 而且它不再隨資料型別改變（那是「畫布會說謊」的來源）
     for kind in ("rsem", "folder", "ebi_patch"):
-        assert cls.resolve_writes_for_kind({"out": "test"}, kind) == ["test"]
+        assert cls.resolve_writes_for_kind({"channel_map": "1:test"},
+                                           kind) == ["test"]
 
 
 # ------------------------------------------------------------ 5. 產生器的週期與缺陷
@@ -201,7 +203,7 @@ def test_the_generator_plants_a_defect_on_a_periodic_layout(ds, truth):
     it = real[0]
 
     ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds.kind})
-    run_step("load_single", ctx, out="test")
+    run_step("load_patch", ctx, channel_map="1:test")
     single = np.asarray(ctx.images["test"])
 
     (px, py), ref = _stacked_reference(single)
@@ -223,7 +225,7 @@ def test_real_frac_zero_has_no_planted_defect(tmp_path):
     ds0 = dataset.load_dataset(paths["klarf"])
     for it in ds0.items:
         ctx = Context(meta={"_defect_item": it, "_dataset_kind": ds0.kind})
-        run_step("load_single", ctx, out="test")
+        run_step("load_patch", ctx, channel_map="1:test")
         single = np.asarray(ctx.images["test"])
         residual = np.abs(single.astype(np.float64)
                           - _stacked_reference(single)[1].astype(np.float64))

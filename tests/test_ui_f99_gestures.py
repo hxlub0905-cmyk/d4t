@@ -70,7 +70,7 @@ def test_only_cards_that_take_the_wire_are_offered():
     images = card_menu.compatible(keys, "image")
     regions = card_menu.compatible(keys, "region")
     assert "denoise" in images and "glv_stats" in images
-    assert "load_single" not in images, "入口卡不吃線"
+    assert "load_patch" not in images, "入口卡不吃線"
     assert "glv_stats" in regions and "denoise" not in regions
     assert card_menu.input_param_for("denoise", "image")
     assert card_menu.input_param_for("glv_stats", "region") == "roi"

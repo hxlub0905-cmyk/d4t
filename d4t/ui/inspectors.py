@@ -1667,8 +1667,6 @@ class FocusInspector(MeasureInspector):
 
 INSPECTORS: Dict[str, type] = {
     "load_patch": InputInspector,
-    # 同一個面板：它讀的是 meta["input"]，兩張 Input 卡都會寫（F11 Input-4）。
-    "load_single": InputInspector,
     "roi_cross": CrossInspector,
     "roi_template": TemplateInspector,
     "align": AlignInspector,

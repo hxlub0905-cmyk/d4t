@@ -22,7 +22,7 @@
 判定只問一句：那個峰有沒有高過「安靜」的水位（`quiet`，預設 32）。
 
 ```
-Patch ──test─┬──> Normalize (test)           ──test──┐
+Input ──test─┬──> Normalize (test)           ──test──┐
                    ├──> Normalize (ref, range from test) ──ref──┤
             ──ref──┘                                            ▼
                                                     Subtract |test − ref| ──diff──> Denoise (median 3) ──diff──> GLV (glv_max)
@@ -44,7 +44,7 @@ Patch ──test─┬──> Normalize (test)           ──test──┐
 **沒有第二張圖可以比的時候，同一張圖上的其他框就是參照**。
 
 ```
-SEM image ──single─┬──> ROI (stripes, crossing)          → on_pattern ───────┐
+Input ──────single─┬──> ROI (stripes, crossing)          → on_pattern ───────┐
                         ├──> ROI (stripes, between_vertical)   → between_columns ─┤
                         ├──> ROI (stripes, between_horizontal) → between_rows ────┤
                         └──single──────────────────────────────────> GLV (each box) <─────────┘
@@ -135,7 +135,7 @@ python -m d4t run recipes/rsem-worst-box.json <你的.001> --workers 4
 
 ```
                                         ┌──→ Write charts    四張圖 + 一張自己配的
-SEM image ──single─┬──> ROI (stripes) ┄cells┄> GLV (across boxes)
+Input ──────single─┬──> ROI (stripes) ┄cells┄> GLV (across boxes)
                         └──single──────────────────→ ┘   └──→ Write report   defects.csv + recipe
 ```
 

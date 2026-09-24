@@ -2172,7 +2172,7 @@ class StudioWindow(QMainWindow):
     #: 不取代目前的資料集。
     _PAIR_CARDS = ("pair_source",)
 
-    #: 資料那幾張卡（`load_patch` / `load_single`）的鈕上寫什麼。
+    #: 資料那張卡（Input，`load_patch`）的鈕上寫什麼。
     #: **它不是某一種 source 的名字** —— 一份 KLARF 是 patch 還是一顆一張由檔案
     #: 決定，所以這顆鈕開的是一張選單（`scope.INPUT_SOURCES` 那三條路）。
     DATA_SOURCE_LABEL = "Open data…"
@@ -3083,7 +3083,7 @@ class StudioWindow(QMainWindow):
                     "(%s) and none for %s data; open a recipe for it, or start "
                     "a new pipeline."
                     % (", ".join(self.model.route_keys()), ds_kind)))
-        added = self._adopt_source_for(ds_kind)
+        added = self._adopt_source_for()
 
         # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11）。
         # 那是資料的事實，所以在這裡講一次，不是每次選卡片時重新猜。
@@ -3119,29 +3119,20 @@ class StudioWindow(QMainWindow):
             self.refresh_preview(force=False)
         return True
 
-    def _adopt_source_for(self, kind: str) -> str:
-        """畫布是空的 → 補上**這種資料該用的那一張**載入卡（回它的顯示名）。
+    def _adopt_source_for(self) -> str:
+        """畫布是空的 → 補上 Input 卡，名字表照資料填（回它的顯示名）。
 
-        為什麼開窗時不放、載資料時才放（F11 Enhance-4）
-        ----------------------------------------------
-        使用者：「一開始進去 GUI 畫面時，Load image 卡片改成預設沒有（user 可以
-        選擇要 Load images or Load one image），add 才會出現。」他要的是**開窗時
-        不要替他決定** —— 因為 Input-4 之後有兩張載入卡，而預先放一張就是替他決定
-        了他還沒決定的事（而猜錯的那一半在畫布上看起來完全正常）。
-
-        但**載入資料的那一刻，「哪一張」已經不是猜的**：`ingest` 判別出來的 kind
-        就是答案（`ebi_patch`/`tiff_stack` → Load images；`rsem`/`folder` →
-        Load one image）。那時候不放才是把一個已知的答案丟給使用者自己拼。
-        所以規則是：**空白畫布才補，而且把補了什麼講出來**（狀態列）。
-
-        只在**完全空白且沒動過**的時候補：使用者已經蓋了一條 pipeline 的話，
-        那是他的東西 —— 這一段一個字都不准動它。
+        開窗時不放（F11 Enhance-4，使用者：「Load image 卡片改成預設沒有……add
+        才會出現」），**載入資料的那一刻才放** —— 那時候一顆有幾張、叫什麼已經
+        不是猜的，是資料說的（`RecipeModel.add_starter_input`，F121 期 2）。
+        規則：**空白畫布才補，而且把補了什麼講出來**（狀態列）；使用者已經蓋了
+        一條 pipeline 的話，那是他的東西，這一段一個字都不准動它。
         """
         if self.model.node_order or self.model.dirty:
             return ""
-        want = RecipeModel.starter_step_for(str(kind or ""))
+        items = self._items()
         try:
-            nid = self.model.add_step(want)
+            nid = self.model.add_starter_input(items[0] if items else None)
         except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
             return ""
         # 補上來的那張卡不算「使用者做過的一步」：Ctrl+Z 不該把它退掉，關窗也
@@ -3149,10 +3140,7 @@ class StudioWindow(QMainWindow):
         self.model.dirty = False
         self.model.clear_history()
         self.select_node(nid)
-        try:
-            return str(get_step(want).label)
-        except KeyError:                 # pragma: no cover
-            return want
+        return str(get_step(RecipeModel.STARTER_STEP).label)
 
     def _items(self) -> List[Any]:
         """目前資料集的 defect 清單（沒有資料集就是空的）。"""
@@ -3765,8 +3753,8 @@ class StudioWindow(QMainWindow):
         """這張卡接的那一條流，在這一顆上長什麼樣（給對話框疊 cell 用）。
 
         **問的是卡片自己的 `source`**，不是一組寫死的名字：單張影像那條路的流
-        可能叫 `single`、`test` 或使用者自己取的任何名字（`load_single` 的
-        `out` 是他填的），而寫死 `ref`/`test` 的話那條路永遠拿不到圖。
+        可能叫 `single`、`test` 或使用者自己取的任何名字（Input 卡的名字表是
+        他填的），而寫死 `ref`/`test` 的話那條路永遠拿不到圖。
         """
         res = getattr(self, "_last_result", None)
         images = dict(getattr(res, "images", None) or {}) if res is not None else {}

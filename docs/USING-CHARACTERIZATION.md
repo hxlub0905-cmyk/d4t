@@ -79,7 +79,7 @@ ground truth 是 API，所以要**走遍的是 API 的清單**。
 ## 3. 畫布怎麼接
 
 ```
-SEM image ──single──────────────┐
+Input ──single──────────────────┐
    （API 空拍，main）                 ├──> H2H
 Pair source ──paired────┘
 
@@ -91,7 +91,7 @@ Pair source ──paired────┘
 
 | 從哪 | 到哪 | 意思 |
 |---|---|---|
-| `SEM image` 的 `single` | **H2H 的 `Search inside`** | 大圖（要在裡面找） |
+| `Input` 的 `single` | **H2H 的 `Search inside`** | 大圖（要在裡面找） |
 | `Pair…` 的 `paired` | **H2H 的 `Small image`** | 小圖（拿去找的那一塊） |
 
 **小的當模板、大的當搜尋範圍** —— EBI 的 patch 是 128²、RSEM 是 1000²，

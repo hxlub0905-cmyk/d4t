@@ -20,6 +20,12 @@
 東西，而「資料型別」是使用者在畫布上看不到的東西。拆成兩張卡之後，兩張的宣告都
 只看**使用者看得到的值**（`channel_map` 的表格／`out` 的名字），那個機制就沒有人
 覆寫它了。
+
+⚠ **F121 期 2（2026-09-24）又合回一張「Input」**（`load_patch`；使用者：入口
+簡單化）。這一份守的不變量一條都沒變 —— 宣告只看使用者看得到的值（名字表）、
+單張資料只吐一條流、舊檔遷移之後行為逐項相同、遷移是一次性的 —— 只是「看得到
+的值」剩下名字表一種：`load_single(out="x")` 由遷移換成 `load_patch("1:x")`，
+而名字表在開資料時照資料填（`RecipeModel.add_starter_input`）。
 """
 from __future__ import annotations
 
@@ -67,13 +73,13 @@ def test_no_card_declares_different_streams_for_different_kinds():
         "改成看使用者看得到的參數（見 steps/load.py 的模組說明）" % offenders)
 
 
-def test_the_two_input_cards_declare_exactly_what_they_produce():
+def test_the_input_card_declares_exactly_what_it_produces():
     patch = get_step("load_patch")
-    single = get_step("load_single")
     assert patch.resolve_writes(patch.validate_params({})) == ["test", "ref"]
-    assert single.resolve_writes(single.validate_params({})) == ["single"]
-    # 名字是使用者的：改了 `out`，宣告（＝畫布上的埠）就跟著改
-    assert single.resolve_writes({"out": "rsem_img"}) == ["rsem_img"]
+    assert patch.resolve_writes({"channel_map": "1:single"}) == ["single"]
+    # 名字是使用者的：改了名字表，宣告（＝畫布上的埠）就跟著改
+    assert patch.resolve_writes({"channel_map": "1:rsem_img"}) == ["rsem_img"]
+    assert "load_single" not in REGISTRY, "F121 期 2 併回 Input 了"
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +89,8 @@ def test_single_image_data_gives_exactly_one_stream(rsem_lot):
     assert rsem_lot.kind == "rsem"
     rec = Recipe(
         recipe_id="one", routes={"rsem": ["load"]},
-        nodes={"load": RecipeNode("load", "load_single", {"out": "single"})},
+        nodes={"load": RecipeNode("load", "load_patch",
+                                  {"channel_map": "1:single"})},
         score=ScoreSpec(expr="1", threshold=0.0, bins={"below": 0, "above": 1}))
     for item in rsem_lot.items:
         res = run_defect(rec, item, "rsem", keep_context=True)
@@ -92,10 +99,11 @@ def test_single_image_data_gives_exactly_one_stream(rsem_lot):
 
 
 def test_lint_is_clean_for_a_single_image_pipeline(rsem_lot):
-    """`load_single` → 量測卡：lint 一句話都不該說。"""
+    """一列的 Input → 量測卡：lint 一句話都不該說。"""
     rec = Recipe(
         recipe_id="one", routes={"rsem": ["load", "m"]},
-        nodes={"load": RecipeNode("load", "load_single", {"out": "single"}),
+        nodes={"load": RecipeNode("load", "load_patch",
+                                  {"channel_map": "1:single"}),
                "m": RecipeNode("m", "glv_stats", {"source": "single"})},
         score=ScoreSpec(expr="glv_mean", threshold=0.0,
                         bins={"below": 0, "above": 1}))
@@ -110,7 +118,9 @@ def test_an_old_rsem_recipe_migrates_to_the_single_image_card():
     """舊檔的 rsem route 靠「`single` 鏡射成 `test`」活著；遷移換卡並保住行為。
 
     判準是「**舊東西在不在**」（鐵則 9）：route 的 kind 是單張影像的那幾種，
-    而它上面有一張 `load_patch`。
+    而它上面有一張 `load_patch` —— **而且檔案是第 1 版**（F121 期 2 起「單張
+    route 上的 `load_patch`」也是新檔案的正常樣子）。F11 那一道先換成
+    `load_single(out="test")`，F121 那一道接著換成一列的 Input ``1:test``。
     """
     d = {
         "recipe_id": "old",
@@ -127,8 +137,8 @@ def test_an_old_rsem_recipe_migrates_to_the_single_image_card():
     assert r.nodes["load"].step == "load_patch"
     new_id = r.routes["rsem"][0]
     assert new_id != "load"
-    assert r.nodes[new_id].step == "load_single"
-    assert r.nodes[new_id].params == {"out": "test"}
+    assert r.nodes[new_id].step == "load_patch"
+    assert r.nodes[new_id].params == {"channel_map": "1:test"}
     # 遷移是**一次性**的：遷移過的那份再讀一次不會再變（節點逐項相同）
     again = Recipe.from_json_dict(r.to_json_dict())
     assert {k: (n.step, n.params) for k, n in again.nodes.items()} == \
@@ -146,7 +156,26 @@ def test_a_recipe_whose_only_route_is_single_image_is_migrated_in_place():
     }
     r = Recipe.from_json_dict(d)
     assert r.routes["rsem"] == ["load"]
-    assert r.nodes["load"].step == "load_single"
+    assert r.nodes["load"].step == "load_patch"
+    assert r.nodes["load"].params == {"channel_map": "1:test"}
+
+
+def test_a_current_single_image_input_card_is_left_alone():
+    """**反向**（F121 期 2）：第 2 版以上的檔案裡，單張 route 上的 Input 卡是
+    正常樣子 —— F11 那一道不准再碰它。碰了的話 ``1:single`` 會被換成
+    ``1:test``，下游指著 `single` 的線全斷，而且每存一次變一次（鐵則 9）。"""
+    d = {
+        "recipe_id": "rsem_now", "version": 5,
+        "routes": {"rsem": ["load"]},
+        "nodes": {"load": {"step": "load_patch",
+                           "params": {"channel_map": "1:single"}}},
+        "score": {"expr": "1", "threshold": 1.0,
+                  "bins": {"below": 0, "above": 1}},
+    }
+    r = Recipe.from_json_dict(d)
+    assert r.nodes["load"].params == {"channel_map": "1:single"}
+    assert Recipe.from_json_dict(r.to_json_dict()).to_json_dict() == \
+        r.to_json_dict()
 
 
 def test_a_patch_only_recipe_is_not_migrated():
@@ -167,7 +196,8 @@ def test_the_migrated_rsem_route_runs_and_gives_the_same_numbers(rsem_lot):
     """遷移之後的 recipe 跑得動，而且與「手寫成新形狀」的那份逐項相同。"""
     fixture = REPO / "tests" / "fixtures" / "recipes" / "dual_route_basic.json"
     r = Recipe.load(str(fixture))
-    assert r.nodes[r.routes["rsem"][0]].step == "load_single"   # 遷移過了
+    first = r.nodes[r.routes["rsem"][0]]                        # 遷移過了
+    assert (first.step, first.params.get("channel_map")) == ("load_patch", "1:test")
     assert r.nodes[r.routes["ebi_patch"][0]].step == "load_patch"
     hand = Recipe.from_json_dict(r.to_json_dict())    # 已經是新形狀的那份
     for item in rsem_lot.items:
@@ -191,18 +221,30 @@ def test_an_omitted_map_falls_back_to_the_card_default(rsem_lot):
     assert patch.resolve_writes({"channel_map": "1:bse"}) == ["bse"]
 
 
-def test_which_load_card_the_data_wants(rsem_lot):
-    """一種 source 一張卡 → 「哪一張」也跟著資料走。
+def test_the_input_card_the_data_gets(rsem_lot, tmp_path):
+    """載入資料時補的那一張（`studio._adopt_source_for`）：**名字表照資料填**。
 
-    F11 Enhance-4 起**開新檔是空白畫布**（使用者要自己挑），所以這個答案的用處
-    從「起手卡放哪一張」變成「載入資料時要補哪一張」
-    （`studio._adopt_source_for`）—— 但那個對照表本身一個字都沒變。
+    F11 那時是「一種 source 一張卡」，由資料型別決定補哪一張；F121 期 2 起只有
+    一張，由資料決定**名字表**—— 一顆一張就是一列，畫布上因此只有一顆埠
+    （F11 那句「這樣畫布跟實際對不起來」要守的正是這件事）。
     """
+    from make_sample import generate
+
     from d4t.ui.viewmodel import RecipeModel
-    assert RecipeModel.starter_step_for("ebi_patch") == "load_patch"
-    assert RecipeModel.starter_step_for("tiff_stack") == "load_patch"
-    assert RecipeModel.starter_step_for("rsem") == "load_single"
-    assert RecipeModel.starter_step_for("folder") == "load_single"
+
+    m = RecipeModel.starter("rsem")
+    nid = m.add_starter_input(rsem_lot.items[0])
+    assert m.nodes[nid].step == "load_patch"
+    assert m.nodes[nid].params["channel_map"] == "1:single"
+    assert get_step("load_patch").resolve_writes(m.nodes[nid].params) == \
+        ["single"]
+
+    paths = generate(str(tmp_path / "patch"), n=2, seed=3)
+    patch = load_dataset(paths["klarf"], paths["tiff"])
+    p = RecipeModel.starter()
+    pid = p.add_starter_input(patch.items[0])
+    assert p.nodes[pid].params["channel_map"] == "1:test, 2:ref"
+
     m = RecipeModel.starter("rsem")
     assert m.node_order == [], "開新檔不預先放載入卡"
     assert m.dirty is False

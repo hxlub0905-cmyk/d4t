@@ -67,29 +67,54 @@ def describe_migration(raw: Any, recipe: Any) -> List[str]:
         old_version = _as_int(raw.get("version", 1), "recipe 'version'")
     except Exception:  # 只是一句提示，不准擋載入
         return says
-    if old_version >= RECIPE_VERSION:
-        return says
 
-    raw_edges = raw.get("edges") or []
-    added = len(getattr(recipe, "edges", []) or []) - len(raw_edges)
-    if added > 0:
-        says.append("added %d wire%s" % (added, "" if added == 1 else "s"))
-
+    # 補線、拆出新卡 —— 那幾道遷移都掛在版本閘底下，所以只問舊版本的檔案
+    # （目前版本的檔案沒被那幾道碰過，不該講話）。
     raw_nodes = raw.get("nodes") or {}
+    if old_version < RECIPE_VERSION:
+        raw_edges = raw.get("edges") or []
+        added = len(getattr(recipe, "edges", []) or []) - len(raw_edges)
+        if added > 0:
+            says.append("added %d wire%s" % (added, "" if added == 1 else "s"))
+        if isinstance(raw_nodes, dict):
+            extra = len(getattr(recipe, "nodes", {}) or {}) - len(raw_nodes)
+            if extra > 0:
+                says.append("split %d card%s"
+                            % (extra, "" if extra == 1 else "s"))
+
+    # **換卡不看版本號**（F121 期 2，2026-09-24）：有幾道換卡看的是「舊東西在
+    # 不在」（`load_single` → Input），對**目前版本**的檔案一樣會動手 —— 以前
+    # 這裡整段被「目前版本就不用講」擋掉，那幾次升級因此是安靜的。比對前後對
+    # 沒被換過的卡講不出任何一句話，所以不會多出雜訊。
     if isinstance(raw_nodes, dict):
-        new_nodes = getattr(recipe, "nodes", {}) or {}
-        extra = len(new_nodes) - len(raw_nodes)
-        if extra > 0:
-            says.append("split %d card%s" % (extra, "" if extra == 1 else "s"))
-        swapped = sorted(
-            {str((raw_nodes.get(nid) or {}).get("step", ""))
-             for nid, node in new_nodes.items()
-             if nid in raw_nodes
-             and str((raw_nodes.get(nid) or {}).get("step", ""))
-             not in ("", str(getattr(node, "step", "")))})
-        if swapped:
-            says.append("renamed %s" % ", ".join("“%s”" % k for k in swapped))
+        became: Dict[str, str] = {}
+        for nid, node in (getattr(recipe, "nodes", {}) or {}).items():
+            old = str((raw_nodes.get(nid) or {}).get("step", "")) \
+                if isinstance(raw_nodes.get(nid), dict) else ""
+            new = str(getattr(node, "step", "") or "")
+            if old and new and old != new:
+                became.setdefault(old, new)
+        if became:
+            says.append("renamed %s" % ", ".join(
+                "“%s” → “%s”" % (_card_word(old), _card_word(new))
+                for old, new in sorted(became.items())))
     return says
+
+
+#: 已經不在卡片庫裡、但舊檔案還寫著的卡 → 使用者當時在畫面上看到的名字。
+#: 升級的那一句話要講**他認得的字**（「SEM image」），不是 recipe 的鍵。
+_RETIRED_CARD_LABELS = {
+    "load_single": "SEM image",     # F121 期 2 併進 Input（`load_patch`）
+}
+
+
+def _card_word(key: str) -> str:
+    """一張卡在升級提示裡叫什麼：卡片庫裡有就用它的 label，退役的查上表，
+    都沒有就原樣（認不得的 key 本身就是線索，不要猜一個漂亮的名字）。"""
+    cls = REGISTRY.get(key)
+    if cls is not None:
+        return str(getattr(cls, "label", "") or key)
+    return _RETIRED_CARD_LABELS.get(key, key)
 
 
 def _migrate_region_params_into_edges(
@@ -355,7 +380,8 @@ _SINGLE_IMAGE_KINDS = SINGLE_IMAGE_KINDS
 
 
 def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
-                              routes: Dict[str, List[str]]) -> None:
+                              routes: Dict[str, List[str]],
+                              version: Any = 1) -> None:
     """單張影像那條 route 上的 ``load_patch`` → ``load_single``（F11 Input-4）。
 
     為什麼需要這一道
@@ -370,6 +396,14 @@ def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
     而它上面有一張 ``load_patch``。不是靠「新東西不在」—— 那分不出「舊檔案」與
     「新 recipe 剛好沒填」。
 
+    ⚠ **F121 期 2（2026-09-24）起這一道只對第 1 版的檔案跑**（``version``）。
+    `load_single` 併回 `load_patch`（「Input」）之後，「單張 route 上有一張
+    `load_patch`」變成**新檔案的正常樣子** —— 那個「舊東西」不再只屬於舊檔案，
+    再照它判斷的話，每一次 `to_json_dict → from_json_dict` 都會把 Input 卡換成
+    `load_single(out="test")`、再被下一道換回 `load_patch("1:test")`，名字表從
+    `1:single` 變成 `1:test`，下游的線全斷（鐵則 9 的形狀）。拆卡（F11，08-17）
+    早於第 2 版（F42 B3，08-27），所以第 2 版以上的檔案一定已經拆過了。
+
     ⚠ **兩條 route 可以共用同一個節點**，而 v1 的雙輸入 recipe 正是那樣寫的
     （``dual_route_basic.json`` 的 ebi_patch 與 rsem 共用九個節點裡的八個，
     包含那張 load 卡）。就地換掉共用的那一張會**把另一條 route 弄壞** ——
@@ -377,6 +411,8 @@ def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
     但這顆有 2 張」）。所以共用的情況要**多開一個節點**給單張那條 route 用，
     而不是改掉大家的那一張。
     """
+    if _as_int(version, "recipe 'version'") >= 2:
+        return
     single = [k for k in routes if str(k) in _SINGLE_IMAGE_KINDS]
     if not single:
         return
@@ -405,6 +441,32 @@ def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
                 nodes[nid] = RecipeNode(id=node.id, step="load_single",
                                         params={"out": "test"},
                                         enabled=node.enabled)
+
+
+def _migrate_single_into_input(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``load_single``「SEM image」→ ``load_patch``「Input」（F121 期 2）。
+
+    使用者 2026-09-24 同意把兩張 Input 卡合回一張（「入口簡單化」）。
+    `load_single(out="x")` 與 `load_patch(channel_map="1:x")` 在一顆一張的資料上
+    像素與特徵逐一相同（實測），所以換卡**不動節點 id、不動流名**：
+    ``recipe.edges`` 上的埠名照樣對得上，一條線都不用改。其餘參數
+    （``nm_per_px`` / ``carry`` / ``only_*``）兩張卡同名同義，原樣帶過去。
+
+    判準是「**舊東西在不在**」（鐵則 9）：節點的 step 是 ``load_single`` 就換。
+    換完之後不再有 ``load_single``，所以跑第二次是 no-op。
+    ⚠ **排在 :func:`_migrate_split_load_cards` 之後**：那一道（只對第 1 版）會
+    產出 ``load_single``，而這一道要把它接著換掉 —— 遷移鏈一段一段接。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "load_single":
+            continue
+        params = dict(node.params)
+        # 空的 ``out`` 在 `load_single` 上是「一條流都不吐」—— 那張卡本來就跑不動，
+        # 換成預設名是讓畫布上至少有一顆埠可以接，而不是造出一張沒有埠的卡。
+        out = str(params.pop("out", "single") or "").strip() or "single"
+        params["channel_map"] = "1:%s" % out
+        nodes[nid] = RecipeNode(id=node.id, step="load_patch", params=params,
+                                enabled=node.enabled)
 
 
 def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:

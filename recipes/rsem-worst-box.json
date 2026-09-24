@@ -16,9 +16,9 @@
   },
   "nodes": {
     "load": {
-      "step": "load_single",
+      "step": "load_patch",
       "params": {
-        "out": "single",
+        "channel_map": "1:single",
         "nm_per_px": 0.0,
         "carry": "XREL,YREL"
       },

@@ -33,6 +33,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication              # noqa: E402
 
+from conftest import add_single_input                   # noqa: E402
 from d4t.core.pipeline import Recipe                    # noqa: E402
 from d4t.ui import studio as studio_mod                 # noqa: E402
 from d4t.ui import theme as theme_mod                   # noqa: E402
@@ -73,7 +74,7 @@ def _errors(win):
 # --------------------------------------------------------------------------- #
 def test_a_pipeline_built_before_the_data_runs_on_it(window, rsem):
     """開窗就先放卡（畫布的鍵是預設的 ``ebi_patch``），再開一個影像資料夾。"""
-    window.model.add_step("load_single")
+    add_single_input(window.model)
     assert window.model.kind == "ebi_patch" and window.model.dirty
 
     assert window.load_folder_path(rsem["images_dir"], sync=True)
@@ -128,7 +129,9 @@ def test_a_blank_canvas_still_takes_the_data_kind_as_its_name(window, rsem):
     assert window.load_folder_path(rsem["images_dir"], sync=True)
     assert window.model.kind == "folder"
     steps = [window.model.nodes[n].step for n in window.model.node_order]
-    assert steps == ["load_single"]
+    assert steps == ["load_patch"]
+    only = window.model.node_order[0]
+    assert window.model.nodes[only].params["channel_map"] == "1:single"
 
 
 # --------------------------------------------------------------------------- #

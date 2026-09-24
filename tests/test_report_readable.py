@@ -109,7 +109,7 @@ def test_the_klarf_recipes_carry_the_coordinates():
         raw = _raw(name)
         carried = {c.strip().upper()
                    for n in raw["nodes"].values()
-                   if n["step"] in ("load_patch", "load_single")
+                   if n["step"] == "load_patch"
                    for c in str(n["params"].get("carry", "")).split(",")}
         assert {"XREL", "YREL"} <= carried, (name, carried)
 

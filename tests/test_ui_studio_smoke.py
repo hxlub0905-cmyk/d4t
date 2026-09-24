@@ -102,8 +102,8 @@ def test_window_constructs_with_library_cards(window):
     assert window.model.node_order == []
     assert window.pipeline.node_ids() == []
     assert window.selected_node is None
-    # 兩張載入卡都在卡片庫裡，讓他挑
-    assert window.library.entry("load_single") is not None
+    # 載入卡在卡片庫裡，讓他自己放（F121 期 2 起只有一張「Input」）
+    assert window.library.entry("load_patch") is not None
     assert window.model.dirty is False, "使用者什麼都還沒做，不該被問「要存檔嗎」"
     # 預覽沒有影像、直方圖沒有資料
     assert window.image_view.has_image() is False

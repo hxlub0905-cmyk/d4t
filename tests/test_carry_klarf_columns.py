@@ -174,7 +174,8 @@ def test_the_union_across_load_cards_is_what_gets_copied():
     就有兩個答案，而少複製一欄的症狀是「這一欄不見了」——而它其實在。
     """
     nodes = [RecipeNode("a", "load_patch", {"carry": "aa, bb"}),
-             RecipeNode("b", "load_single", {"carry": "bb,cc"}),
+             RecipeNode("b", "load_patch", {"channel_map": "1:single",
+                                            "carry": "bb,cc"}),
              RecipeNode("c", "glv_stats", {"carry": "zz"})]   # 不是 Load 卡
     assert columns_for_main(nodes) == ["AA", "BB", "CC"]
 

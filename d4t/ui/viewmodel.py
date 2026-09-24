@@ -26,6 +26,7 @@ from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       is_region_edge, region_edge_values,
                                       rules_to_tree)
 from d4t.core.steps._util import centre_name, others_name
+from d4t.core.steps.load import channel_map_for
 from d4t.core.steps.glv_stats import EACH_BOX, POOLED
 
 #: GLV 卡最上面那三顆「要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
@@ -207,17 +208,25 @@ class RecipeModel:
     #: 新 recipe 的起手卡。每一條 pipeline 都得先有影像才有得做，所以空白畫布
     #: 上第一件事一定是「加 Input」—— 那不是一個選擇，是一個儀式。
     #: 試用回饋（F7-9）原話：「一開始預設畫布上就應該有 load image 這個節點」。
+    #: F121 期 2 起**只有一張**（「Input」）—— F11 那時一顆一張的資料換成
+    #: `load_single`，那張卡併回來了；「畫布上冒出兩顆埠而資料只有一張」改由
+    #: :meth:`add_starter_input` 照資料填名字表來擋。
     STARTER_STEP = "load_patch"
 
-    #: **一顆一張影像**的資料型別 → 起手卡要換成 `load_single`（F11 Input-4）。
-    #: 一種 source 一張卡，所以「哪一張卡是起手卡」也跟著資料走 —— 給單張資料
-    #: 放一張 `load_patch`，畫布上會冒出兩顆埠而資料只有一張圖。
-    SINGLE_IMAGE_STARTERS = {"rsem": "load_single", "folder": "load_single"}
+    def add_starter_input(self, item: Any = None) -> str:
+        """開資料時補在**空白畫布**上的那張 Input 卡（F121 期 2），回它的 id。
 
-    @classmethod
-    def starter_step_for(cls, kind: str) -> str:
-        """這種資料的起手卡是哪一張。"""
-        return cls.SINGLE_IMAGE_STARTERS.get(str(kind or ""), cls.STARTER_STEP)
+        名字表照 ``item``（這批資料的第一顆）的影像填
+        （`steps/load.channel_map_for`）：一顆一張 → ``1:single``、EBI patch →
+        ``1:test, 2:ref``、N 張 → N 列。畫布上的埠因此一開始就等於資料真的有的
+        那幾張 —— F11 拆卡要解的「畫布跟實際對不起來」，合回一張之後由這裡守。
+        沒有 ``item`` 就留卡片的預設值。
+        """
+        nid = self.add_step(self.STARTER_STEP)
+        cmap = channel_map_for(item) if item is not None else ""
+        if cmap:
+            self.set_param(nid, "channel_map", cmap)
+        return nid
 
     @classmethod
     def starter(cls, kind: str = "ebi_patch") -> "RecipeModel":

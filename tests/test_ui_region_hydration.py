@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import first_source                        # noqa: E402
+from conftest import first_source, first_single_source, add_single_input  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -63,8 +63,8 @@ def window(qapp):
 
 
 def _gds(window, layers: str = "1:epi, 2:mg"):
-    """``load_single → roi_reference(GDS) → glv_stats``，線都接好了。"""
-    src = first_source(window, "load_single")
+    """``Input（1:single）→ roi_reference(GDS) → glv_stats``，線都接好了。"""
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -213,7 +213,7 @@ def test_an_old_style_box_with_no_line_is_left_alone(window):
     F7-9 的 `unknown-region` 當初要擋的那種「跑得完、有數字、而且是錯的」。
     """
     model = RecipeModel(kind="rsem")
-    img = model.add_step("load_single")
+    img = add_single_input(model)
     gds = model.add_step("roi_reference")
     glv = model.add_step("glv_stats")
     model.set_param(gds, "method", "layout layers")
@@ -234,7 +234,7 @@ def test_a_typo_keeps_its_name_so_the_lint_can_still_say_so(window):
     它，而 `glv_stats` 的空 ``roi`` 是完全合法的「量整張圖」。
     """
     model = RecipeModel(kind="rsem")
-    model.add_step("load_single")
+    add_single_input(model)
     glv = model.add_step("glv_stats")
     model.set_param(glv, "source", "single")
     model.set_param(glv, "roi", "nope")
@@ -390,7 +390,7 @@ def test_a_region_line_now_moves_the_layout(window):
     那是對的：它一直都是一條真的依賴，只是以前畫布看得到、引擎看不到。
     這裡把它釘成一條測試，免得下一個人以為那是 bug。
     """
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     glv = window.add_card_after(src, "glv_stats")
     gds = window.add_card_after(glv, "roi_reference")   # Region 卡在量測卡右邊
     window.model.set_param(gds, "method", "layout layers")

@@ -39,9 +39,9 @@ DUAL = REPO / "tests" / "fixtures" / "recipes" / "dual_route_basic.json"
 
 def _single_image_recipe(route_key: str, glv_edges=(("roi", "m1", "cells",
                                                      "roi"),)) -> Recipe:
-    """一顆一張的 pipeline（SEM image → ROI → GLV），**鍵名由呼叫端給**。"""
+    """一顆一張的 pipeline（Input 一列 → ROI → GLV），**鍵名由呼叫端給**。"""
     nodes = {
-        "load": RecipeNode("load", "load_single", {}),
+        "load": RecipeNode("load", "load_patch", {"channel_map": "1:single"}),
         "roi": RecipeNode("roi", "roi_reference",
                           {"source": "single",
                            "method": "stripes in the image",
@@ -111,7 +111,7 @@ def test_the_reported_case_runs_instead_of_failing_every_defect(folder):
 
 def test_a_mismatch_now_says_what_is_really_wrong(folder):
     """一條 patch 的 pipeline 開在單張影像上**還是跑不動** —— 但講的是真正的
-    原因（Patch 卡要兩張、這顆只有一張），不是一個使用者看不到的鍵名。
+    原因（Input 卡的名字表要兩張、這顆只有一張），不是一個使用者看不到的鍵名。
     期 3 會把這句話提前到開跑之前、掛在 Input 卡上。"""
     r = Recipe.load(str(REPO / "recipes" / "ebi-die-to-die.json"))
     assert list(r.routes) == ["ebi_patch"]

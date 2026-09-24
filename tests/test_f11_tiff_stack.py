@@ -191,8 +191,9 @@ def test_a_single_defect_failing_does_not_kill_the_batch(tmp_path):
     ds = dataset.load_tiff_stack(str(path), per_defect=1)
     rec = Recipe(
         recipe_id="deep", routes={"tiff_stack": ["load"]},
-        # 一顆一張 → 用 Load one image 那張卡（F11 Input-4）
-        nodes={"load": RecipeNode("load", "load_single", {})},
+        # 一顆一張 → 名字表一列（F11 那時是 `load_single`，F121 期 2 併回 Input）
+        nodes={"load": RecipeNode("load", "load_patch",
+                                  {"channel_map": "1:single"})},
         score=ScoreSpec(expr="1", threshold=1.0,
                         bins={"below": 0, "above": 1}))
     res = run_defect(rec, ds.items[0], "tiff_stack")

@@ -28,6 +28,28 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F121 期 2：一張 Input 卡（2026-09-24）
+
+使用者：「繼續做」（四項已同意：合卡、一顆 Open、名字少於張數就讀第一張並警告、
+舊 recipe 自動升級）。
+
+* `load_single`「SEM image」併回 `load_patch`，**label 改成「Input」**（key 沒動，
+  出貨 recipe 與黃金值裡的 `load_patch` 一個字都不變）。開資料時補在空白畫布上的
+  那一張，**名字表照資料填**（`steps/load.channel_map_for`、
+  `RecipeModel.add_starter_input`）：一顆一張 → `1:single`，畫布上一顆埠。
+* 遷移 `_migrate_single_into_input`：`load_single(out="x")` → `load_patch("1:x")`，
+  節點 id 與流名不變、線一條都不用動。**F11 拆卡那一道加了版本閘（只對第 1 版）**
+  —— 不加的話合卡之後每存一次，`1:single` 就被換成 `1:test`（鐵則 9）。
+* 升級提示講使用者看過的名字：「renamed “SEM image” → “Input”」，而且不再因為檔案
+  是目前版本就不講（`describe_migration`）。
+* 兩份出貨 recipe 改成新格式；卡片庫只剩一張載入卡（README／ARCHITECTURE 的卡數
+  20 → 19）。
+* 黃金值三份逐項相同；typecheck 128（上限 128）；規模尺：遷移 22 → 23、`recipe.py`
+  648 → 650、UI 按卡片名分支 23 → 20。
+* 留給期 3：資料開著時從卡片庫**手動**加的 Input 卡，名字表是預設的 test/ref。
+
+---
+
 ## F121 期 1：recipe 不再以資料型別當鑰匙（2026-09-24）
 
 使用者回報的那一句（`unknown input-type route 'folder'; this recipe only defines
