@@ -2946,7 +2946,7 @@ class StudioWindow(QMainWindow):
             try:
                 ds = DatasetLoadWorker.run_sync(path, tiff)
             except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load dataset: %s: %s" % (type(e).__name__, e), "error")
+                self._status("Could not load dataset: %s" % wording.failure("studio.load_dataset", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start(path, tiff):
@@ -2975,8 +2975,8 @@ class StudioWindow(QMainWindow):
             try:
                 ds = DatasetLoadWorker.run_sync_folder(d, doe)
             except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load folder: %s: %s"
-                             % (type(e).__name__, e), "error")
+                self._status("Could not load folder: %s"
+                             % wording.failure("studio.load_folder", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start_folder(d, doe):
@@ -3001,8 +3001,8 @@ class StudioWindow(QMainWindow):
             try:
                 ds = DatasetLoadWorker.run_sync_image_file(f)
             except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load image: %s: %s"
-                             % (type(e).__name__, e), "error")
+                self._status("Could not load image: %s"
+                             % wording.failure("studio.load_image", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start_image_file(f):
@@ -3248,7 +3248,7 @@ class StudioWindow(QMainWindow):
         try:
             recipe = Recipe.load(path)
         except Exception as e:  # UI 邊界
-            self._status("Could not load recipe: %s: %s" % (type(e).__name__, e), "error")
+            self._status("Could not load recipe: %s" % wording.failure("studio.load_recipe", e), "error")
             return False
         # 舊格式**升級了就要說**（U17）：畫布上多出來的線與拆開的卡是遷移補的，
         # 而使用者只會看到「這跟我上次存的不一樣」。讀原始 JSON 再比一次是為了
@@ -3355,7 +3355,7 @@ class StudioWindow(QMainWindow):
         try:
             self.model.to_recipe().save(path)
         except Exception as e:  # UI 邊界
-            self._status("Could not save: %s: %s" % (type(e).__name__, e),
+            self._status("Could not save: %s" % wording.failure("studio.save", e),
                          "error")
             return False
         self.recipe_path = path
@@ -3453,7 +3453,7 @@ class StudioWindow(QMainWindow):
                                                 upto_node=upto,
                                                 sources=self.sources_for_run())
             except Exception as e:  # UI 邊界
-                self._status("Preview failed: %s: %s" % (type(e).__name__, e), "error")
+                self._status("Preview failed: %s" % wording.failure("studio.preview", e), "error")
                 return False
             self._on_preview_ready(result)
             return True

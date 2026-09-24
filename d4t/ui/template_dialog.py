@@ -91,6 +91,7 @@ from d4t.core.pipeline.cellrois import (
 )
 
 from . import fit_screen
+from . import wording
 from .crop_dialog import CropDialog, crop_array, describe_crop
 from .lattice_dialog import LatticeDialog
 from .splitters import HairlineSplitter
@@ -1250,7 +1251,7 @@ class TemplateDialog(QDialog):
         try:
             img = load_gray(path)
         except Exception as e:  # UI 邊界
-            self._fail("%s: %s" % (type(e).__name__, e))
+            self._fail(wording.failure("template.load_image", e))
             return
         self.load_image(img, path)
 

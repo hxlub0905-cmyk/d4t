@@ -32,6 +32,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QFileDialog
 
 from .workers import DatasetLoadWorker
+from . import wording
 
 if TYPE_CHECKING:                      # 只給型別看：這一支不 import studio
     from .studio import StudioWindow
@@ -105,7 +106,7 @@ class AttachSources(QObject):
             try:
                 ds = DatasetLoadWorker.run_sync(str(klarf_path), None)
             except Exception as e:  # UI 邊界，一律回報
-                return self._on_pair_source_failed("%s: %s" % (type(e).__name__, e))
+                return self._on_pair_source_failed(wording.failure("attach.pair_source", e))
             self._pending_pair = (str(node_id), str(klarf_path))
             return self._on_pair_source_loaded(ds)
 

@@ -214,7 +214,7 @@ class RunController(QObject):
                     workers=int(workers) if workers else 1, cache_dir=cdir,
                     sample=spec)
             except Exception as e:  # UI 邊界
-                self.w._status("Trial run failed: %s: %s" % (type(e).__name__, e), "error")
+                self.w._status("Trial run failed: %s" % wording.failure("run.trial", e), "error")
                 return False
             self.w._apply_trial_results(results, time.time() - t0)
             return True
@@ -317,7 +317,7 @@ class RunController(QObject):
         try:
             n = rerun_decision(recipe, rows)
         except Exception as e:  # UI 邊界
-            self.w._status("Re-run failed: %s: %s" % (type(e).__name__, e), "error")
+            self.w._status("Re-run failed: %s" % wording.failure("run.rerun", e), "error")
             return False
         elapsed = time.time() - t0
         self.w._apply_trial_results(rows, elapsed)
@@ -341,7 +341,7 @@ class RunController(QObject):
             try:
                 bctx = OutputWorker.run_sync(recipe, self.w.dataset, list(results))
             except Exception as e:  # UI 邊界
-                self._on_outputs_failed("%s: %s" % (type(e).__name__, e))
+                self._on_outputs_failed(wording.failure("run.write_outputs", e))
                 return False
             self._on_outputs_done(bctx)
             return True

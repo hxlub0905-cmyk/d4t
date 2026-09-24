@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog
 
+from . import wording
+
 if TYPE_CHECKING:                  # 只給型別看：這一支不 import studio
     from .studio import StudioWindow
 
@@ -235,8 +237,8 @@ def _load_raw(window: Any, folder: str, spec: Any) -> bool:
     try:
         ds = load_raw_folder(d, spec or RawSpec(width=1, height=1))
     except Exception as e:                  # UI 邊界，一律回報
-        window._status("Could not read the raw images: %s: %s"
-                       % (type(e).__name__, e), "error")
+        window._status("Could not read the raw images: %s"
+                       % wording.failure("open.raw", e), "error")
         return False
     return bool(window._on_dataset_loaded(ds))
 
