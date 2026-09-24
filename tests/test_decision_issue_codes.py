@@ -23,7 +23,8 @@ from d4t.core.pipeline.recipe import (  # noqa: E402
     DECISION_ISSUE_CODES, NON_DECISION_NODELESS_CODES,
 )
 
-_SRC = (REPO / "d4t" / "core" / "pipeline" / "recipe.py").read_text(
+# 2026-09-24 起 lint 住在 `recipe_validate.py`（`recipe.py` 拆成四支）。
+_SRC = (REPO / "d4t" / "core" / "pipeline" / "recipe_validate.py").read_text(
     encoding="utf-8")
 
 
