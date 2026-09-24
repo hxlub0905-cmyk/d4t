@@ -163,7 +163,9 @@ def test_nothing_it_returns_looks_like_an_internal_id():
 # --------------------------------------------------------------------------- #
 #: 48 條 lint 的產地。**一條一條搬**（F118 §4 第 3／5 步），所以這一節守的是
 #: 「搬到一半」那段日子：沒搬到的那些**必須原樣**，而不是安靜地變成空字串。
-RECIPE_PY = Path(__file__).resolve().parent.parent / "d4t/core/pipeline/recipe.py"
+#: 2026-09-24 起 lint 住在 `recipe_validate.py`（`recipe.py` 拆成四支）。
+RECIPE_PY = (Path(__file__).resolve().parent.parent
+             / "d4t/core/pipeline/recipe_validate.py")
 
 
 def _issue_calls():

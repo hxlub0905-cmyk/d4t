@@ -215,7 +215,7 @@ Path 行都建在它上面。
 
 其餘一律 modal（`WelcomeDialog`、`TemplateDialog`、`ChartSettingsDialog`、
 `GraphBuilderDialog`、`CurveDialog`、`StatusHistoryDialog`、
-`RecipeLibraryDialog`、`CropDialog`）—— 它們都是「進去做完一件事再出來」，而在那段時間裡
+`RecipeLibraryDialog`、`CropDialog`、`RawLayoutDialog`）—— 它們都是「進去做完一件事再出來」，而在那段時間裡
 主視窗沒有東西可看。
 
 ⚠ **`UniformityWindow` 不在上面兩張表裡**，因為它不是頂層視窗 —— 它是
@@ -298,7 +298,10 @@ d4t/
 │   ├── pipeline/             # 引擎
 │   │   ├── context.py        #   Context（images／features／regions／meta）—— 步驟間的唯一介面
 │   │   ├── step.py           #   Step 介面 ＋ ParamSpec ＋ registry ＋ `GROUP_ORDER`（七段的唯一出處）
-│   │   ├── recipe.py         #   Recipe(DAG) ＋ lint 式 validate ＋ 版本遷移
+│   │   ├── recipe.py         #   Recipe(DAG) ＋ 執行順序；對外唯一入口（其餘三支從這裡轉出口）
+│   │   ├── recipe_schema.py  #   節點／線／判定樹／分流的資料模型與 JSON 形狀（2026-09-24 拆出）
+│   │   ├── recipe_migrations.py # 每一道版本遷移（呼叫順序在 `Recipe.from_json_dict`）
+│   │   ├── recipe_validate.py #  lint 式 validate
 │   │   ├── expression.py     #   score 表達式引擎（自寫 parser，**不用 eval**）
 │   │   ├── decide_tree.py    #   判定樹怎麼走 —— 引擎與 UI 共用同一支
 │   │   ├── verdict_features.py verdict_trace.py  #   判定問了哪幾個數字／重放一顆的判定（F45）
@@ -387,6 +390,10 @@ d4t/
     ├── gallery_controller.py #   Gallery／Results 視窗／回溯的 controller，加上**縮圖那一條鏈**
     │                         #     （哪個 channel → 讀圖 → `ThumbWorker` 背景解碼）（F116 第 3 步）
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
+    ├── inspector_base.py     #   儀表的共用底座：`Inspector` 基底、數字格式、共用 header（2026-09-24 拆出）
+    ├── inspector_glv.py      #   Gray level 卡的儀表（同上）
+    ├── inspector_cd.py       #   CD 卡的儀表（同上）
+    ├── inspector_enhance.py  #   Tone／Normalize／Denoise／Flatten 共用的儀表（同上）
     ├── studio_layout.py      #   `StudioWindow` 的**介面組裝**：工具列、主體、預覽區、
     │                         #     進度列、快捷鍵（F116 第 2 步；模組層函式吃 `win`，
     │                         #     照舊在 `win` 上設同樣那些名字）
@@ -448,6 +455,8 @@ d4t/
     │                         #     ⚠ 卡片名與階段名**不翻**（recipe JSON 的鄰居）
     ├── status_log.py         #   狀態列說過的話（F91 U2 後半）—— 下一句就把上一句
     │                         #     蓋掉，而那一句常常是唯一講出「沒成功」的地方
+    ├── failure_dialog.py     #   Run all／寫出失敗時的對話框：發生什麼、可以怎麼做、log 在哪（2026-09-24）
+    ├── language.py           #   工具列的語言鈕（English ⇄ 中文）：存 QSettings、問要不要重開（2026-09-24）
     ├── baseline.py           #   跟上一次比差多少（F91 X1）：把一次跑壓成一小塊、
     │                         #     兩塊相減成一行字、釘住的那一塊存進 QSettings
     ├── truth_marks.py        #   在結果表上標真缺陷／誤報（F91 X2）→ 寫回
@@ -485,6 +494,7 @@ d4t/
     ├── clipboard.py          #   Ctrl+C／V／D 的內容（F99 P1-8）：設定帶走、接線不帶
     ├── open_dialogs.py       #   三顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110／F114-2），
     │                         #     加上 recipe 的開／存（F116 第 4 步 —— 同一個「只問路徑」的契約）
+    ├── raw_dialog.py         #   `.raw` 的寬／高／檔頭／位元深度一張表單填完，即時比對檔案大小＋縮圖預覽（2026-09-24）
     ├── canvas_edges.py       #   **畫布上拉一條線／剪一條線，在 model 上是什麼意思**
     │                         #     （鐵則 10 的主場：一個輸入埠一條線、區域線住在 edges、
     │                         #     拉一條線＝一步復原）（F116 第 6 步）
@@ -493,8 +503,6 @@ d4t/
     ├── attach_sources.py     #   **把第二份東西掛到已載入的這一份上**：配對卡的第二份 lot（F15）
     │                         #     與 GLAS 匯出的 layer 標註（F11 Region-3）（F116 第 4 步）
     │                         #   —— 加一個入口只要改 `scope.INPUT_SOURCES` 與這裡的 `OPENABLE`
-    ├── windows_menu.py       #   Help 鈕的小箭頭列出開著的頂層視窗（F99 P2-6）——
-    │                         #     工具列在 1366 上裝不下第十三顆鈕
     └── assets/               #   `d4t.svg` 與兩份字標（pyproject 的 package-data 帶著它們走）
 ```
 

@@ -39,6 +39,7 @@ from d4t.core.pipeline import get_step
 
 __all__ = ["card", "card_of_step", "field", "name_list",
            "step_error_text", "trace_error_text", "issue_line",
+           "exception_text", "failure",
            "headline", "HEADLINE_MAX"]
 
 #: 一行摘要最長幾個字（F117 G3 定的，H3 起兩個地方共用）。
@@ -246,3 +247,72 @@ def step_error_text(err: Any, model: Any = None,
     if not who:
         who = card_of_step(getattr(err, "step_key", ""))
     return ("“%s”: %s" % (who, detail)) if who else detail
+
+
+# --------------------------------------------------------------------------- #
+# 例外 → 一句話（2026-09-24，評價清單 #4）
+# --------------------------------------------------------------------------- #
+def _where(e: Any) -> str:
+    """例外帶著的檔名（``OSError.filename``）—— 只留檔名，不留整條路徑。"""
+    import os
+
+    name = getattr(e, "filename", None)
+    return os.path.basename(str(name)) if name else ""
+
+
+def exception_text(e: Any) -> str:
+    """**一個例外 → 一句使用者看得懂的話**，不帶 Python 的型別名。
+
+    在這一支之前，UI 的每一個失敗出口都寫 ``"%s: %s" % (type(e).__name__, e)``，
+    於是狀態列上出現「KeyError: 'x'」「PermissionError: [Errno 13] …」——
+    那是給開發者看的字（推廣鐵則）。這裡照**使用者能做什麼**分類：
+
+    * 檔案不在／沒權限／是資料夾不是檔案 —— 講是哪一個檔、他可以怎麼辦；
+    * 記憶體不夠 —— 叫他少跑幾顆；
+    * `StepError` —— 已經有結構，交給 :func:`step_error_text`；
+    * core 自己丟的 `ValueError`／`RecipeError`／`ParamError` 本來就寫成人話，原樣；
+    * 其他 —— 用例外自己的訊息，空的話說「詳細在 log 裡」。
+
+    ⚠ 原始的例外與 traceback **不丟**：呼叫端走 :func:`failure`，它會記進
+    `d4t.log`（`crashlog.log_dir()`），查問題的人找得到。
+    """
+    if e is None:
+        return ""
+    where = _where(e)
+    if isinstance(e, FileNotFoundError):
+        return ("a file it needs is not there%s - it may have been moved, "
+                "renamed or deleted." % (" (%s)" % where if where else ""))
+    if isinstance(e, PermissionError):
+        return ("no permission to use %s - it may be open in another program "
+                "(Excel?), or the folder is read-only."
+                % (where or "that file"))
+    if isinstance(e, IsADirectoryError):
+        return "%s is a folder, but a file was expected." % (where or "that path")
+    if isinstance(e, NotADirectoryError):
+        return "%s is a file, but a folder was expected." % (where or "that path")
+    if isinstance(e, MemoryError):
+        return ("ran out of memory - try fewer defects at a time, or close "
+                "other programs.")
+    if getattr(e, "detail", None):         # StepError：已經有結構
+        return step_error_text(e)
+    if isinstance(e, KeyError):
+        key = e.args[0] if e.args else ""
+        return ("something the recipe or the data expects is missing (%r). "
+                "Details are in the log." % (key,))
+    if isinstance(e, OSError):
+        why = getattr(e, "strerror", None) or str(e)
+        return "could not read or write %s: %s." % (where or "a file", why)
+    text = str(e).strip()
+    return text or "something unexpected went wrong - details are in the log."
+
+
+def failure(where: str, e: Any) -> str:
+    """在 ``except`` 裡呼叫：**把例外連 traceback 記進 log，回一句給畫面的話**。
+
+    ``where`` 同 :func:`d4t.core.log.swallowed` —— 「哪一支的哪個動作」，
+    事後查 log 的人從這個字串找過來。
+    """
+    from d4t.core.log import get
+
+    get("ui").warning("failed in %s", where, exc_info=True)
+    return exception_text(e)

@@ -56,7 +56,7 @@ from PySide6.QtWidgets import QMessageBox
 from d4t.core.log import swallowed
 from d4t.core.pipeline import sampling
 
-from . import wording
+from . import failure_dialog, wording
 from .status_action import open_folder
 from .workers import OutputWorker, TrialWorker
 
@@ -78,6 +78,24 @@ DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".d4t", "cache")
 #: ``if __name__ == "__main__"`` 保護），非主執行緒自動改用 spawn。
 #: 迴歸測試見 ``tests/test_batch_thread_safety.py``。
 TRIAL_WORKERS = None
+
+#: Run all 失敗時對話框上的建議（`failure_dialog`）。
+_RUN_ALL_TIPS = (
+    "Run a trial on a few defects first - if that fails too, the problem is in "
+    "the recipe, and the red marks on the canvas say where.",
+    "If it says a file is missing or cannot be read, check that the lot folder "
+    "is still where it was when you opened it.",
+    "If it ran out of memory, run fewer defects at a time.",
+)
+
+#: 寫出失敗時的建議。
+_WRITE_TIPS = (
+    "Close the report or KLARF if it is open in another program (Excel locks "
+    "the files it has open), then press Write outputs again.",
+    "Check that the “Write to” folder on the output card exists and that you "
+    "may write there.",
+    "Nothing you ran is lost - the results are still in the Results window.",
+)
 
 
 #: 要跑過幾顆、花過幾秒，才開始講「還要多久」（F117 K3）。
@@ -120,6 +138,8 @@ class RunController(QObject):
         self._trial_t0 = 0.0
         #: `write_outputs(sync=True)` 要一路同步跑完（測試那條路）。
         self._write_outputs_sync = False
+        #: 這一次跑的是不是 Run all（失敗時要不要升級成對話框，見 `failure_dialog`）。
+        self._running_all = False
 
     def run_trial(self, n: int, workers: Optional[int] = 1,
                   sync: bool = False, cache_dir: Optional[Any] = None,
@@ -131,6 +151,9 @@ class RunController(QObject):
         只有整批才寫」，而新加一條跑 pipeline 的路時它預設不寫。
         只有 :meth:`run_all` 傳 True。
         """
+        # Run all 的旗標只活到「真的開跑」那一刻：下面任何一條提早 return 都讓
+        # 它歸零，免得下一次普通試跑失敗時跳出 Run all 的對話框。
+        is_all, self._running_all = self._running_all, False
         items = list(getattr(self.w.dataset, "items", []) or []) if self.w.dataset else []
         if not items:
             self.w._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
@@ -206,6 +229,7 @@ class RunController(QObject):
             column=str(spec.get("column", "CLASSNUMBER") or "CLASSNUMBER"))
         self.w.sample_note = dict(note)
 
+        self._running_all = is_all
         if sync:
             t0 = time.time()
             try:
@@ -214,8 +238,9 @@ class RunController(QObject):
                     workers=int(workers) if workers else 1, cache_dir=cdir,
                     sample=spec)
             except Exception as e:  # UI 邊界
-                self.w._status("Trial run failed: %s: %s" % (type(e).__name__, e), "error")
+                self._on_trial_failed(wording.failure("run.trial", e))
                 return False
+            self._running_all = False
             self.w._apply_trial_results(results, time.time() - t0)
             return True
 
@@ -223,6 +248,7 @@ class RunController(QObject):
         if not self.w.trial_worker.start(recipe, self.w.dataset, limit,
                                        workers=workers, cache_dir=cdir,
                                        sample=spec):
+            self._running_all = False
             self.w._status("A run is already in progress — please wait.")
             return False
         self.w._progress_set(0, limit, "%v / %m defects")
@@ -251,6 +277,7 @@ class RunController(QObject):
         if not items:
             self.w._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
             return False
+        self._running_all = True
         return self.run_trial(len(items), workers=TRIAL_WORKERS,
                               cache_dir=DEFAULT_CACHE_DIR, sync=sync)
 
@@ -317,7 +344,7 @@ class RunController(QObject):
         try:
             n = rerun_decision(recipe, rows)
         except Exception as e:  # UI 邊界
-            self.w._status("Re-run failed: %s: %s" % (type(e).__name__, e), "error")
+            self.w._status("Re-run failed: %s" % wording.failure("run.rerun", e), "error")
             return False
         elapsed = time.time() - t0
         self.w._apply_trial_results(rows, elapsed)
@@ -341,7 +368,7 @@ class RunController(QObject):
             try:
                 bctx = OutputWorker.run_sync(recipe, self.w.dataset, list(results))
             except Exception as e:  # UI 邊界
-                self._on_outputs_failed("%s: %s" % (type(e).__name__, e))
+                self._on_outputs_failed(wording.failure("run.write_outputs", e))
                 return False
             self._on_outputs_done(bctx)
             return True
@@ -378,6 +405,10 @@ class RunController(QObject):
             first = sorted(errors.items())[0]
             more = ("  (and %d more)" % (len(errors) - 1)) if len(errors) > 1 else ""
             bits.append("Output card “%s” failed: %s%s" % (first[0], first[1], more))
+            failure_dialog.tell(
+                self.w, "Some outputs were not written",
+                "\n".join("“%s”: %s" % kv for kv in sorted(errors.items())),
+                _WRITE_TIPS)
         msg = "  ·  ".join(bits)
         level = "error" if errors else None
         if where:
@@ -401,6 +432,18 @@ class RunController(QObject):
 
     def _on_outputs_failed(self, msg: str) -> None:
         self.w._status("Writing outputs failed: %s" % msg, "error")
+        failure_dialog.tell(self.w, "The outputs were not written", msg,
+                            _WRITE_TIPS)
+
+    def _on_trial_failed(self, msg: str) -> None:
+        """試跑／Run all 整批失敗。Run all 另外跳對話框（評價清單 #5）。"""
+        self.w._progress_done()
+        was_all, self._running_all = self._running_all, False
+        what = "Run all failed" if was_all else "Trial run failed"
+        self.w._status("%s: %s" % (what, msg), "error")
+        if was_all:
+            failure_dialog.tell(self.w, "Run all did not finish", msg,
+                                _RUN_ALL_TIPS)
 
     def _confirm_irreversible_writes(self) -> bool:
         """有**啟用**的 KLARF `inplace` 卡就先問一次（F16 Stage 5c）。
@@ -467,6 +510,7 @@ class RunController(QObject):
                           "  ·  %s" % left if left else ""))
 
     def _on_trial_done_async(self, results: Any) -> None:
+        self._running_all = False
         self.w._apply_trial_results(list(results or []),
                                   time.time() - (self._trial_t0 or time.time()))
 

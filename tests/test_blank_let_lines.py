@@ -139,7 +139,7 @@ def test_every_place_that_walks_the_lets_uses_the_same_rule():
                 if isinstance(n, ast.Attribute) and n.attr == "is_blank"]
         assert uses, "%s 沒有用 Let.is_blank —— 它自己判斷了什麼叫空白" % path
 
-    src = (REPO / "d4t" / "core" / "pipeline" / "recipe.py").read_text(
+    src = (REPO / "d4t" / "core" / "pipeline" / "recipe_validate.py").read_text(
         encoding="utf-8")
     tree = ast.parse(src)
     uses = [n for n in ast.walk(tree)

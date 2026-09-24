@@ -115,25 +115,3 @@ def test_the_verdict_note_only_speaks_when_the_preview_stopped_early(qapp):
     assert verdict_note(None, None, True) == "", "沒選卡：預覽本來就跑完"
     assert verdict_note("glv", 2, True) == "", "真的有判定：膠囊自己在講"
     assert verdict_note("glv", None, False) == "", "跑出錯：狀態列在講"
-
-
-def test_the_help_button_lists_open_windows(qapp):
-    """P2-6：十一個頂層視窗、零個視窗管理。工具列裝不下第十三顆鈕（1366 上只剩
-    76 px），所以掛在 Help 的小箭頭上。"""
-    from PySide6.QtWidgets import QToolButton, QWidget
-
-    from d4t.ui import windows_menu
-    a, b = QWidget(), QWidget()
-    a.show()
-    rows = windows_menu.rows(lambda: [("A", a), ("B", b), ("C", None)])
-    assert [(t, alive) for t, _w, alive in rows] == [("A", True), ("B", False),
-                                                     ("C", False)]
-    btn = QToolButton()
-    btn.setToolTip("Help")
-    windows_menu.attach(btn, lambda: [("A", a)])
-    assert btn.menu() is not None
-    assert btn.popupMode() == QToolButton.MenuButtonPopup, "鈕本身照舊，只多一個箭頭"
-    btn.menu().aboutToShow.emit()
-    texts = [act.text() for act in btn.menu().actions()]
-    assert "A" in texts
-    a.close()

@@ -168,12 +168,11 @@ def test_a_toolbar_button_really_comes_out_translated(tmp_path, monkeypatch,
     """結構對還不夠 —— 真的開一個視窗，讀那顆鈕上的字。"""
     monkeypatch.setattr(strings, "LOCALE_DIR", tmp_path)
     (tmp_path / "zz.json").write_text(
-        json.dumps({"Results": "結果", "Help": "說明"}), encoding="utf-8")
+        json.dumps({"Results": "結果"}), encoding="utf-8")
     strings.install("zz")
     from d4t.ui.studio import StudioWindow
     win = StudioWindow()
     try:
-        assert win.btn_help.text() == "說明"
         assert win.btn_results.text() == "結果"
     finally:
         win.close()

@@ -43,6 +43,8 @@ from d4t.core.pipeline import (
 )
 from d4t.core.pipeline.engine import DefectResult
 
+from . import wording
+
 __all__ = ["DatasetLoadWorker", "PreviewWorker", "TrialWorker",
            "RegionCheckWorker", "OutputWorker"]
 
@@ -218,7 +220,7 @@ def owned_workers(win: Any) -> List["_ThreadedWorker"]:
 def window_children(win: Any) -> List[Any]:
     """關窗要一起關掉的子視窗。
 
-    ``_open_windows()`` 是「Windows 下拉列上那幾個」的**唯一**一份名單
+    ``_open_windows()`` 是頂層子視窗的**唯一**一份名單
     （U15），所以這裡讀它而不是再抄一份 —— 抄第二份出來的那份一定會漂。
     """
     out = [getattr(win, "welcome_dialog", None),
@@ -254,7 +256,7 @@ class DatasetLoadWorker(_ThreadedWorker):
             try:
                 ds = load_dataset(path_s, tiff_s)
             except Exception as e:  # 一律回報
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.DatasetLoadWorker", e))
             else:
                 self.loaded.emit(ds)
 
@@ -279,7 +281,7 @@ class DatasetLoadWorker(_ThreadedWorker):
             try:
                 ds = load_doe_folder(d) if doe else load_folder(d)
             except Exception as e:  # 一律回報
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.DatasetLoadWorker", e))
             else:
                 self.loaded.emit(ds)
 
@@ -302,7 +304,7 @@ class DatasetLoadWorker(_ThreadedWorker):
             try:
                 ds = load_image_file(f)
             except Exception as e:  # 一律回報
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.DatasetLoadWorker", e))
             else:
                 self.loaded.emit(ds)
 
@@ -393,7 +395,7 @@ class PreviewWorker(_ThreadedWorker):
                                upto_node=upto, track_changes=True,
                                sources=sources)
             except Exception as e:  # 合約外的意外
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.PreviewWorker", e))
             else:
                 self.ready.emit(r)
 
@@ -461,7 +463,7 @@ class TrialWorker(_ThreadedWorker):
                                 abort_check=self._abort.is_set,
                                 sample=spec)
             except Exception as e:  # 整批爆掉才會走到這
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.TrialWorker", e))
             else:
                 self.done.emit(out)
 
@@ -528,7 +530,7 @@ class RegionCheckWorker(_ThreadedWorker):
             try:
                 out = check_regions(*args)
             except Exception as e:  # 合約外的意外
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.RegionCheckWorker", e))
             else:
                 self.ready.emit(out)
 
@@ -578,7 +580,7 @@ class CalibrateWorker(_ThreadedWorker):
             try:
                 out = CalibrateWorker.run_sync(*args)
             except Exception as e:  # 合約外的意外
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.CalibrateWorker", e))
             else:
                 self.ready.emit(out)
 
@@ -651,7 +653,7 @@ class OutputWorker(_ThreadedWorker):
                 bctx = run_batch_steps(recipe, dataset, payload)
             except Exception as e:  # 整個機制爆掉才會走到這
                 # 單張卡失敗是 `bctx.errors`（鐵則 7 的跨顆版），不會走到這裡。
-                self.failed.emit(f"{type(e).__name__}: {e}")
+                self.failed.emit(wording.failure("workers.OutputWorker", e))
             else:
                 self.done.emit(bctx)
 

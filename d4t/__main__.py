@@ -290,6 +290,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for r in ok:
             bins[r.get("bin")] = bins.get(r.get("bin"), 0) + 1
         print("bin 分佈：" + " · ".join(f"bin {b}={c}" for b, c in sorted(bins.items())))
+        # 評價清單 #1：「有題目答不出來」要講出來，不然它安靜地變成一個有把握的 bin。
+        n_q = sum(1 for r in ok
+                  if float((r.get("features") or {}).get("decide_unanswered") or 0) > 0)
+        if n_q:
+            ub = getattr(getattr(recipe, "decide", None), "unanswered_bin", None)
+            print(f"  ⚠ {n_q} 顆有題目答不出來（某張卡在那幾顆上沒量到）—— "
+                  + (f"照 recipe 的設定送進 bin {ub}" if ub is not None else
+                     "被當成「否」繼續判。要另外分出來：判定區勾 "
+                     "“When a question can't be answered”"))
     # ---- 分流摘要（F23 §4.1）----
     # 「掉進 default 的顆數」一定要看得見：站點換了編碼、整批掉進 default，
     # 是「跑得完、有數字、而且是錯的」的形狀。route 的決定是純函式
@@ -347,6 +356,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 print("    bin %-4s %3d 顆　真缺陷 %3d　假點 %3d　純度 %s"
                       % (row["bin"], row["n"], row["n_real"],
                          row["n_nuisance"], pct))
+
+        # 判到的 bin × 真正的類別（評價清單 #2）—— ground truth 標了類別才有。
+        table = summary.get("bin_by_class")
+        if table and len(table["classes"]) > 1:
+            print("  每一個 bin 裡是哪幾類（ground truth 的 type）：")
+            for row in table["rows"]:
+                parts = ["%s %d" % (c, row["by_class"][c])
+                         for c in table["classes"] if row["by_class"].get(c)]
+                if row["unlabelled"]:
+                    parts.append("沒標 %d" % row["unlabelled"])
+                print("    bin %-4s %3d 顆　%s" % (row["bin"], row["n"],
+                                               "　".join(parts)))
 
     for r in fail[:5]:
         print(f"  ✗ {r.get('defect_id')}: {r.get('error')}")

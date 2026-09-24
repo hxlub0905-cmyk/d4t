@@ -120,6 +120,10 @@ class ResultsWindow(QMainWindow):
         bar.addWidget(self.summary_label)
 
         spacer = QWidget(bar)
+        # ⚠ **要叫 `toolbarSpacer`**（F117 E6）：主題只把那個名字的撐開空白畫成
+        # 透明（`theme.py`），沒名字的會被畫成一條很寬的灰框 —— 走查看到的
+        # 「頂端那條灰色空條」就是它。主視窗那一條一直有名字，所以只有這裡中。
+        spacer.setObjectName("toolbarSpacer")
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
 
@@ -621,12 +625,23 @@ def extra_only(message: str) -> str:
 
 
 def summarize_run(n_total: int, n_ok: int, elapsed: float,
-                  scores: Sequence[Any] = ()) -> str:
-    """Results 工具列那一行文字（Studio 與測試共用，避免兩邊寫法漂移）。"""
+                  scores: Sequence[Any] = (), rows: Sequence[Any] = ()) -> str:
+    """Results 工具列那一行文字（Studio 與測試共用，避免兩邊寫法漂移）。
+
+    ``rows`` 給了的話，**有題目答不出來的顆數**常駐在這一行（評價清單 #1）：
+    它們照樣有 bin，而那個 bin 可能是「答不出來＝否」一路走下去的結果 ——
+    只寫在 CSV 的 `decide_unanswered` 欄的話，沒有人會去翻。
+    """
     n_fail = int(n_total) - int(n_ok)
     text = "%d defects · %d ok · %d failed · %.1f s" % (
         int(n_total), int(n_ok), n_fail, float(elapsed))
     vals = [float(s) for s in (scores or ()) if s is not None]
     if vals:
         text += "   score %.4g – %.4g" % (min(vals), max(vals))
+    n_q = sum(1 for r in (rows or ())
+              if isinstance(r, dict)
+              and float((r.get("features") or {}).get("decide_unanswered") or 0) > 0)
+    if n_q:
+        text += ("   ⚠ %d had a question that could not be answered (a number "
+                 "was not measured) - see decide_unanswered" % n_q)
     return text

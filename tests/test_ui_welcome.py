@@ -362,11 +362,11 @@ def test_constructing_studio_never_pops_the_welcome(window):
         other.close()
 
 
-def test_toolbar_has_help_and_examples_entries(window):
-    assert window.btn_help.text() == "Help"
+def test_toolbar_has_examples_entry_and_no_help_button(window):
+    """Help 鈕 2026-09-24 使用者要求拿掉（連同「開著哪些視窗」的小箭頭）。"""
     assert window.btn_examples.text() == "Templates…"
-    for b in (window.btn_help, window.btn_examples):
-        assert b.toolTip().strip()
+    assert window.btn_examples.toolTip().strip()
+    assert not hasattr(window, "btn_help")
 
 
 # --------------------------------------------------------------------------- #

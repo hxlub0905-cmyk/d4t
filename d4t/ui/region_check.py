@@ -43,6 +43,7 @@ from d4t.core.pipeline import get_step
 from d4t.core.pipeline.engine import run_defect
 
 from . import fit_screen
+from . import wording
 from .gallery import make_thumb, thumb_placement
 from . import theme
 from .theme import TOKENS, region_hex
@@ -121,7 +122,7 @@ def check_regions(recipe: Any, items: Sequence[Any], kind: str, node_id: str,
             res = run_defect(recipe, item, kind, keep_context=True,
                              upto_node=node_id, sources=dict(sources or {}))
         except Exception as e:  # 合約外的意外
-            entry["error"] = "%s: %s" % (type(e).__name__, e)
+            entry["error"] = wording.failure("region_check.run", e)
             out.append(entry)
             continue
 

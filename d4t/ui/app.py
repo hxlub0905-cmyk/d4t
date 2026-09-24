@@ -14,7 +14,7 @@ from typing import List, Optional, Sequence
 
 from PySide6.QtWidgets import QApplication
 
-from . import crashlog, fit_screen, scope, theme
+from . import crashlog, fit_screen, language, scope, theme
 from .branding import app_icon
 from .studio import StudioWindow
 from .welcome import saved_theme
@@ -52,6 +52,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # 各種對話框）都會跟著繼承，之後開新視窗不必記得補一行。
     app.setWindowIcon(app_icon())
     theme.apply_theme(app, saved_theme(theme.DEFAULT_THEME))
+    # 介面語言（評價清單 #6）：**在建任何視窗之前** —— `tr()` 是建構時讀的。
+    language.apply_saved()
 
     win = StudioWindow()
     # **要多大取小的那一個**（U1）：1440×900 是開發機的尺寸，而目標機器是

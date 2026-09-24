@@ -205,7 +205,8 @@ def test_the_short_one_never_prints_a_small_number_as_zero(qapp):
 #: 而那正是這條規則明文禁止的事（「表格與面板一律走 `format_feature_value`」）。
 #: 一個 6,700 行的檔案通過一次審查，不代表它以後每一行都通過。
 _SHORT_OK = {
-    "inspectors.py": {"_short_number"},          # 影像上那些標記的別名
+    "inspector_base.py": {"_short_number"},      # 影像上那些標記的別名
+                                                 # （2026-09-24 從 inspectors.py 搬來）
     "image_view.py": {"_paint_heat_bar"},        # 熱圖色條 —— 畫在影像上
                                                  # （U7 從 widgets.py 搬來）
 }

@@ -28,6 +28,96 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## 專案評價之後的「嚴重～高」那一批（2026-09-24）
+
+使用者：「7 先不要做，按順序做 4 5 6 2 1，6 要有一個切換的按鈕」。#3 量過之後撤回
+（出貨的兩份 recipe 早就有 80% 下限的測試，實測 92.5%／93.3%；掉到 12/24 的是
+測試用的舊 fixture，不是出貨的東西 —— 評價時寫錯了）。
+
+* **#4 例外型別名不上畫面**：`wording.exception_text(e)`／`wording.failure(where, e)`
+  —— 檔案不在／沒權限（「是不是被 Excel 開著」）／是資料夾／記憶體不夠／StepError／
+  KeyError 各一句人話，原始 traceback 進 `d4t.log`。UI 十幾個出口全換；反向守門
+  `tests/test_wording_exceptions.py`（crashlog 以外不准再拼 `type(e).__name__`）。
+* **#5 對話框**：`ui/failure_dialog.py`（`SHOW` 旗標）。只有 Run all 與寫出失敗升級
+  成對話框（使用者按下去通常走開了）；`_running_all` 只活到真的開跑。studio 那段
+  lambda 收進 `run_ctl._on_trial_failed`（studio.py −2 行）。
+* **#6 語言鈕**：`ui/language.py`，工具列主題鈕旁、寫「按下去會切到的那一種」的自稱。
+  存 QSettings，`app.py` 建視窗前 `apply_saved()`；切換＝存＋問要不要重開（先照常
+  問存檔、關成了才 `startDetached`；`python -m d4t` 啟動的改回 `-m`）。⚠ 全套跑出
+  **`test_ui_english_only` 紅**：第一版把中文寫在 .py 裡 —— M7 的規則是 UI 字串一律
+  英文、中文只准住翻譯檔。改成英文原句＋`zh_TW.json`，對話框用「要切過去的那一種」
+  的譯文講（`language.said_in`），鈕上的自稱是翻譯檔裡的一列（`NAME_KEY`）。
+* **#2 bin × 真正類別**：`report._bin_by_class`，ground truth 標了 `type` 才出；
+  CLI `run --ground-truth` 與 Excel 摘要頁。合成資料一跑就看得出 EBI 漏抓的 4 顆全是
+  `dark_blob`。HTML 報表本來就不吃 ground truth，沒動。
+* **#1 問不出來的送去 bin N**（使用者選「警告＋選配設定」）：`DecideSpec.unanswered_bin`
+  ／`unanswered_label`，JSON `decide.unanswered` **沒設不寫**（嚴格附加 → 舊檔
+  round-trip 不變、不需要遷移、不升 `RECIPE_VERSION`）。沒設＝F30 照舊答「否」。
+  判定區一格勾選、CLI 與 Results 工具列常駐「N 顆有題目答不出來」、回溯面板講真正
+  去的 bin。黃金值三份逐項相同。
+  ⚠ **順帶查出一個舊 bug**：undo 快照（`_decide_snapshot`）從來沒帶規則／otherwise
+  的 `outcome`（F119）—— 按一次 undo「好消息／壞消息」就安靜地不見。一起補上。
+
+---
+
+## 專案評價之後的「中等」那一批（2026-09-24）
+
+使用者：「接著做中等部分」。清單上的 #8–#13，做了五項，#11 留著等決定。
+
+* **#8 核心批碰到 Qt**：`test_doe_folder.py` 在函式裡 import `d4t.ui.open_dialogs`
+  （模組層就拉 PySide6），沒有 `libEGL` 的機器上核心批紅一條，而兩條既有守門都沒叫
+  —— 它們只看「直接寫 PySide6」。補 `importorskip`，並在 `test_no_qt.py` 加一條：
+  靜態算出 `d4t/ui` 裡哪幾支會遞移地拉進 Qt，非 `test_ui_*` 檔 import 它們的那個
+  函式（或模組層）要有 `importorskip("PySide6.QtWidgets", exc_type=ImportError)`。
+* **#9 相對的「Write to」**：以前相對於行程的工作目錄（在 repo 根目錄跑一次 CLI
+  就多一個 `ebi_report/`）。現在接在資料旁邊：KLARF 所在資料夾，沒有 KLARF 就是
+  影像那個資料夾（`output._anchor`，四張 Output 卡共用）。`recipes/README.md` 與
+  `USING-UNIFORMITY.md` 的說法跟著改。
+* **#12 `inspectors.py` 3,669 → 1,733**：基底與共用 header → `inspector_base.py`，
+  GLV／CD／Enhance 各一支。註冊表不動、`inspectors` 轉出口；`studio_surface` 前後相同。
+* **#10 `recipe.py` 4,522 → 648**：`recipe_schema.py`（資料模型）、
+  `recipe_migrations.py`（22 道遷移；**呼叫順序仍在 `Recipe.from_json_dict`**）、
+  `recipe_validate.py`（lint，延遲 import `Recipe`／`execution_order` 以免繞圈）。
+  `recipe.py` 是對外唯一入口、全部轉出口。驗收：`freeze_golden --check` 三份全綠、
+  核心批 3801 passed、pyright 128 → 128。讀原始碼的四條測試改讀新檔。
+* **#13 範例資料／範本找 repo 路徑**：沒有搬進套件 —— 公司機是整包複製，搬
+  `recipes/`（64 個檔案引用）換不到什麼。範本庫本來就會在資料夾不在時回空清單；
+  範例資料那一顆改成講白話（「複製整個 d4t 資料夾」），不再印例外型別名。
+* **#11 `StudioWindow` 的狀態收進 viewmodel**：**沒做**。量過：controller 對
+  window 的直接存取 run_controller 65 處／gallery 62／attach_sources 47／
+  gauge_panel 93／studio_layout 362。這是一個要先寫計畫書（F116 §6 的六個坑）
+  的工程，不是一輪順手的事 —— 留給使用者決定。
+* 另：上一輪拿掉 Help 鈕漏改了三條測試（`f7_19_wiring`／`f7_24_layout`／
+  `strings`）、新對話框沒在視窗規則與 `mark_primary` 上表態 —— 全套跑完才抓到，已修。
+
+---
+
+## 專案評價之後的「輕微」那一批（2026-09-24）
+
+使用者請我先評價整個專案、列出從嚴重到輕微的修改清單，然後說「先做輕微部分
+（.16 不要做，help 的按鈕跟功能幫我拿掉）」。
+
+* **工具列的 Help 鈕拿掉**（使用者選「只拿工具列 Help 鈕」）—— 連同它掛著的
+  「開著哪些視窗」小箭頭，`ui/windows_menu.py` 因此成了孤兒而刪掉。Welcome
+  導覽本身、卡片上的「Manual →」都還在；`show_welcome(force=True)` 留著給測試。
+  ⚠ 代價：勾過「不再顯示」的人再也叫不回 Welcome（範例資料那一顆在空狀態上還有）。
+* **`.raw` 的版面改成一張表單＋即時預覽**（新模組 `ui/raw_dialog.py`）。以前
+  選「Something else」之後是連跳四個小對話框（寬 → 高 → 檔頭 → 位元深度），
+  填錯一格就從頭來。現在四格一起填，底下常駐講「對不對得上檔案大小、差多少」，
+  對上了才准按 OK，並畫出照這組設定讀出來的縮圖（只讀縮圖要的那幾列，`memmap`）。
+  另有一顆「Height from file size」。推得出唯一解時的那一步選單照舊。
+* **提示字放大一號**：`font_tiny` 10 → 11、`font_small` 11 → 12（theme token）。
+* **用字**：設定區空狀態與狀態列上把管線上的卡叫 step 的兩句改成 card
+  （判定樹上的 step 是「一題」，那是對的，不動）。
+* **`engine.py` 的 `except Exception`**：`_roi_snapshot` 收窄到
+  `(TypeError, ValueError, AttributeError)`；其餘是刻意的退路（`feature_prefix`
+  「一定要有退路」、快取層出包當 miss），**不收窄**（收窄會讓 `run_defect`
+  有機會 raise，違反鐵則 7），改成補上 `swallowed()` —— 至少 `--log` 看得到。
+* **`strings.py` 檔頭說謊**（還寫著「沒有 tr() 也沒有 catalog」）→ 改成現況：
+  機制在、`install()` 還沒有人叫。
+
+---
+
 ## F120 收尾：Pitch helper 搬去自己的 repo，d4t 這邊移除乾淨（2026-09-23）
 
 使用者 2026-09-23：「我之後帶走後 d4t 會把 pitch helper 移除，就等於 pitch

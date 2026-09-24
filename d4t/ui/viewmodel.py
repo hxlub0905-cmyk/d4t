@@ -72,29 +72,43 @@ def _decide_snapshot(d: "DecideSpec") -> Dict[str, Any]:
 
     ⚠ **樹也要進來**（F24）。漏掉的話，一份判定樹 recipe 在 Studio 裡按一次
     undo，樹就安靜地消失 —— 而畫面上看起來只是「回到上一步」。
+    ⚠ 同一個道理（2026-09-24 補）：規則／otherwise 的 ``outcome``（F119「好消息
+    還是壞消息」）與「問不出來的送去哪個 bin」（評價清單 #1）以前沒進來，按一次
+    undo 就安靜地不見了。
     """
     return {
         "let": [(x.name, x.expr, str(getattr(x, "scale", "") or ""),
                  str(getattr(x, "fill", "") or ""))
                 for x in d.let],
-        "rules": [(r.when, int(r.bin), r.label) for r in d.rules],
-        "otherwise": (int(d.otherwise_bin), d.otherwise_label),
+        "rules": [(r.when, int(r.bin), r.label, str(getattr(r, "outcome", "") or ""))
+                  for r in d.rules],
+        "otherwise": (int(d.otherwise_bin), d.otherwise_label,
+                      str(d.otherwise_outcome or "")),
         "score": d.score,
         "tree": None if d.tree is None else _tree_to_json(d.tree),
+        "unanswered": (None if d.unanswered_bin is None
+                       else (int(d.unanswered_bin), d.unanswered_label)),
     }
 
 
 def _decide_restore(snap: Optional[Dict[str, Any]]) -> Optional["DecideSpec"]:
     if not snap:
         return None
-    ob, ol = snap.get("otherwise") or (0, "")
+    other = tuple(snap.get("otherwise") or (0, ""))
+    ob, ol = other[0], other[1]
+    oo = other[2] if len(other) > 2 else ""
     tree = snap.get("tree")
+    un = snap.get("unanswered")
     return DecideSpec(
         let=[Let(*row) for row in snap.get("let") or []],
-        rules=[Rule(w, int(b), lb) for w, b, lb in snap.get("rules") or []],
+        rules=[Rule(*row[:3], outcome=str(row[3]) if len(row) > 3 else "")
+               for row in snap.get("rules") or []],
         otherwise_bin=int(ob), otherwise_label=str(ol),
+        otherwise_outcome=str(oo or ""),
         score=str(snap.get("score", "") or ""),
-        tree=None if tree is None else _tree_from_json(tree))
+        tree=None if tree is None else _tree_from_json(tree),
+        unanswered_bin=None if un is None else int(un[0]),
+        unanswered_label="" if un is None else str(un[1] or ""))
 
 
 def is_a_constant_expression(text: Any) -> bool:
@@ -780,6 +794,20 @@ class RecipeModel:
             kw["otherwise_bin"] = int(bin)
         if label is not None and str(label) != self.decide.otherwise_label:
             kw["otherwise_label"] = str(label)
+        if kw:
+            self._edit_decide(**kw)
+
+    def set_unanswered(self, bin: Optional[int] = -1,
+                       label: Optional[str] = None) -> None:
+        """「問不出來的送去 bin N」（評價清單 #1）。``bin=None`` ＝關掉（照舊答「否」）；
+        預設 ``-1`` ＝這一次不動 bin，只改名字。"""
+        if self.decide is None:
+            return
+        kw: Dict[str, Any] = {}
+        if bin != -1 and bin != self.decide.unanswered_bin:
+            kw["unanswered_bin"] = None if bin is None else int(bin)
+        if label is not None and str(label) != self.decide.unanswered_label:
+            kw["unanswered_label"] = str(label)
         if kw:
             self._edit_decide(**kw)
 

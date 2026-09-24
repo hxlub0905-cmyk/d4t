@@ -281,8 +281,10 @@ _LIGHT: Dict[str, Any] = {
     #: ⚠ 這是 QSS 的字串（帶 `px`）。自繪那一面要的是數字 —— 用
     #: :func:`font_px`，不要自己 `int(...[:-2])`。
     "font_micro": "9px",     #: rail 上的階段名、卡片數 —— 排在直立的窄條裡
-    "font_tiny": "10px",     #: 膠囊分組的那一行小標
-    "font_small": "11px",    #: 一句補充說明（hint、summary、空狀態）
+    #: ⚠ **10 → 11、11 → 12**（2026-09-24）：提示字在機台旁的 PC 上太小
+    #: （Windows 的 DPI 沒驗過），而這兩格是「一句補充說明」的全部。
+    "font_tiny": "11px",     #: 膠囊分組的那一行小標
+    "font_small": "12px",    #: 一句補充說明（hint、summary、空狀態）
     #: ⚠ **12 → 13**（F99 P2-1）。這一格以前寫 12，而 QSS 的 ``* { font-size }``
     #: 寫死 13 —— 名字叫 body 的 token 不是 body，任何吃 `font_body` 的東西都比
     #: 鄰居小一號。現在 QSS 吃這一格（`$font_body`），數字對齊真相。

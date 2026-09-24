@@ -292,9 +292,8 @@ def generate_demo_lot(out_dir: Any = None, n: int = DEMO_DEFECTS,
                       seed: int = DEMO_SEED) -> Dict[str, str]:
     """產一批合成 EBI patch 資料（「用範例資料試一次」的第一步）。
 
-    ``tools/make_sample.py`` 不是安裝進來的套件，所以這裡**延遲 import**：
-    把 repo 的 ``tools/`` 補進 ``sys.path`` 再 import ``make_sample.generate``。
-    延遲的另一個理由是它會拉進 tifffile —— 只按別的鈕的人不需要付這個成本。
+    ``tools/make_sample.py`` 不是安裝進來的套件，所以**延遲 import**（補
+    ``sys.path``）；它也會拉進 tifffile —— 只按別的鈕的人不需要付這個成本。
 
     同一組 ``(n, seed)`` 產出的位元組完全相同，所以已經產過就直接沿用
     （第二次按這顆鈕是秒回的）。
@@ -306,13 +305,14 @@ def generate_demo_lot(out_dir: Any = None, n: int = DEMO_DEFECTS,
         return {"out_dir": out, "klarf": klarf, "tiff": tiff}
 
     tools_dir = str(Path(__file__).resolve().parents[2] / "tools")
+    if not os.path.isfile(os.path.join(tools_dir, "make_sample.py")):
+        raise RuntimeError("the sample-data maker (tools/make_sample.py) is not "
+                           "here - copy the whole d4t folder, not only d4t/")
     if tools_dir not in sys.path:
         sys.path.insert(0, tools_dir)
     from make_sample import generate
 
     return generate(out, n=int(n), seed=int(seed))
-
-
 
 
 def verdict_note(selected_node: Optional[str], verdict_bin: Any,
@@ -776,9 +776,7 @@ class StudioWindow(QMainWindow):
         self.trial_worker.done.connect(self.run_ctl._on_trial_done_async)
         self.output_worker.done.connect(self.run_ctl._on_outputs_done)
         self.output_worker.failed.connect(self.run_ctl._on_outputs_failed)
-        self.trial_worker.failed.connect(
-            lambda msg: (self._progress_done(),
-                         self._status("Trial run failed: %s" % msg, "error")))
+        self.trial_worker.failed.connect(self.run_ctl._on_trial_failed)
 
 
     # ==================================================================== #
@@ -2828,7 +2826,7 @@ class StudioWindow(QMainWindow):
         """ParamForm 的唯一出口：驗證通過才寫回 model，失敗就把那列變紅字。"""
         node_id = self.selected_node
         if node_id is None or node_id not in self.model.nodes:
-            self._status("Select a step in the pipeline before editing parameters.", "error")
+            self._status("Select a card on the canvas before editing its settings.", "error")
             return
         try:
             says = self.model.set_param(node_id, str(name), value)
@@ -2946,7 +2944,7 @@ class StudioWindow(QMainWindow):
             try:
                 ds = DatasetLoadWorker.run_sync(path, tiff)
             except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load dataset: %s: %s" % (type(e).__name__, e), "error")
+                self._status("Could not load dataset: %s" % wording.failure("studio.load_dataset", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start(path, tiff):
@@ -2975,8 +2973,8 @@ class StudioWindow(QMainWindow):
             try:
                 ds = DatasetLoadWorker.run_sync_folder(d, doe)
             except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load folder: %s: %s"
-                             % (type(e).__name__, e), "error")
+                self._status("Could not load folder: %s"
+                             % wording.failure("studio.load_folder", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start_folder(d, doe):
@@ -3001,8 +2999,8 @@ class StudioWindow(QMainWindow):
             try:
                 ds = DatasetLoadWorker.run_sync_image_file(f)
             except Exception as e:  # UI 邊界，一律回報
-                self._status("Could not load image: %s: %s"
-                             % (type(e).__name__, e), "error")
+                self._status("Could not load image: %s"
+                             % wording.failure("studio.load_image", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
         if not self.dataset_worker.start_image_file(f):
@@ -3248,7 +3246,7 @@ class StudioWindow(QMainWindow):
         try:
             recipe = Recipe.load(path)
         except Exception as e:  # UI 邊界
-            self._status("Could not load recipe: %s: %s" % (type(e).__name__, e), "error")
+            self._status("Could not load recipe: %s" % wording.failure("studio.load_recipe", e), "error")
             return False
         # 舊格式**升級了就要說**（U17）：畫布上多出來的線與拆開的卡是遷移補的，
         # 而使用者只會看到「這跟我上次存的不一樣」。讀原始 JSON 再比一次是為了
@@ -3355,7 +3353,7 @@ class StudioWindow(QMainWindow):
         try:
             self.model.to_recipe().save(path)
         except Exception as e:  # UI 邊界
-            self._status("Could not save: %s: %s" % (type(e).__name__, e),
+            self._status("Could not save: %s" % wording.failure("studio.save", e),
                          "error")
             return False
         self.recipe_path = path
@@ -3453,7 +3451,7 @@ class StudioWindow(QMainWindow):
                                                 upto_node=upto,
                                                 sources=self.sources_for_run())
             except Exception as e:  # UI 邊界
-                self._status("Preview failed: %s: %s" % (type(e).__name__, e), "error")
+                self._status("Preview failed: %s" % wording.failure("studio.preview", e), "error")
                 return False
             self._on_preview_ready(result)
             return True
@@ -3959,7 +3957,7 @@ class StudioWindow(QMainWindow):
             self.run_ctl._write_outputs(results)
         # F7-5：結果一到就把 Results 視窗帶出來 —— 使用者按 Run 想看的就是這個
         self.results.set_summary(
-            summarize_run(len(results), ok, elapsed, self.trial_scores))
+            summarize_run(len(results), ok, elapsed, self.trial_scores, results))
         # X1：baseline 那一行吃的是**引擎判出來的 bin**（不是某個門檻重算的），
         # 因為使用者剛剛看到的就是它。拖門檻線時 `_refresh_bin_summary` 會用
         # 那個門檻再餵一次。
@@ -3982,7 +3980,7 @@ class StudioWindow(QMainWindow):
     # 首次開啟導覽 + 範例 recipe 庫（M6）
     # ==================================================================== #
     def _open_windows(self):
-        """「Windows」下拉列的那幾個頂層視窗（U15 那張表上准開的）。"""
+        """Studio 的頂層子視窗（U15 那張表上准開的）—— 關窗時一起關。"""
         return [("Results", getattr(self, "results", None)),
                 ("Region check", getattr(self, "region_window", None)),
                 ("Uniformity charts",
@@ -3991,8 +3989,8 @@ class StudioWindow(QMainWindow):
     def show_welcome(self, force: bool = False) -> Optional[Any]:
         """開（或重開）首次導覽。
 
-        ``force=False`` 時尊重「不再顯示」（勾過就回 ``None``）；工具列的
-        「說明」一律 ``force=True``。對話框是**非 modal** 的，所以這個方法
+        ``force=False`` 時尊重「不再顯示」（勾過就回 ``None``）；``force=True``
+        不管那個勾（工具列的 Help 鈕 2026-09-24 拿掉了，現在只有測試這樣叫）。對話框是**非 modal** 的，所以這個方法
         永遠會馬上回來 —— 測試可以直接拿回傳值來按鈕。
         """
         if not force and welcome_disabled():
@@ -4057,7 +4055,7 @@ class StudioWindow(QMainWindow):
         try:
             paths = generate_demo_lot(out_dir, n=int(n))
         except Exception as e:  # UI 邊界，一律回報
-            self._status("Could not generate sample data: %s: %s" % (type(e).__name__, e), "error")
+            self._status("Could not make the sample data: %s" % e, "error")
             return False
         finally:
             QApplication.restoreOverrideCursor()

@@ -282,7 +282,9 @@ FILE_CEILINGS = {
     # 遇到同名不疊 —— 那要遷移全 repo 的特徵名與分數表達式、重錄黃金值，而換
     # 來的是一個**看不見的**行為。一條講得出後果的 warning 便宜得多，而且它
     # 擋得住每一張卡，不只被走查點到的那一張。
-    "d4t/core/pipeline/recipe.py": 4522,
+    # 2026-09-24：4,522 → 648。拆成四支（schema／migrations／validate 與留下來的
+    # `Recipe`＋執行順序），另外三支都在一般上限底下。
+    "d4t/core/pipeline/recipe.py": 648,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右
@@ -292,7 +294,9 @@ FILE_CEILINGS = {
     # **帶著流名前綴** —— 寫死的那一版在 DOE（一次 N 個 condition，正是這張圖最
     # 有用的時候）會畫出一張**空圖**，而空圖上寫的是「跑一次試跑就看得到」。
     # 多的幾行是「跟卡片要名字，不自己拼字串」與那句為什麼。
-    "d4t/ui/inspectors.py": 3669,
+    # 2026-09-24：3,669 → 1,733。基底、GLV、CD、Enhance 四塊各搬進自己的
+    # `ui/inspector_*.py`（每支都在一般上限底下）；這裡剩註冊表與小面板。
+    "d4t/ui/inspectors.py": 1733,
     # 節點畫布。沒有被點名，只是它超過一般上限，凍住免得它安靜地漂。
     #
     # 2026-09-08（U18/U19/U20）：2,705 → 2,887（+182）。三件都長在畫布上，
@@ -447,7 +451,8 @@ def _class_shape(rel: str, cls_name: str):
 
 
 def _migration_count() -> int:
-    src = (REPO / "d4t/core/pipeline/recipe.py").read_text(encoding="utf-8")
+    # 2026-09-24 起遷移住在 `recipe_migrations.py`（`recipe.py` 拆成四支）。
+    src = (REPO / "d4t/core/pipeline/recipe_migrations.py").read_text(encoding="utf-8")
     return len([n for n in ast.walk(ast.parse(src))
                 if isinstance(n, ast.FunctionDef)
                 and n.name.startswith("_migrate")])
@@ -612,7 +617,7 @@ COUNT_CEILINGS = {
     # **而且不會報錯**。那正是這個 repo 最貴的失敗（「跑得完、有數字、而且是錯的」）。
     "recipe_migrations": (
         22,
-        "recipe.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 5）",
+        "recipe_migrations.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 5）",
         _migration_count,
     ),
 }

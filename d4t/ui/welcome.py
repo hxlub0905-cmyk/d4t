@@ -319,7 +319,7 @@ def read_recipe_info(path: Any) -> Dict[str, Any]:
         if not isinstance(d, dict):
             raise ValueError("top level is not a JSON object")
     except Exception as e:  # UI 邊界
-        info["error"] = "%s: %s" % (type(e).__name__, e)
+        info["error"] = wording.exception_text(e)
         return info
 
     info["recipe_id"] = str(d.get("recipe_id") or p.stem)

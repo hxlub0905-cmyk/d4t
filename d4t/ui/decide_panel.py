@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDoubleSpinBox, QFrame,
+    QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFrame,
     QHBoxLayout, QLabel, QScrollArea,
     QLineEdit, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
@@ -404,6 +404,16 @@ class DecidePanel(QWidget):
             self.body_lay.addWidget(self._section("Nothing matched", ""))
             self.body_lay.addWidget(self._otherwise_row(d))
 
+        # ── 問不出來 ──（評價清單 #1）
+        self.body_lay.addWidget(self._section(
+            "When a question can't be answered",
+            "A card writes nothing when it cannot measure a defect, so a "
+            "question about that number has no answer. Unticked: it counts "
+            "as 'no' and the defect keeps going. Ticked: it goes straight "
+            "to the bin below, so 'could not measure' never looks like a "
+            "confident class."))
+        self.body_lay.addWidget(self._unanswered_row(d))
+
         # ── 分數 ──
         self.body_lay.addWidget(self._section(
             "Score",
@@ -610,6 +620,34 @@ class DecidePanel(QWidget):
         for w in (spacer, rest, arrow, binspin, label):
             row.lay.addWidget(w, 1 if w is rest else 0)
         cnt = self._count_label(int(d.otherwise_bin))
+        return row if cnt is None else self._with_note(row, cnt)
+
+    def _unanswered_row(self, d: Any) -> QWidget:
+        m = self._model
+        row = _Row(self)
+        on = d.unanswered_bin is not None
+        self.chk_unanswered = QCheckBox("Put those defects in")
+        self.chk_unanswered.setChecked(on)
+        binspin = QSpinBox()
+        binspin.setRange(0, MAX_BIN)
+        binspin.setPrefix("bin ")
+        # 關著的時候給一個顯眼、不會跟一般類別撞的號碼當起點（使用者改得掉）。
+        binspin.setValue(int(d.unanswered_bin) if on else 99)
+        # 兩位數要放得下（66 px 只裝得下「bin 9」—— 截圖量到的）。
+        binspin.setFixedWidth(82)
+        binspin.setEnabled(on)
+        label = QLineEdit(str(d.unanswered_label or ""))
+        label.setPlaceholderText("call it")
+        label.setFixedWidth(92)
+        label.setEnabled(on)
+        self.chk_unanswered.toggled.connect(
+            lambda t: self._restructure(
+                m.set_unanswered, int(binspin.value()) if t else None))
+        binspin.valueChanged.connect(lambda v: m.set_unanswered(bin=int(v)))
+        label.textEdited.connect(lambda t: m.set_unanswered(label=str(t)))
+        for w in (self.chk_unanswered, binspin, label):
+            row.lay.addWidget(w, 1 if w is self.chk_unanswered else 0)
+        cnt = self._count_label(int(d.unanswered_bin)) if on else None
         return row if cnt is None else self._with_note(row, cnt)
 
     # ---- 小工具 -------------------------------------------------------------
