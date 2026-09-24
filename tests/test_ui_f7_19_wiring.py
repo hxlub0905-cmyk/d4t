@@ -491,9 +491,10 @@ def test_the_toolbar_is_grouped_not_one_long_row(window):
     assert index_of(window.trial_group) == len(actions) - 1
     assert window.btn_trial.parent() is window.trial_group
     assert window.btn_trial_more.parent() is window.trial_group
-    # Help 與主題被移到右邊（在撐開的空白之後），不再混在檔案操作裡
-    assert index_of(window.btn_help) > index_of(window.btn_open_recipe)
-    assert index_of(window.btn_help) > index_of(window.btn_undo)
+    # Results 與主題在右邊（在撐開的空白之後），不混在檔案操作裡
+    # （Help 鈕 2026-09-24 使用者要求拿掉）
+    assert index_of(window.btn_results) > index_of(window.btn_open_recipe)
+    assert index_of(window.btn_results) > index_of(window.btn_undo)
 
 
 def test_every_button_built_for_the_toolbar_is_actually_on_it(window):

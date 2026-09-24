@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from d4t.core.ingest.rawfile import RawSpec
 
 from . import strings
+from .buttons import mark_primary
 from .image_view import _qimage_from_uint8, to_uint8
 
 __all__ = ["RawLayoutDialog", "PREVIEW_SIDE", "MAX_SIDE"]
@@ -107,6 +108,7 @@ class RawLayoutDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         self.btn_ok = self.buttons.button(QDialogButtonBox.Ok)
+        mark_primary(self.buttons)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)

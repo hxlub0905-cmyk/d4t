@@ -292,9 +292,8 @@ def generate_demo_lot(out_dir: Any = None, n: int = DEMO_DEFECTS,
                       seed: int = DEMO_SEED) -> Dict[str, str]:
     """產一批合成 EBI patch 資料（「用範例資料試一次」的第一步）。
 
-    ``tools/make_sample.py`` 不是安裝進來的套件，所以這裡**延遲 import**：
-    把 repo 的 ``tools/`` 補進 ``sys.path`` 再 import ``make_sample.generate``。
-    延遲的另一個理由是它會拉進 tifffile —— 只按別的鈕的人不需要付這個成本。
+    ``tools/make_sample.py`` 不是安裝進來的套件，所以**延遲 import**（補
+    ``sys.path``）；它也會拉進 tifffile —— 只按別的鈕的人不需要付這個成本。
 
     同一組 ``(n, seed)`` 產出的位元組完全相同，所以已經產過就直接沿用
     （第二次按這顆鈕是秒回的）。
@@ -306,13 +305,14 @@ def generate_demo_lot(out_dir: Any = None, n: int = DEMO_DEFECTS,
         return {"out_dir": out, "klarf": klarf, "tiff": tiff}
 
     tools_dir = str(Path(__file__).resolve().parents[2] / "tools")
+    if not os.path.isfile(os.path.join(tools_dir, "make_sample.py")):
+        raise RuntimeError("the sample-data maker (tools/make_sample.py) is not "
+                           "here - copy the whole d4t folder, not only d4t/")
     if tools_dir not in sys.path:
         sys.path.insert(0, tools_dir)
     from make_sample import generate
 
     return generate(out, n=int(n), seed=int(seed))
-
-
 
 
 def verdict_note(selected_node: Optional[str], verdict_bin: Any,
@@ -4057,7 +4057,7 @@ class StudioWindow(QMainWindow):
         try:
             paths = generate_demo_lot(out_dir, n=int(n))
         except Exception as e:  # UI 邊界，一律回報
-            self._status("Could not generate sample data: %s: %s" % (type(e).__name__, e), "error")
+            self._status("Could not make the sample data: %s" % e, "error")
             return False
         finally:
             QApplication.restoreOverrideCursor()

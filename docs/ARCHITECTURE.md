@@ -387,6 +387,10 @@ d4t/
     ├── gallery_controller.py #   Gallery／Results 視窗／回溯的 controller，加上**縮圖那一條鏈**
     │                         #     （哪個 channel → 讀圖 → `ThumbWorker` 背景解碼）（F116 第 3 步）
     ├── inspectors.py         #   每張卡自己的儀表（依 `Step.key` 註冊）
+    ├── inspector_base.py     #   儀表的共用底座：`Inspector` 基底、數字格式、共用 header（2026-09-24 拆出）
+    ├── inspector_glv.py      #   Gray level 卡的儀表（同上）
+    ├── inspector_cd.py       #   CD 卡的儀表（同上）
+    ├── inspector_enhance.py  #   Tone／Normalize／Denoise／Flatten 共用的儀表（同上）
     ├── studio_layout.py      #   `StudioWindow` 的**介面組裝**：工具列、主體、預覽區、
     │                         #     進度列、快捷鍵（F116 第 2 步；模組層函式吃 `win`，
     │                         #     照舊在 `win` 上設同樣那些名字）
@@ -485,6 +489,7 @@ d4t/
     ├── clipboard.py          #   Ctrl+C／V／D 的內容（F99 P1-8）：設定帶走、接線不帶
     ├── open_dialogs.py       #   三顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110／F114-2），
     │                         #     加上 recipe 的開／存（F116 第 4 步 —— 同一個「只問路徑」的契約）
+    ├── raw_dialog.py         #   `.raw` 的寬／高／檔頭／位元深度一張表單填完，即時比對檔案大小＋縮圖預覽（2026-09-24）
     ├── canvas_edges.py       #   **畫布上拉一條線／剪一條線，在 model 上是什麼意思**
     │                         #     （鐵則 10 的主場：一個輸入埠一條線、區域線住在 edges、
     │                         #     拉一條線＝一步復原）（F116 第 6 步）

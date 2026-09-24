@@ -187,7 +187,7 @@ def test_the_one_action_worth_pressing_is_the_one_with_colour(window, qapp):
     （Results 視窗）。
     """
     assert window.btn_trial.objectName() == "primary"
-    plain = (window.btn_open_recipe, window.btn_examples, window.btn_help)
+    plain = (window.btn_open_recipe, window.btn_examples)
     for b in plain:
         assert b.objectName() != "primary"
         assert b.property("variant") is None, b.text()
