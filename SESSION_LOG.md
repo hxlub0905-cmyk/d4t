@@ -28,6 +28,38 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## 專案評價之後的「中等」那一批（2026-09-24）
+
+使用者：「接著做中等部分」。清單上的 #8–#13，做了五項，#11 留著等決定。
+
+* **#8 核心批碰到 Qt**：`test_doe_folder.py` 在函式裡 import `d4t.ui.open_dialogs`
+  （模組層就拉 PySide6），沒有 `libEGL` 的機器上核心批紅一條，而兩條既有守門都沒叫
+  —— 它們只看「直接寫 PySide6」。補 `importorskip`，並在 `test_no_qt.py` 加一條：
+  靜態算出 `d4t/ui` 裡哪幾支會遞移地拉進 Qt，非 `test_ui_*` 檔 import 它們的那個
+  函式（或模組層）要有 `importorskip("PySide6.QtWidgets", exc_type=ImportError)`。
+* **#9 相對的「Write to」**：以前相對於行程的工作目錄（在 repo 根目錄跑一次 CLI
+  就多一個 `ebi_report/`）。現在接在資料旁邊：KLARF 所在資料夾，沒有 KLARF 就是
+  影像那個資料夾（`output._anchor`，四張 Output 卡共用）。`recipes/README.md` 與
+  `USING-UNIFORMITY.md` 的說法跟著改。
+* **#12 `inspectors.py` 3,669 → 1,733**：基底與共用 header → `inspector_base.py`，
+  GLV／CD／Enhance 各一支。註冊表不動、`inspectors` 轉出口；`studio_surface` 前後相同。
+* **#10 `recipe.py` 4,522 → 648**：`recipe_schema.py`（資料模型）、
+  `recipe_migrations.py`（22 道遷移；**呼叫順序仍在 `Recipe.from_json_dict`**）、
+  `recipe_validate.py`（lint，延遲 import `Recipe`／`execution_order` 以免繞圈）。
+  `recipe.py` 是對外唯一入口、全部轉出口。驗收：`freeze_golden --check` 三份全綠、
+  核心批 3801 passed、pyright 128 → 128。讀原始碼的四條測試改讀新檔。
+* **#13 範例資料／範本找 repo 路徑**：沒有搬進套件 —— 公司機是整包複製，搬
+  `recipes/`（64 個檔案引用）換不到什麼。範本庫本來就會在資料夾不在時回空清單；
+  範例資料那一顆改成講白話（「複製整個 d4t 資料夾」），不再印例外型別名。
+* **#11 `StudioWindow` 的狀態收進 viewmodel**：**沒做**。量過：controller 對
+  window 的直接存取 run_controller 65 處／gallery 62／attach_sources 47／
+  gauge_panel 93／studio_layout 362。這是一個要先寫計畫書（F116 §6 的六個坑）
+  的工程，不是一輪順手的事 —— 留給使用者決定。
+* 另：上一輪拿掉 Help 鈕漏改了三條測試（`f7_19_wiring`／`f7_24_layout`／
+  `strings`）、新對話框沒在視窗規則與 `mark_primary` 上表態 —— 全套跑完才抓到，已修。
+
+---
+
 ## 專案評價之後的「輕微」那一批（2026-09-24）
 
 使用者請我先評價整個專案、列出從嚴重到輕微的修改清單，然後說「先做輕微部分
