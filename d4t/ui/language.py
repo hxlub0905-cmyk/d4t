@@ -31,9 +31,16 @@ ASK = True
 
 SETTINGS_KEY = "ui/language"
 
-#: 鈕上顯示的字：**顯示的是「按下去會切到的那一種」**，跟主題鈕同一個慣例
-#: ——使用者要找的是「中文」這兩個字，不是「現在是 EN」。
-LABELS: Dict[str, str] = {"en": "EN", "zh_TW": "中文"}
+#: 認得的語言。鈕上顯示的字是**「按下去會切到的那一種」的自稱**（跟主題鈕
+#: 同一個慣例）—— 使用者要找的是「中文」這兩個字，不是「現在是 EN」。
+#:
+#: ⚠ **自稱與對話框的譯文住在那份翻譯檔裡，不住在這裡**：UI 字串一律英文
+#: （`tests/test_ui_english_only.py`，M7 使用者：「中英夾雜很混亂」），中文只
+#: 准出現在 `locales/zh_TW.json`。鍵是 :data:`NAME_KEY`。
+LABELS: Dict[str, str] = {"en": "EN", "zh_TW": "zh_TW"}
+
+#: 翻譯檔裡「這種語言叫什麼」的那一列（值＝鈕上的字）。
+NAME_KEY = "Language name (shown on the language button)"
 
 
 def _settings():
@@ -73,9 +80,28 @@ def next_locale(current: str) -> str:
         return order[0]
 
 
+def said_in(code: str, text: str) -> str:
+    """一句英文在**另一種語言**裡怎麼說（還沒切過去，所以不能用 `tr()`）。"""
+    if code == strings.DEFAULT_LOCALE:
+        return text
+    import json
+
+    try:
+        raw = json.loads((strings.LOCALE_DIR / ("%s.json" % code))
+                         .read_text(encoding="utf-8"))
+    except Exception:
+        return text
+    got = raw.get(text) if isinstance(raw, dict) else None
+    return str(got) if got and str(got).strip() else text
+
+
 def button_text() -> str:
-    """鈕上的字 = 按下去會切到的那一種語言。"""
-    return LABELS.get(next_locale(strings.current()), "EN")
+    """鈕上的字 = 按下去會切到的那一種語言的自稱。"""
+    nxt = next_locale(strings.current())
+    if nxt == strings.DEFAULT_LOCALE:
+        return LABELS["en"]
+    name = said_in(nxt, NAME_KEY)
+    return name if name != NAME_KEY else LABELS.get(nxt, nxt)
 
 
 def _relaunch_command():
@@ -104,25 +130,23 @@ def toggle(window: Any) -> str:
     from PySide6.QtCore import QProcess
     from PySide6.QtWidgets import QMessageBox
 
-    zh = nxt.startswith("zh")
-    title = "切換語言" if zh else "Switch language"
-    text = ("介面會換成中文（目前只有一部分字有翻譯）。要現在重開 d4t 嗎？\n"
-            "（還沒存的 recipe 會先問你要不要存。）" if zh else
-            "The interface will switch to English. Restart d4t now?\n"
-            "(You will be asked to save an unsaved recipe first.)")
-    later = "下次開啟時再換" if zh else "Next time I open d4t"
+    # 對話框用**要切過去的那一種語言**講（使用者切到中文就是想讀中文）。
+    def say(text: str) -> str:
+        return said_in(nxt, text)
+
     box = QMessageBox(window)
-    box.setWindowTitle(title)
-    box.setText(text)
-    btn_now = box.addButton("現在重開" if zh else "Restart now",
-                            QMessageBox.AcceptRole)
-    box.addButton(later, QMessageBox.RejectRole)
+    box.setWindowTitle(say("Switch language"))
+    box.setText(say("The interface will switch language (only part of it is "
+                    "translated so far). Restart d4t now?\n(You will be asked "
+                    "to save an unsaved recipe first.)"))
+    btn_now = box.addButton(say("Restart now"), QMessageBox.AcceptRole)
+    box.addButton(say("Next time I open d4t"), QMessageBox.RejectRole)
     box.exec()
     if box.clickedButton() is btn_now and window.close():
         # 先關（使用者可能在「要不要存」那一步反悔），關成了才開新的。
         prog, args, cwd = _relaunch_command()
         QProcess.startDetached(prog, args, cwd)
     else:
-        window._status("Language saved - it changes the next time d4t opens."
-                       if not zh else "語言已存 —— 下次開啟 d4t 時生效。")
+        window._status(say("Language saved - it changes the next time d4t "
+                           "opens."))
     return nxt

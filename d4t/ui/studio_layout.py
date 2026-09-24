@@ -232,8 +232,8 @@ def build_toolbar(win: "StudioWindow") -> None:
     # （「中文」／「EN」），跟主題鈕一樣是 ghost —— 隨時找得到、不搶流程的重量。
     win.btn_lang = _tool_button(
         win, language.button_text(),
-        "Switch the interface language (English / 中文) - d4t restarts to "
-        "apply it", lambda: language.toggle(win))
+        "Switch the interface language - d4t restarts to apply it",
+        lambda: language.toggle(win))
     win.btn_lang.setProperty("variant", "ghost")
 
     # 一段 = 一種事情；段與段之間一條分隔線。

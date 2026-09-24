@@ -28,6 +28,38 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## 專案評價之後的「嚴重～高」那一批（2026-09-24）
+
+使用者：「7 先不要做，按順序做 4 5 6 2 1，6 要有一個切換的按鈕」。#3 量過之後撤回
+（出貨的兩份 recipe 早就有 80% 下限的測試，實測 92.5%／93.3%；掉到 12/24 的是
+測試用的舊 fixture，不是出貨的東西 —— 評價時寫錯了）。
+
+* **#4 例外型別名不上畫面**：`wording.exception_text(e)`／`wording.failure(where, e)`
+  —— 檔案不在／沒權限（「是不是被 Excel 開著」）／是資料夾／記憶體不夠／StepError／
+  KeyError 各一句人話，原始 traceback 進 `d4t.log`。UI 十幾個出口全換；反向守門
+  `tests/test_wording_exceptions.py`（crashlog 以外不准再拼 `type(e).__name__`）。
+* **#5 對話框**：`ui/failure_dialog.py`（`SHOW` 旗標）。只有 Run all 與寫出失敗升級
+  成對話框（使用者按下去通常走開了）；`_running_all` 只活到真的開跑。studio 那段
+  lambda 收進 `run_ctl._on_trial_failed`（studio.py −2 行）。
+* **#6 語言鈕**：`ui/language.py`，工具列主題鈕旁、寫「按下去會切到的那一種」的自稱。
+  存 QSettings，`app.py` 建視窗前 `apply_saved()`；切換＝存＋問要不要重開（先照常
+  問存檔、關成了才 `startDetached`；`python -m d4t` 啟動的改回 `-m`）。⚠ 全套跑出
+  **`test_ui_english_only` 紅**：第一版把中文寫在 .py 裡 —— M7 的規則是 UI 字串一律
+  英文、中文只准住翻譯檔。改成英文原句＋`zh_TW.json`，對話框用「要切過去的那一種」
+  的譯文講（`language.said_in`），鈕上的自稱是翻譯檔裡的一列（`NAME_KEY`）。
+* **#2 bin × 真正類別**：`report._bin_by_class`，ground truth 標了 `type` 才出；
+  CLI `run --ground-truth` 與 Excel 摘要頁。合成資料一跑就看得出 EBI 漏抓的 4 顆全是
+  `dark_blob`。HTML 報表本來就不吃 ground truth，沒動。
+* **#1 問不出來的送去 bin N**（使用者選「警告＋選配設定」）：`DecideSpec.unanswered_bin`
+  ／`unanswered_label`，JSON `decide.unanswered` **沒設不寫**（嚴格附加 → 舊檔
+  round-trip 不變、不需要遷移、不升 `RECIPE_VERSION`）。沒設＝F30 照舊答「否」。
+  判定區一格勾選、CLI 與 Results 工具列常駐「N 顆有題目答不出來」、回溯面板講真正
+  去的 bin。黃金值三份逐項相同。
+  ⚠ **順帶查出一個舊 bug**：undo 快照（`_decide_snapshot`）從來沒帶規則／otherwise
+  的 `outcome`（F119）—— 按一次 undo「好消息／壞消息」就安靜地不見。一起補上。
+
+---
+
 ## 專案評價之後的「中等」那一批（2026-09-24）
 
 使用者：「接著做中等部分」。清單上的 #8–#13，做了五項，#11 留著等決定。

@@ -7,7 +7,7 @@ afdeefd139fced4a765660e1ac83b2a22899607d .gitattributes
 957a47224f1448948c40bccce13ecdae9f4fdaf5 CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 603fe90b9832f4e03541c4bcebb994301cfea80b README.md
-ae82868894f2fd42d658d84c208f2434ae2b4161 SESSION_LOG.md
+4a5092ceeca8df9b0d854e924b5ab344e06b77c0 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
 6fbcb70c28188602452885aa514d53cdab854e5a d4t/__main__.py
@@ -144,10 +144,10 @@ bfa9b063cb5cf71fe66cc21ba49dce02c3c9c793 d4t/ui/image_view.py
 6efd9f6b2fd8bd05eb69b657f069ef6d39a1d62e d4t/ui/inspector_enhance.py
 0780c3fa56f4183756235405ce21c39849ad8753 d4t/ui/inspector_glv.py
 3fa38aa87871df25a3d83d393fed0fe6e5de8e92 d4t/ui/inspectors.py
-1668f0bb634f92eaad9b693eb4807ba00b3bd797 d4t/ui/language.py
+dac095b7957a9356cf7e9bb0cf0c0cb50b2a5c9a d4t/ui/language.py
 489c5a6279f79249da2def6f41e3c59479c01299 d4t/ui/lattice_dialog.py
 3ae460d9afe25a5db61b7e72389c30b3d059b05f d4t/ui/library.py
-d577ffb1139dedd58a91b63dc21ad922108098c9 d4t/ui/locales/zh_TW.json
+f3d966c7383ef89db30e6d9e20dcb04086e5bd25 d4t/ui/locales/zh_TW.json
 f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
 a6d0286f67c1d76d815c06dd9ac07e6f94a4d893 d4t/ui/numbers.py
@@ -169,7 +169,7 @@ f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 7049adc73b88e981b292b8f168e593c0519b1dd8 d4t/ui/strings.py
 47f52da22042e58172a4636dda4567792cacf0f2 d4t/ui/studio.py
-053a0f323c330cbc453721e1872ce9ea8ba576b9 d4t/ui/studio_layout.py
+af7b9880b328104595c586ca0e1e1d6a667a5b68 d4t/ui/studio_layout.py
 1657d2a467406dff1f80677b888ae916e079e74c d4t/ui/template_dialog.py
 3602605dc1bb4e8542054d518220f389dc80be28 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
