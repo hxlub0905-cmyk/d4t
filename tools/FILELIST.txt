@@ -158,7 +158,7 @@ dba58e9c35eea2fab5c294959dfacbc39d618ca4 d4t/ui/problems_bar.py
 0ec4763b0c322ef7618b9c71f7b0ae7be5f0e5f2 d4t/ui/raw_dialog.py
 a47aeb5e37d01adaffb4d952d3bdf469e73be4f5 d4t/ui/region_check.py
 9bcae50b6478688608568c6c8242688343af9d38 d4t/ui/region_words.py
-bb7b1e5d090bd84f816a959c873a1032b8839c68 d4t/ui/results.py
+49261a165872b408289ac0c4dcc2bd83fa84efd1 d4t/ui/results.py
 4a732bbb220f24288ed22d3c88b77f87d0b3be10 d4t/ui/results_table.py
 fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 11a38b9e760697b23510805b56706f1eb8f6c85e d4t/ui/route_panel.py
@@ -200,7 +200,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
 a16900945e9feae0ec94239a23b0495fa2d045a7 docs/USING-SIMGEN.md
 00f08896560102bf52d194637171001961734d18 docs/USING-UNIFORMITY.md
-4a56b0ed65886c59f4282f7e67cbc1ac0a64c140 docs/plans/F117-ui-review.md
+c02b5ed1aa8d2c33e7bfa8a9ca830a324fbd0cb4 docs/plans/F117-ui-review.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -494,6 +494,7 @@ cd74ab49f2bac6958ff5eee6597096b58ee1a05f tests/test_ui_template_dialog.py
 4afcc5dde93d4638226f8e8e6b5951c2180e3ed6 tests/test_ui_template_library.py
 2ccf7c4309537774ea064e19c85fcd6882352471 tests/test_ui_template_words.py
 70065facbc537265f15aac818b0940bac75a8400 tests/test_ui_tile_legend.py
+d0376810421f39558164147504fe67aac211af1d tests/test_ui_toolbar_spacers.py
 08bacfb75a1edef9872b8db5e7d3fe04370040f9 tests/test_ui_tree_canvas.py
 3e35f38742072f17ed18720b111038ee0a2b2896 tests/test_ui_tree_edit.py
 8a0a3a9aa996dfeb6f6c79de491294b1fcace92a tests/test_ui_truth_disagreement.py

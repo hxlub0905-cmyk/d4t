@@ -120,6 +120,10 @@ class ResultsWindow(QMainWindow):
         bar.addWidget(self.summary_label)
 
         spacer = QWidget(bar)
+        # ⚠ **要叫 `toolbarSpacer`**（F117 E6）：主題只把那個名字的撐開空白畫成
+        # 透明（`theme.py`），沒名字的會被畫成一條很寬的灰框 —— 走查看到的
+        # 「頂端那條灰色空條」就是它。主視窗那一條一直有名字，所以只有這裡中。
+        spacer.setObjectName("toolbarSpacer")
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
 
