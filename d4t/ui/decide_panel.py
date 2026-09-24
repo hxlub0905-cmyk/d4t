@@ -633,7 +633,8 @@ class DecidePanel(QWidget):
         binspin.setPrefix("bin ")
         # 關著的時候給一個顯眼、不會跟一般類別撞的號碼當起點（使用者改得掉）。
         binspin.setValue(int(d.unanswered_bin) if on else 99)
-        binspin.setFixedWidth(66)
+        # 兩位數要放得下（66 px 只裝得下「bin 9」—— 截圖量到的）。
+        binspin.setFixedWidth(82)
         binspin.setEnabled(on)
         label = QLineEdit(str(d.unanswered_label or ""))
         label.setPlaceholderText("call it")

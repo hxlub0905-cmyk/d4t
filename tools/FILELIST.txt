@@ -118,7 +118,7 @@ fc092908d4dbd03137edf5bbefbd3613acddc769 d4t/ui/chips.py
 7935652b2c400dcfa78c66dccfd608b61de3b0e9 d4t/ui/crashlog.py
 9a4bad6887e5cf5412a210c76e7d2a726d8dbe90 d4t/ui/crop_dialog.py
 49fde71960791082203194f5709fccebf81850d6 d4t/ui/cross_links.py
-2cd572e962bc7738eae5139e2ec8bec7c1356723 d4t/ui/decide_panel.py
+f2b598e659a4fd4496542c96e471f5f001958e92 d4t/ui/decide_panel.py
 9475e553fa9c604e9d301b99c6c5e77bd828fc28 d4t/ui/edit_plan.py
 dbbd2cfb271d7aa788e3dd7b59a308c8013a9618 d4t/ui/failure_dialog.py
 3fea0845e35705d81839e31cb36790ae859103f4 d4t/ui/feature_panel.py
