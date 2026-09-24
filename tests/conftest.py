@@ -34,6 +34,10 @@ def _no_modal_dialogs_in_tests():
     fd = sys.modules.get("d4t.ui.failure_dialog")
     if fd is not None:
         fd.SHOW = False
+    # 評價清單 #6：切換語言時的「要不要現在重開」。
+    lang = sys.modules.get("d4t.ui.language")
+    if lang is not None:
+        lang.ASK = False
     yield
 
 

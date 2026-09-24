@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 from d4t.core.pipeline import sampling
 
 from . import fit_screen
+from . import language
 from . import open_dialogs
 from . import scope
 from . import strings
@@ -227,6 +228,13 @@ def build_toolbar(win: "StudioWindow") -> None:
         "", "Switch between the light and dark theme",
         win.toggle_theme, icon="theme")
     win.btn_theme.setProperty("variant", "ghost")
+    # 語言切換（評價清單 #6，2026-09-24）：鈕上寫的是**按下去會切到的那一種**
+    # （「中文」／「EN」），跟主題鈕一樣是 ghost —— 隨時找得到、不搶流程的重量。
+    win.btn_lang = _tool_button(
+        win, language.button_text(),
+        "Switch the interface language (English / 中文) - d4t restarts to "
+        "apply it", lambda: language.toggle(win))
+    win.btn_lang.setProperty("variant", "ghost")
 
     # 一段 = 一種事情；段與段之間一條分隔線。
     #
@@ -281,6 +289,7 @@ def build_toolbar(win: "StudioWindow") -> None:
 
     # 右邊：不屬於流程、但要隨時找得到的那幾顆。
     bar.addWidget(win.btn_results)
+    bar.addWidget(win.btn_lang)
     bar.addWidget(win.btn_theme)
     bar.addSeparator()
 

@@ -99,7 +99,7 @@ ea1a849d4a952d268d4a32411381e1a83d184b82 d4t/core/steps/quality.py
 0a37eeb8bcaa987e2955fbc1fdf0b1598461380c d4t/core/store/__init__.py
 809ce36f601fc9be43e450fa5b84c862adfd001a d4t/core/store/results.py
 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 d4t/ui/__init__.py
-4ac46fb93eb236ba829a451dd29c238c092831ba d4t/ui/app.py
+c54c4879546d01d75a2ec2e649227b3f26cba6b8 d4t/ui/app.py
 69081c611d94599b822fd245b3a73541d46d9329 d4t/ui/assets/d4t-wordmark-dark.svg
 f8cbf586f20a72eb7dbeae1b04aaf0d47f3cbe6a d4t/ui/assets/d4t-wordmark.svg
 a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
@@ -144,6 +144,7 @@ bfa9b063cb5cf71fe66cc21ba49dce02c3c9c793 d4t/ui/image_view.py
 6efd9f6b2fd8bd05eb69b657f069ef6d39a1d62e d4t/ui/inspector_enhance.py
 0780c3fa56f4183756235405ce21c39849ad8753 d4t/ui/inspector_glv.py
 3fa38aa87871df25a3d83d393fed0fe6e5de8e92 d4t/ui/inspectors.py
+1668f0bb634f92eaad9b693eb4807ba00b3bd797 d4t/ui/language.py
 489c5a6279f79249da2def6f41e3c59479c01299 d4t/ui/lattice_dialog.py
 3ae460d9afe25a5db61b7e72389c30b3d059b05f d4t/ui/library.py
 d577ffb1139dedd58a91b63dc21ad922108098c9 d4t/ui/locales/zh_TW.json
@@ -166,9 +167,9 @@ fcc5231bedd9981ea880248b6589315a9c0d395b d4t/ui/route_badge.py
 290e9af828021e66a1b944acd1e46ddb52aeb578 d4t/ui/splitters.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
-5a139f2d725231c050ad8231c2aaa34420dbe2b0 d4t/ui/strings.py
+7049adc73b88e981b292b8f168e593c0519b1dd8 d4t/ui/strings.py
 938c346621fae97b4538183084a39ca21ade95a7 d4t/ui/studio.py
-f2736695c553bf6161cb12ac293cb30ed31752af d4t/ui/studio_layout.py
+053a0f323c330cbc453721e1872ce9ea8ba576b9 d4t/ui/studio_layout.py
 1657d2a467406dff1f80677b888ae916e079e74c d4t/ui/template_dialog.py
 3602605dc1bb4e8542054d518220f389dc80be28 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
@@ -185,7 +186,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 a3b314d92356cdea69aa537f65273237e7be4526 d4t/ui/wording.py
 133bc87c427642bfce9f4c9c533d589b8e597efe d4t/ui/workbench.py
 b73295cca3782eb38c0edfafe7b2279e14376a4c d4t/ui/workers.py
-d53f70d8175a15e0ea9dc01b35a309aea74825a4 docs/ARCHITECTURE.md
+970779675322a8cb0947a6cac9000b5e9048ef1f docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
@@ -210,7 +211,7 @@ a2d0542168cc30204d2a282c58c5b16985177502 recipes/ebi-die-to-die.json
 ad473bba330e2f3f50e6a22dae31c0bd13a179a5 recipes/one-image-uniformity.json
 473eaff15a7017f856d79fe8bca0c9050c4ebe97 recipes/rsem-worst-box.json
 cf5284f96a1d071e240ef88199e54d580b48c57c requirements.txt
-49104c604637f764ceebd2f500fb20cf0dbade3e tests/conftest.py
+9401155ff5efb017fd1050013abb87fb6e19f8e7 tests/conftest.py
 c96b78b09514426cafa0ce283d53d7e5a4b4e015 tests/fixtures/bench_baseline.json
 2f91aee241cdd8dd9aac07f0f663d3175b53ad7f tests/fixtures/golden/die_to_die_basic__make_sample.json
 8247b0c3f77960d0e0432cbed1169d1fc5cfb983 tests/fixtures/golden/dual_route_basic__make_sample.json
@@ -444,6 +445,7 @@ d644e6c465d92bf9bee29d6fb9e1c2905ceab9d4 tests/test_ui_guided_condition.py
 46b4c2bc498be5f3641b2d66d44117424d375bed tests/test_ui_info_level.py
 fb683dce0a578ea484b1c96297da907b39c081c9 tests/test_ui_input_kinds.py
 9fb2df3eb827f0f6c70f18b38c3c4fcddf7536ad tests/test_ui_inspectors.py
+0f7447bee32093710fef2a59af90d79f1abd951b tests/test_ui_language.py
 e080d7615bf2f2b8df2c17b6bd0d9b4e4c1b9107 tests/test_ui_layout_follows_the_wires.py
 455ea8223907af8aa3a9a5516bdb09c2fdc0eced tests/test_ui_layout_modes.py
 26e65c59a96f1b4eb97e59b6647752e5c9f388fc tests/test_ui_lot_strip.py
