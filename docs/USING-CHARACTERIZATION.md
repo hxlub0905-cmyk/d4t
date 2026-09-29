@@ -30,7 +30,7 @@
 > （`pair_source` / `H2H` / `output_char` 全在，測試也全在），走這條路的人
 > 自己拉線。下面就是那份 recipe 當初的組法。
 
-1. **`Open KLARF…`** 載 **API（RSEM）那一份**當 main。⚠ 不是 EBI —— 理由見 §2。
+1. **`Open data…`** 載 **API（RSEM）那一份**當 main。⚠ 不是 EBI —— 理由見 §2。
 2. 卡片庫 → Input 段 → **`Pair source`** → 按 **`Open data…`** 選
    **EBI 那一份**。
 3. 卡片庫 → Compare 段 → **`H2H`**。

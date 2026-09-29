@@ -120,47 +120,31 @@ def _open_raw_folder(folder: str, raw: Any):
 
 
 def _open_input(path: str, tiff_path: Any = None, raw: Any = None):
-    """CLI 的輸入 —— **每一種都認**（F85），照 `scope.INPUT_SOURCES` 那張表。
+    """CLI 的輸入 —— **跟 Studio 那一顆「Open data…」同一個判斷**（F121 期 4）。
 
     以前這裡只呼叫 `load_dataset`，也就是只認 KLARF；給它一個資料夾的下場是
-    ``IsADirectoryError``，而那句話對使用者沒有任何意義。Studio 早就吃四種
-    輸入了（F11 Input-3），CLI 沒有跟上 —— 於是 `folder` 那條 route 的
-    recipe（`recipes/one-image-uniformity.json` 就是一份）在命令列上**根本
-    跑不起來**，而畫布上它是好的。
-
-    判準只看路徑本身，不看副檔名以外的東西：
-
-    * **資料夾** → `load_folder`（每個影像檔一顆；裡面只有子資料夾的話它會
-      講「影像在下一層」）
-    * **影像檔** → `load_image_file`（那一張就是唯一的一顆）
-    * 其餘 → `load_dataset`（KLARF，含 `--tiff`）
+    ``IsADirectoryError``，而那句話對使用者沒有任何意義（F85 補上了資料夾與單張）。
+    判斷本身住在 `ingest.dataset.plan_open`（一個家，Studio 也叫它）：KLARF 檔、
+    影像資料夾、單張影像、只有一份 KLARF 的資料夾、``.raw``。這裡只負責**照著開**
+    —— 與 `.raw` 的版面：由 `--raw` 給，或從檔案大小推；推不出唯一解就當場說清楚，
+    不挑一個「最像的」（猜錯的話每一個像素都錯，而且不會報錯）。
 
     ⚠ F110 在這裡多過一條「資料夾裡只有資料夾 → DOE（一個子目錄一顆）」，
     2026-09-24（F121 期 0）拿掉了：使用者說那個設計錯了，DOE 的資料就是一個
     資料夾的單張影像。
-
-    ⚠ 多頁 TIFF 走的是**第四條**（KLARF 那一支會自己講不出話），而
-    `Open stack…` 那條路 CLI 仍然沒有 —— 它需要「一顆幾張」那個數字，
-    而那是一格參數不是一條路徑。這裡不假裝有。
     """
-    from d4t.core.ingest import dataset as dataset_mod
     from d4t.core.ingest.dataset import (
-        load_dataset, load_folder, load_image_file,
+        load_dataset, load_folder, load_image_file, plan_open,
     )
 
-    p = str(path)
-    if os.path.isdir(p):
-        names = sorted(os.listdir(p))
-        # `.raw` **不進 `_IMAGE_EXTS`**（它解不開），所以這一條要自己問一次。
-        # 版面由 `--raw` 給，或從檔案大小推 —— 推不出唯一解就當場說清楚，
-        # 不挑一個「最像的」（猜錯的話每一個像素都錯，而且不會報錯）。
-        from d4t.core.ingest.rawfile import RAW_EXTS as _RAW_EXTS
-        if any(os.path.splitext(n)[1].lower() in _RAW_EXTS for n in names):
-            return _open_raw_folder(p, raw)
-        return load_folder(p)
-    if os.path.splitext(p)[1].lower() in dataset_mod._IMAGE_EXTS:
-        return load_image_file(p)
-    return load_dataset(p, tiff_path=tiff_path)
+    plan = plan_open(path)
+    if plan.what == "raw":
+        return _open_raw_folder(plan.path, raw)
+    if plan.what == "folder":
+        return load_folder(plan.path)
+    if plan.what == "image":
+        return load_image_file(plan.path)
+    return load_dataset(plan.path, tiff_path=tiff_path)
 
 
 def _cmd_run(args: argparse.Namespace) -> int:

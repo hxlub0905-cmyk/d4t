@@ -28,6 +28,33 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F121 期 4：一顆 Open（2026-09-29）
+
+使用者：「繼續做期4」。入口簡單化的最後一期 —— **F121 五期都做完了**，計畫書留在
+`docs/plans/` 等使用者試用後說收。
+
+* **一顆「Open data…」**：`scope.INPUT_SOURCES` 剩一列，工具列、空白畫面、Input 卡
+  上是同一個字。卡上那顆以前先跳一張「你要開哪一種」的選單，現在直接是對話框
+  （非原生，檔案與資料夾都挑得到）。`open_dialogs` 的 `ask_klarf` / `ask_images` /
+  `raw_folder_for` 換成 `ask_data` ＋ `open_path`；`studio.py` 拿掉那張選單
+  （4,347 → 4,302，HARD_CAPS 與一般上限一起降）。
+* **「這條路徑是什麼」只有一個家**：`ingest.dataset.plan_open` → `klarf` / `folder` /
+  `image` / `raw`，CLI 的 `_open_input` 叫同一支。認 KLARF 看檔頭
+  （`looks_like_klarf`），不看副檔名。
+* **做的時候量出來的**：EBI 的 lot 資料夾裡 KLARF 旁邊躺著它的 patch `.tif`，第一版
+  把整個 lot 資料夾判成「影像資料夾」。改成**正好一份 KLARF 就開那份**；兩份以上
+  不替人挑，`load_folder` 講「挑一份」並列名字（`_KLARFS_ONLY_WARNING`）。
+* **CLI 行為變了兩處**（往「跟 Studio 一樣」）：只有一份 KLARF 的資料夾開那份
+  KLARF；直接給 `.raw` 檔案走 raw。
+* 畫面上六處「use “Open KLARF…” first」改成 “Open data…”；歡迎頁的字從表上讀
+  （`welcome.open_title`）。反向測試 `test_ui_one_open.py` 用 ast 掃 `d4t/ui` 的字串
+  擋退役的三個鈕名。文件（CLAUDE.md §5、USING-*、recipes/README、
+  `one-image-uniformity.json` 的說明）一起改；USING-SIMGEN 那一格本來就寫錯
+  （Golden Cell 視窗的鈕叫 `Open image…`），順手對上。
+* 黃金值三份逐項相同；typecheck 128（上限 128）；ruff 乾淨。
+
+---
+
 ## F121 期 3：Input 卡看資料（2026-09-24）
 
 使用者回報的那一個到這裡收尾：EBI 的 recipe 開在沒有 KLARF 的 RSEM 影像上，

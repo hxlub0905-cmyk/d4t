@@ -84,11 +84,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QStatusBar,
     QWidget,
@@ -471,7 +469,7 @@ class StudioWindow(QMainWindow):
             # 起手卡直接選起來：右欄一開窗就是「可以動的東西」，
             # 而不是一句「請先從卡片庫挑一張卡」。
             self.select_node(self.model.node_order[0])
-        self._status("Ready — press “Help” for a guided start, or “Open KLARF…” "
+        self._status("Ready — press “Help” for a guided start, or “Open data…” "
                      "to load your data.")
 
         # **開窗要寬到工具列放得下**（F48，2026-08-28）。
@@ -1058,7 +1056,7 @@ class StudioWindow(QMainWindow):
         elif not n_items and not has_steps:
             run_why = "Load a KLARF and add at least one card first."
         elif not n_items:
-            run_why = "No dataset loaded yet — use “Open KLARF…” first."
+            run_why = "No dataset loaded yet — use “Open data…” first."
         else:
             run_why = "The pipeline is empty — add a card from the library first."
 
@@ -2172,9 +2170,9 @@ class StudioWindow(QMainWindow):
     #: 不取代目前的資料集。
     _PAIR_CARDS = ("pair_source",)
 
-    #: 資料那張卡（Input，`load_patch`）的鈕上寫什麼。
-    #: **它不是某一種 source 的名字** —— 一份 KLARF 是 patch 還是一顆一張由檔案
-    #: 決定，所以這顆鈕開的是一張選單（`scope.INPUT_SOURCES` 那三條路）。
+    #: 資料那張卡（Input，`load_patch`）的鈕上寫什麼 —— 跟空白畫面上那一顆
+    #: 同一個字（F121 期 4 起入口只有一顆，`scope.INPUT_SOURCES[0].title`；
+    #: `tests/test_ui_one_open.py` 守著兩邊一樣）。
     DATA_SOURCE_LABEL = "Open data…"
 
     def _source_action_for(self, node: Any) -> Tuple[str, str, str]:
@@ -2331,10 +2329,10 @@ class StudioWindow(QMainWindow):
             view.reveal_cards(srcs)
 
     def _on_source_requested(self) -> None:
-        """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。
+        """入口卡上那顆鈕：附加檔、第二份 lot、主資料各自開自己的對話框。
 
-        **選單的每一列都是 `scope.INPUT_SOURCES` 的一列** —— 那張表仍然是入口
-        的唯一定義（F11 Input-5），這一輪只是換了它長在哪裡。
+        主資料那一顆以前開一張選單（`scope.INPUT_SOURCES` 一列一項）；F121 期 4
+        起入口只有一顆，**按下去就是那一顆**，不先問「你要開哪一種」。
         """
         nid = self.selected_node
         node = self.model.nodes.get(nid) if nid else None
@@ -2351,20 +2349,7 @@ class StudioWindow(QMainWindow):
         if node.step in self._PAIR_CARDS:
             self.attach_ctl._on_open_pair_source(nid)
             return
-        menu = QMenu(self)
-        for src in scope.INPUT_SOURCES:
-            act = QAction(src.title, menu)
-            tip = src.what
-            if not src.has_klarf:
-                tip += ("  There is no KLARF here, and no KLARF means no "
-                        "coordinates and no write-back - CSV and Excel "
-                        "reports still work.")
-            act.setToolTip(tip)
-            act.triggered.connect(
-                partial(open_dialogs.open_source, self, src.key))
-            menu.addAction(act)
-        btn = self.param_form.source_button()
-        menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
+        open_dialogs.open_source(self, scope.INPUT_SOURCES[0].key)
 
     # ---- 核心大小畫在影像上（F11 Enhance-UI-A）-----------------------------
     def _kernel_extent(self) -> Tuple[Optional[float], str]:
@@ -3191,7 +3176,7 @@ class StudioWindow(QMainWindow):
         """跳到第 ``index`` 顆 defect（超出範圍會夾住）。"""
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+            self._status("No dataset loaded yet — use “Open data…” first.", "error")
             return False
         i = max(0, min(int(index), len(items) - 1))
         self.defect_index = i
@@ -3412,7 +3397,7 @@ class StudioWindow(QMainWindow):
         item = self._current_item()
         if item is None:
             if force:
-                self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+                self._status("No dataset loaded yet — use “Open data…” first.", "error")
             return False
 
         recipe = self.model.to_recipe()
@@ -3979,7 +3964,8 @@ class StudioWindow(QMainWindow):
             dlg = WelcomeDialog(self)
             dlg.demo_requested.connect(self._on_demo_requested)
             dlg.open_klarf_requested.connect(
-                partial(open_dialogs.open_source, self, "klarf"))
+                partial(open_dialogs.open_source, self,
+                        scope.INPUT_SOURCES[0].key))
             dlg.library_requested.connect(self.open_recipe_library)
             self.welcome_dialog = dlg
         dlg.show()
@@ -4056,7 +4042,7 @@ class StudioWindow(QMainWindow):
         self._status(
             "Sample run finished — the histogram below is the score "
             "distribution (drag the threshold line), and the wall of thumbnails "
-            "is on the right. Next, use “Open KLARF…” to switch to your own data.")
+            "is on the right. Next, use “Open data…” to switch to your own data.")
         return True
 
     # ==================================================================== #

@@ -267,13 +267,14 @@ git add -A && python tools/release.py && git add -A
 
 **一張載入卡**：`load_patch`「Input」，一張或好幾張都吃，**名字表開資料時照資料填**
 （F121 期 2 把 `load_single`「SEM image」併回來了，舊 recipe 由遷移換卡；key 沒動）。
-三種 source：
+**入口只有一顆**「Open data…」（F121 期 4），檔案或資料夾都吃；是哪一種由
+`ingest.dataset.plan_open` 看那條路徑回答（CLI 叫同一支）。三種 source：
 
-| kind | 什麼樣的資料 | 入口 |
-|---|---|---|
-| `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁；檔名 `.tif` 或 `.I01`，**內容都是 TIFF**，副檔名只住在 `klarf_core.PATCH_IMAGE_EXTS`）| `Open KLARF…` |
-| `rsem` | KLARF + 每顆一個影像檔 | `Open KLARF…`（自動判別）|
-| `folder` | 一個資料夾的影像、或單獨一張、沒有 KLARF | `Open images…`（**資料夾或單一檔案都吃**；headerless `.raw` 也在這裡 —— 它沒有寬高與位元深度，所以那顆會問，或從檔案大小推）|
+| kind | 什麼樣的資料 |
+|---|---|
+| `ebi_patch` | KLARF + patch TIFF（每顆連續幾頁；檔名 `.tif` 或 `.I01`，**內容都是 TIFF**，副檔名只住在 `klarf_core.PATCH_IMAGE_EXTS`）|
+| `rsem` | KLARF + 每顆一個影像檔（KLARF 自己講是哪一種）|
+| `folder` | 一個資料夾的影像、或單獨一張、沒有 KLARF（headerless `.raw` 也在這裡 —— 它沒有寬高與位元深度，所以會問，或從檔案大小推）|
 
 `folder` **寫不回 KLARF**，那句話**常駐在資料集標籤上**（F110 的 `doe_folder`
 2026-09-24 刪了：設計錯了，DOE 就是 `folder`）。第二份 lot 走 `pair_source`
@@ -290,8 +291,7 @@ SUPPORTED_KINDS = ("ebi_patch", "rsem", "folder")
 HIDDEN_STEPS = ()                # 目前沒有收起來的卡（`align` F109 拿回來了）
 SHOW_TEMPLATE_LIBRARY = True     # 工具列的 Templates…（2026-09-08 打開）
 SHOW_SAMPLE_DATA = True          # 「用範例資料試一次」（2026-09-09 隨 ebi-die-to-die.json 打開）
-INPUT_SOURCES = (...)            # **兩顆** Open 的字、圖示、一句白話說明
-                                 # （加一列就好 —— 分岔在 ui/open_dialogs.open_source）
+INPUT_SOURCES = (...)            # 那一顆 Open 的字、圖示、白話說明（分岔在 ui/open_dialogs）
 ATTACHMENTS = (...)              # 掛在已載入 lot 上的附加檔（GLAS 匯出）
 ```
 

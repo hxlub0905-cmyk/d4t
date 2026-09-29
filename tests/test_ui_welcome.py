@@ -601,22 +601,30 @@ def test_the_welcome_page_does_not_name_the_kinds_it_reads(qapp):
             "scope.INPUT_SOURCES，這裡列第二份就會漂" % head)
 
 
-def test_the_counts_on_the_welcome_page_are_counted_not_typed(qapp):
-    """畫面上那幾個「有幾種」的數字要跟著表走。
+def test_the_names_on_the_welcome_page_are_read_off_the_table(qapp):
+    """畫面上講到的入口要跟著表走 —— **讀出來的，不是打上去的**。
 
     以前是寫死的：tooltip 寫「the other three kinds」、頁尾寫「the four kinds
-    of data it reads」—— 而 `INPUT_SOURCES` 現在是三條。
+    of data it reads」—— 而 `INPUT_SOURCES` 那時是三條（F117 G1 改成數的）。
+    F121 期 4 入口合成一顆「Open data…」之後不再數（「the 1 kinds」不是一句話），
+    改成**講那顆鈕的名字** —— 那個名字一樣要從表上讀：表改了，這幾句跟著改。
     """
     from d4t.ui import scope
     from d4t.ui import welcome as w
 
-    assert w.ways_in() == len(scope.INPUT_SOURCES) - 1 + len(scope.ATTACHMENTS)
-
+    assert w.open_title() == scope.INPUT_SOURCES[0].title
     real = scope.INPUT_SOURCES
-    try:                                    # 少一種 → 那幾句話要跟著少
-        scope.INPUT_SOURCES = real[:-1]
-        assert w.ways_in() == len(real) - 2 + len(scope.ATTACHMENTS)
-        assert str(len(real) - 1) in w._footer_hint() or scope.SHOW_SAMPLE_DATA
+    try:                                    # 改一個名字 → 那幾句話跟著改
+        scope.INPUT_SOURCES = (real[0]._replace(title="Open stuff…"),)
+        assert w.open_title() == "Open stuff…"
+        assert "Open stuff…" in w._footer_hint() or scope.SHOW_SAMPLE_DATA \
+            or scope.SHOW_TEMPLATE_LIBRARY
+        dlg = w.WelcomeDialog()
+        try:
+            assert "Open stuff…" in dlg.btn_open.toolTip()
+        finally:
+            dlg.close()
+            dlg.deleteLater()
     finally:
         scope.INPUT_SOURCES = real
 

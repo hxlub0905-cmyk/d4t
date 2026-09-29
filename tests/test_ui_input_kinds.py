@@ -232,42 +232,55 @@ def test_every_entry_is_on_the_one_table_that_grows_the_buttons():
 
 def test_the_one_button_that_takes_a_file_or_a_folder_routes_like_the_cli(
         tmp_path):
-    """**`Open images…` 與命令列要對同一份資料給同一個答案。**
+    """**「Open data…」與命令列要對同一份資料給同一個答案。**
 
-    F114-2 把 `folder`／`image`／`raw` 併成一顆，而併得起來的唯一理由是
-    「是哪一種**看那條路徑就知道**」。那條規則於是有了**兩份實作** ——
-    UI 的 `open_dialogs.raw_folder_for` 與 CLI 的 `d4t.__main__._open_input`
-    —— 而兩份實作一定會漂（`CLAUDE.md` §0 的第一句話）。這一條把它們釘在一起。
+    F114-2 把 `folder`／`image`／`raw` 併成一顆，F121 期 4 再把 KLARF 併進來；
+    併得起來的唯一理由是「是哪一種**看那條路徑就知道**」。那條規則以前有**兩份
+    實作**（UI 的 `open_dialogs.raw_folder_for` 與 CLI 的 `_open_input`），靠這一條
+    釘著不漂；F121 期 4 起**只有一份**（`ingest.dataset.plan_open`），兩邊都叫它 ——
+    這一條改成釘「兩邊真的都在叫它」，以及那一份的每一格。
 
-    釘的是最容易漂的那一格：**`.raw` 認不認得**。`.raw` 解不開，所以它
-    **不在** `dataset._IMAGE_EXTS` 裡，兩邊都得自己多問一次 —— 少問的那一邊
-    會把 `.raw` 當成「沒有影像的資料夾」而給出一個空的 lot。
+    最容易漂的那一格仍然是 **`.raw`**：它解不開、不在 `_IMAGE_EXTS` 裡，少問
+    的那一邊會把它當成「沒有影像的資料夾」而給出一個空的 lot。
     """
+    import inspect
+
     import numpy as np
+
+    from make_sample import generate
 
     from d4t import __main__ as cli
     from d4t.core.ingest import imageio
+    from d4t.core.ingest.dataset import plan_open
     from d4t.ui import open_dialogs
 
     raw_dir = tmp_path / "raws"
     raw_dir.mkdir()
     (raw_dir / "a.raw").write_bytes(np.zeros((8, 8), "<u2").tobytes())
-
     png_dir = tmp_path / "pngs"
     png_dir.mkdir()
     imageio.save_gray(str(png_dir / "a.png"), np.full((8, 8), 20, np.uint8))
+    lot = generate(str(tmp_path / "lot"), n=2, seed=3)
+    klarf_dir = Path(lot["klarf"]).parent
 
-    # UI：資料夾與裡面那個檔案都要指到同一個 lot 資料夾
-    assert open_dialogs.raw_folder_for(str(raw_dir)) == str(raw_dir)
-    assert open_dialogs.raw_folder_for(str(raw_dir / "a.raw")) == str(raw_dir)
-    # ……而不是 raw 的那條路上，它要說「不是我」
-    assert open_dialogs.raw_folder_for(str(png_dir)) is None
-    assert open_dialogs.raw_folder_for(str(png_dir / "a.png")) is None
+    # 一份判斷：每一格
+    assert plan_open(raw_dir) == ("raw", str(raw_dir))
+    assert plan_open(raw_dir / "a.raw") == ("raw", str(raw_dir))
+    assert plan_open(png_dir) == ("folder", str(png_dir))
+    assert plan_open(png_dir / "a.png") == ("image", str(png_dir / "a.png"))
+    assert plan_open(lot["klarf"]) == ("klarf", lot["klarf"])
+    # 資料夾裡沒有影像、只有一份 KLARF（patch 是一個多頁 TIFF，不算影像檔）→ 那一份
+    assert plan_open(klarf_dir).what == "klarf"
+
+    # 兩邊都叫它（不是各自再寫一份）
+    assert "plan_open" in inspect.getsource(open_dialogs.open_path)
+    assert "plan_open" in inspect.getsource(cli._open_input)
 
     # CLI：同一個資料夾也要走 raw 那條（8x8 的 16-bit 只有一組正方形解）
     ds = cli._open_input(str(raw_dir), raw="8x8@16")
     assert ds.kind == "folder" and len(ds.items) == 1
     assert cli._open_input(str(png_dir)).kind == "folder"
+    assert cli._open_input(str(klarf_dir)).kind == "ebi_patch"
 
 
 def test_the_two_kinds_without_a_klarf_say_so_where_it_stays(window, tmp_path):

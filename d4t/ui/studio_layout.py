@@ -418,7 +418,7 @@ def _tool_button(win: "StudioWindow", text: str, tip: str, slot: Any,
 def build_shortcuts(win: "StudioWindow") -> None:
     handlers = {
         "open_klarf": partial(open_dialogs.open_source, win,
-                              "klarf"),
+                              scope.INPUT_SOURCES[0].key),
         "open_recipe": partial(open_dialogs.open_recipe, win),
         "save_recipe": partial(open_dialogs.save_recipe, win),
         "save_recipe_as": partial(open_dialogs.save_recipe_as, win),

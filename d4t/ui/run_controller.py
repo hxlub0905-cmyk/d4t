@@ -156,7 +156,7 @@ class RunController(QObject):
         is_all, self._running_all = self._running_all, False
         items = list(getattr(self.w.dataset, "items", []) or []) if self.w.dataset else []
         if not items:
-            self.w._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+            self.w._status("No dataset loaded yet — use “Open data…” first.", "error")
             return False
         if not self.w.model.node_order:
             self.w._status("The pipeline is empty — add a card before running.")
@@ -275,7 +275,7 @@ class RunController(QObject):
         """
         items = list(getattr(self.w.dataset, "items", []) or []) if self.w.dataset else []
         if not items:
-            self.w._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+            self.w._status("No dataset loaded yet — use “Open data…” first.", "error")
             return False
         self._running_all = True
         return self.run_trial(len(items), workers=TRIAL_WORKERS,

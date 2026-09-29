@@ -5,14 +5,16 @@
 可以支援 patch + 對應 KLARF，我需要他也能支援 **RSEM image + KLARF，或單純
 圖片**」，而 Input 段的定位是「**整個輸入 image source 的核心**」。
 
-| kind | 什麼樣的資料 | Studio 的入口 |
-|---|---|---|
-| ``ebi_patch`` | KLARF + patch TIFF（每顆連續幾頁）| ``Open KLARF…`` |
-| ``rsem`` | KLARF + 每顆一個影像檔 | ``Open KLARF…``（自動判別）|
-| ``folder`` | 一個資料夾的影像、或單獨一張、沒有 KLARF（`.raw` 也走這裡）| ``Open images…`` |
+| kind | 什麼樣的資料 |
+|---|---|
+| ``ebi_patch`` | KLARF + patch TIFF（每顆連續幾頁）|
+| ``rsem`` | KLARF + 每顆一個影像檔 |
+| ``folder`` | 一個資料夾的影像、或單獨一張、沒有 KLARF（`.raw` 也走這裡）|
 
-後兩者沒有 KLARF → 沒有座標、**寫不回 KLARF**，而那件事在載入的當下就講
-（資料集標籤上常駐 ``· no KLARF``，見 :func:`no_klarf_message`）。
+**三種都走同一顆「Open data…」**（F121 期 4）—— 是哪一種由挑的那條路徑自己
+回答（`ingest.dataset.plan_open`）。``folder`` 沒有 KLARF → 沒有座標、**寫不回
+KLARF**，而那件事在載入的當下就講（資料集標籤上常駐 ``· no KLARF``，見
+:func:`no_klarf_message`）。
 
 這個檔案還是「產品範圍開關」的家
 --------------------------------
@@ -51,13 +53,13 @@ __all__ = [
 #:
 #: **2026-08-17（F11 Input-3）：RSEM 與單張圖片打開了。** 使用者的話是
 #: 「目前 d4t 可以支援 patch + 對應 KLARF，我需要他也能支援 **RSEM image +
-#: KLARF，或單純圖片**」。四條路對應四種 source，而「一種 source 一個入口」
-#: 是使用者定的分類原則 —— 見 `StudioWindow` 工具列的三顆 Open。
+#: KLARF，或單純圖片**」。那時的分類原則是「一種 source 一個入口」；F121 期 4
+#: （2026-09-29）使用者改成**一顆 Open**（「我想把入口簡單化」），見 INPUT_SOURCES。
 #: **2026-09-18（F110）加過第五種 ``doe_folder``，2026-09-24（F121 期 0）刪掉了。**
 #: 它是「一個子目錄一顆 defect、裡面每個檔案一個 imaging condition」。使用者：
 #: 「DOE 的相關都先拿掉……（我當初設計錯了）。DOE 更像是一個資料夾內有多張
-#: 圖片但沒有 KLARF 的情況（單張 image）」—— 那正是 ``folder``，所以 DOE 的資料
-#: 走 `Open images…`。刪（不是收起來）是因為**設計錯了**，連 ingest 那一支一起
+#: 圖片但沒有 KLARF 的情況（單張 image）」—— 那正是 ``folder``（開一個影像
+#: 資料夾）。刪（不是收起來）是因為**設計錯了**，連 ingest 那一支一起
 #: 拿掉（見 `docs/plans/F121-simple-input.md` 期 0）。
 #: **2026-09-18（F114）：``tiff_stack`` 拿掉了。** 使用者：「stack 功能請幫我
 #: 拿掉 我們用不到」。拿掉的是**產品面**（入口與這張清單）—— `ingest` 那一支
@@ -334,38 +336,33 @@ class InputSource(NamedTuple):
     short: str = ""
 
 
-#: Studio 的資料入口（順序就是畫面上的順序）。
+#: Studio 的資料入口（順序就是畫面上的順序）—— **現在只有一顆**。
 #:
 #: **2026-09-18（F114-2）：五顆併成三顆。** 使用者：「目前的 input 入口搞得我
 #: 很亂（user 可能會被嚇掉）」→「入口整合成 3 顆」。判準是**使用者答不答得出來**：
+#: 併掉的 ``folder`` / ``image`` / ``raw`` 只差在「一個檔還是一疊檔」與「byte 要
+#: 怎麼變成像素」—— **看一眼那條路徑就知道**，看得出來的事不該拿去問人。
+#: **2026-09-24（F121 期 0）：三顆剩兩顆**（DOE 的 `Open conditions…` 設計錯了）。
 #:
-#: * 併掉的 ``folder`` / ``image`` / ``raw`` 是**同一種 kind**（``folder``），
-#:   只差在「一個檔還是一疊檔」與「byte 要怎麼變成像素」—— 而那兩件事
-#:   **看一眼那條路徑就知道**。看得出來的事不該拿去問人（推廣鐵則），所以
-#:   `Open images…` 吃「一個資料夾**或**一個檔案」，分岔在
-#:   `open_dialogs._open_picked`。
-#: * 沒併的兩顆是因為**看不出來**：KLARF 那顆服務兩種 kind，而 patch 與一顆
-#:   一張的差別寫在 KLARF 裡（`Images N { … }`）—— 拆成兩顆等於要使用者回答
-#:   一個檔案已經回答了的問題。
+#: **2026-09-29（F121 期 4）：兩顆剩一顆**「Open data…」。使用者：「我想把入口
+#: 簡單化」。F114-2 那時 KLARF 那顆沒併，理由是「看不出來」—— 其實看得出來：
+#: 一個檔案是不是 KLARF 讀檔頭就知道（`ingest.dataset.looks_like_klarf`），是
+#: patch 還是一顆一張由 KLARF 自己講。判斷只有一個家
+#: （`ingest.dataset.plan_open`），CLI 與 `open_dialogs.open_path` 都叫它。
 #:
-#: **2026-09-24（F121 期 0）：三顆剩兩顆。** 第三顆是 DOE 的 `Open conditions…`
-#: （一個子目錄一顆），使用者說那個設計錯了 —— DOE 的資料就是一個資料夾的單張
-#: 影像，走 `Open images…`。
+#: ``has_klarf`` 在這一列是 True：挑 KLARF 的那一種寫得回；沒有 KLARF 的那一句
+#: 寫在 ``what`` 裡，而且載進來之後常駐在資料集標籤上（:func:`no_klarf_message`）。
 INPUT_SOURCES: Tuple[InputSource, ...] = (
     InputSource(
-        key="klarf", kinds=("ebi_patch", "rsem"), title="Open KLARF…",
-        short="KLARF…",
-        what=("A KLARF and its images - either a patch TIFF with several "
-              "pages per defect, or one image file per defect. Which one it "
-              "is comes from the KLARF, you do not have to say."),
-        icon="folder", has_klarf=True),
-    InputSource(
-        key="images", kinds=("folder",), title="Open images…",
-        short="Images…",
-        what=("A folder of images, or one image on its own - every image "
-              "becomes one defect. Headerless .raw works too: it asks how "
-              "they are laid out, because a .raw file does not say."),
-        icon="folder_open", has_klarf=False),
+        key="data", kinds=("ebi_patch", "rsem", "folder"),
+        title="Open data…", short="Data…",
+        what=("A KLARF with its images, a folder of images, or one image on "
+              "its own - pick the file or the folder and d4t works out which. "
+              "A KLARF says whether it is a patch TIFF or one image per "
+              "defect; without a KLARF there are no coordinates and no "
+              "write-back. Headerless .raw works too: it asks how the files "
+              "are laid out, because a .raw file does not say."),
+        icon="folder_open", has_klarf=True),
 )
 
 

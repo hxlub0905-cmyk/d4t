@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -217,7 +217,7 @@ class Dataset:
 
         有 KLARF 就是那個檔（廠內講的就是那個檔名）；沒有 KLARF 的
         （folder / 單張）回第一顆影像所在的資料夾 —— 那是使用者
-        在 `Open images…` 挑的那個。
+        在「Open data…」挑的那個。
 
         ⚠ **答不出來就回空字串**，呼叫端那一列就不寫。一列寫著
         ``Source: unknown`` 比沒有那一列更像「我知道，只是弄丟了」。
@@ -579,18 +579,102 @@ def load_folder(folder) -> Dataset:
                         % (len(multipage), ", ".join(multipage[:3])
                            + ("…" if len(multipage) > 3 else "")))
     if not items:
-        # **只有子資料夾**的那一種要講出下一步（F121 期 0）：F110 的 DOE 入口
-        # 以前把它讀成「一個子目錄一顆」，那個入口拿掉之後它會走到這裡 ——
-        # 「找不到影像」是真的，但使用者要知道的是「影像在下一層」。
+        # **講得出下一步**（F121 期 0／期 4）：「找不到影像」是真的，但使用者要
+        # 知道的是「影像在下一層」或「這裡有的是 KLARF」。一份 KLARF 的時候
+        # `plan_open` 根本不會走到這裡（直接開那一份）；走到這裡的是好幾份。
+        klarfs = [n for n in sorted(os.listdir(d))
+                  if looks_like_klarf(os.path.join(d, n))]
         subs = [n for n in sorted(os.listdir(d))
                 if os.path.isdir(os.path.join(d, n))]
-        if subs:
+        if klarfs:
+            warnings.append(_KLARFS_ONLY_WARNING
+                            % (d, len(klarfs), ", ".join(klarfs[:3])
+                               + ("…" if len(klarfs) > 3 else "")))
+        elif subs:
             warnings.append(_SUBFOLDERS_ONLY_WARNING
                             % (d, ", ".join(subs[:3])
                                + ("…" if len(subs) > 3 else "")))
         else:
             warnings.append(f"No image files found in folder: {d}")
     return Dataset(kind="folder", klarf=None, items=items, warnings=warnings)
+
+
+#: 資料夾裡沒有影像、有好幾份 KLARF 時說的那一句（見 :func:`load_folder`）。
+_KLARFS_ONLY_WARNING = (
+    "No image files in %s - it has %d KLARF files (%s). Open the KLARF you "
+    "want itself: its images come with it.")
+
+#: 讀檔頭認 KLARF 時看的位元組數。KLARF 沒有可靠的副檔名（``.001`` /
+#: ``.klarf`` / ``.txt`` 都見過），而它的頭幾行一定有 ``FileVersion``（1.2）或
+#: ``Record FileRecord``（1.8）。
+_KLARF_SNIFF = 4096
+
+
+def looks_like_klarf(path: Any) -> bool:
+    """這個檔案**看起來是一份 KLARF** 嗎（讀檔頭，不看副檔名）。
+
+    影像檔一律不是（副檔名在 `_IMAGE_EXTS` / `RAW_EXTS` 裡的不讀）；讀不了的
+    也不是。用在「開一個資料夾」的那條路：資料夾裡只有一份 KLARF、沒有影像時，
+    使用者要的就是那一份（見 :func:`plan_open`）。
+    """
+    p = str(path)
+    ext = os.path.splitext(p)[1].lower()
+    if not os.path.isfile(p) or ext in _IMAGE_EXTS or ext in RAW_EXTS:
+        return False
+    try:
+        with open(p, "rb") as fh:
+            head = fh.read(_KLARF_SNIFF)
+    except OSError:
+        return False
+    return b"FileVersion" in head or b"FileRecord" in head
+
+
+class OpenPlan(NamedTuple):
+    """「開這條路徑」要走哪一條 ingest（:func:`plan_open` 的答案）。
+
+    ``what``：``"klarf"``（KLARF ＋ 它指到的影像）、``"folder"``（一個資料夾
+    的影像，每張一顆）、``"image"``（單獨一張）、``"raw"``（一個資料夾的
+    headerless ``.raw`` —— 寬高與位元深度要另外問，所以呼叫端各自處理）。
+    ``path``：真的要讀的那個（資料夾裡只有一份 KLARF 時是那一份的路徑；
+    指到一個 ``.raw`` 檔時是它所在的資料夾）。
+    """
+
+    what: str
+    path: str
+
+
+def plan_open(path: Any) -> OpenPlan:
+    """**一顆 Open 鈕**的判斷：這條路徑是什麼資料（F121 期 4）。
+
+    使用者挑一個檔案或一個資料夾，d4t 自己看出是哪一種 —— 看得出來的事不該
+    拿去問人（推廣鐵則）。**CLI 與 Studio 都叫這一支**（以前 CLI 的
+    `__main__._open_input` 與 Studio 的 `open_dialogs.raw_folder_for` 各寫一份，
+    靠一條測試綁著不漂）。
+
+    * 資料夾：有 ``.raw`` → ``raw``；裡面**正好一份** KLARF → ``klarf``（開
+      那一份 —— **不管旁邊有沒有影像**：EBI 的 lot 資料夾裡就躺著它的 patch
+      TIFF，而 RSEM 的影像常跟 KLARF 放在一起；KLARF 描述的正是那些影像，
+      挑這個資料夾的人要的是那一批，不是「每張圖一顆、沒有座標」）；
+      其餘 → ``folder``（有影像就一張一顆；沒有的話 `load_folder` 講出下一步：
+      影像在子資料夾、或有好幾份 KLARF 要挑一份）。
+    * 檔案：``.raw`` → ``raw``（它所在的資料夾，一批共用一組版面）；影像檔 →
+      ``image``；其餘 → ``klarf``（讀不懂的話 `load_dataset` 會講）。
+    """
+    p = str(path)
+    if os.path.isdir(p):
+        names = sorted(os.listdir(p))
+        if any(os.path.splitext(n)[1].lower() in RAW_EXTS for n in names):
+            return OpenPlan("raw", p)
+        klarfs = [n for n in names if looks_like_klarf(os.path.join(p, n))]
+        if len(klarfs) == 1:
+            return OpenPlan("klarf", os.path.join(p, klarfs[0]))
+        return OpenPlan("folder", p)
+    ext = os.path.splitext(p)[1].lower()
+    if ext in RAW_EXTS:
+        return OpenPlan("raw", os.path.dirname(p) or ".")
+    if ext in _IMAGE_EXTS:
+        return OpenPlan("image", p)
+    return OpenPlan("klarf", p)
 
 
 #: 資料夾裡沒有影像、只有子資料夾時說的那一句（見 :func:`load_folder`）。

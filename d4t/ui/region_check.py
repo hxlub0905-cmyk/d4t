@@ -391,7 +391,7 @@ def refresh_region_button(win: "StudioWindow") -> None:
     win.btn_region_check.setEnabled(bool(regions) and has_data)
     if regions and not has_data:
         win.btn_region_check.setToolTip(
-            "No dataset loaded yet — use “Open KLARF…” first.")
+            "No dataset loaded yet — use “Open data…” first.")
 
 
 def open_region_check(win: "StudioWindow", n: Optional[int] = None,
@@ -410,7 +410,7 @@ def open_region_check(win: "StudioWindow", n: Optional[int] = None,
         return False
     items = win._items()
     if not items:
-        win._status("No dataset loaded yet — use “Open KLARF…” first.",
+        win._status("No dataset loaded yet — use “Open data…” first.",
                     "error")
         return False
 

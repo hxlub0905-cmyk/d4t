@@ -152,15 +152,14 @@ GLOSSARY = (
 )
 
 
-def ways_in() -> int:
-    """「開啟 KLARF」以外還有幾條路進得來（F117 G1）。
+def open_title() -> str:
+    """那顆「開自己的資料」鈕在 Studio 上叫什麼（F121 期 4：入口只有一顆）。
 
-    **數出來的，不是寫死的數字** —— 這裡以前寫著「the other three kinds」並且
-    點名了 ``a multi-page TIFF``，而 ``tiff_stack`` 2026-09-18（F114）就從產品面
-    拿掉了：**第一次見面的那一頁在介紹一種打不開的東西**，而且沒有任何測試
-    問得出來。
+    **從表上讀，不寫死**（F117 G1 那一課：這一頁的數字與名字寫死過兩次，兩次
+    都漂了）。以前這裡是 ``ways_in()`` —— 「開 KLARF 以外還有幾條路」—— 而入口
+    合成一顆之後那個數字只剩附加檔，句子也就不該再數了。
     """
-    return max(0, len(scope.INPUT_SOURCES) - 1) + len(scope.ATTACHMENTS)
+    return scope.INPUT_SOURCES[0].title if scope.INPUT_SOURCES else ""
 
 
 def _intro_text() -> str:
@@ -193,8 +192,9 @@ def _footer_hint() -> str:
     ⚠ **是函式不是常數**（F117 G1）。兩個理由，而第二個是 bug：
 
     1. 最後那一句以前寫著「the four kinds of data it reads」—— 而
-       `scope.INPUT_SOURCES` 現在是**三**條（F114 拿掉 stack 之後）。
-       寫死的數字會漂，所以它現在是數出來的。
+       `scope.INPUT_SOURCES` 那時是**三**條（F114 拿掉 stack 之後）。寫死的
+       數字會漂，所以它改成數出來的；F121 期 4 入口合成一顆之後不再數，改成
+       講那顆鈕的名字（也是從表上讀的，:func:`open_title`）。
     2. 常數是在 **import 的那一刻**算的，於是 `scope.use_profile()` 換過
        profile 之後這一句還停在舊的分支 —— 那正是 U10 那條「旗標要透過模組
        讀」在講的事，而這一行剛好是漏網的那個。
@@ -206,9 +206,9 @@ def _footer_hint() -> str:
         return ("Open your own data, then press “Templates…” — do not start "
                 "from an empty pipeline; every template is a complete, "
                 "runnable one.")
-    return ("Close this window and Studio shows you the %d kinds of data it "
-            "reads, one entry each; then build the pipeline card by card from "
-            "the library on the left." % len(scope.INPUT_SOURCES))
+    return ("Close this window, open your data with “%s”, then build the "
+            "pipeline card by card from the library on the left."
+            % open_title())
 
 
 # --------------------------------------------------------------------------- #
@@ -511,9 +511,9 @@ class WelcomeDialog(QDialog):
         self.btn_open = QPushButton(strings.tr("Open my own data"), self)
         self.btn_open.setCursor(Qt.PointingHandCursor)
         self.btn_open.setToolTip(
-            "Close this window and go straight to picking a KLARF - the most "
-            "common case. Studio's start screen lists the other %d ways in, "
-            "one entry each." % ways_in())
+            "Close this window and pick your data - a KLARF, a folder of "
+            "images, or one image; d4t works out which (Studio's “%s”)."
+            % open_title())
         self.btn_open.setMinimumHeight(34)
         self.btn_open.clicked.connect(self.click_open)
 

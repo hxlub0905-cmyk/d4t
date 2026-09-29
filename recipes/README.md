@@ -129,7 +129,7 @@ python -m d4t run recipes/rsem-worst-box.json <你的.001> --workers 4
 
 ## `one-image-uniformity.json`
 
-**一張影像、沒有 KLARF、沒有參照**：用 `Open images…` 打開（指到那張圖，或指到
+**一張影像、沒有 KLARF、沒有參照**：用 `Open data…` 打開（指到那張圖，或指到
 一整批），這一份把量測框鋪滿整個視野、**逐格量一次**，然後回答一句話 ——
 **這片區域的灰階均不均勻**：CV %，以及左右與上下各斜了多少（`slope_per_100px`）。
 

@@ -1,6 +1,6 @@
 # F121 — 入口簡單化：一顆 Open、一張 Input 卡、recipe 不認資料型別
 
-狀態：**進行中（2026-09-24）—— 期 0～3 做完了（拿掉 DOE、recipe 不認型別、一張 Input 卡、Input 卡看資料）；剩期 4（一顆 Open）。**
+狀態：**五期都做完了（2026-09-29）—— 拿掉 DOE、recipe 不認型別、一張 Input 卡、Input 卡看資料、一顆 Open。等使用者試用後說收，再搬進 `docs/history/plans/`。**
 方向與四項做法使用者已同意（「好 開始做」）。
 
 同一系列的後續：ADC 與 Output 那兩張「特別的卡」各自另開一份（見 §6）。
@@ -286,7 +286,30 @@ route）；規模尺：遷移 22 → 23、`recipe.py` 648 → 650（各寫了為
   ⚠ 變灰是**顯示**；值還在 recipe 裡，換回有 KLARF 的資料時照樣用（同 `show_when`
   的規矩：藏起來的東西不准改變結果 —— `test_card_invariants` I9）。
 
-### 期 4 — 一顆 Open
+### 期 4 — 一顆 Open ✅ 2026-09-29
+
+做成的樣子：工具列、空白畫面、Input 卡上都是同一顆「Open data…」，按下去**直接**是
+對話框（以前卡上那顆先跳一張「你要開哪一種」的選單）。對話框檔案與資料夾都挑得到
+（非原生、`Directory` 模式關掉 `ShowDirsOnly`），挑完交給 core 的
+`ingest.dataset.plan_open` 回答是哪一種：`klarf` / `folder` / `image` / `raw`。
+CLI 的 `_open_input` 叫同一支（`tests/test_ui_input_kinds.py` 讀兩邊原始碼守著）。
+
+**計畫沒寫、做的時候量出來的一件**：使用者最常挑的是**整個 lot 資料夾**，而 EBI
+的 lot 資料夾裡 KLARF 旁邊就躺著它的 patch `.tif`（`.tif` 算影像檔）。第一版照
+「有影像就是 folder」判，結果那一批被當成「一張 TIFF 一顆、沒有 KLARF」。改成
+**資料夾裡正好一份 KLARF → 開那份 KLARF**（它的影像跟著來）；兩份以上不替使用者挑，
+`load_folder` 講「挑一份」並列出名字。認 KLARF 看**檔頭**（`looks_like_klarf`：前
+4 KB 有 `FileVersion`／`FileRecord`），不看副檔名 —— KLARF 沒有可靠的副檔名。
+
+**CLI 行為的兩個變化**（都是往「跟 Studio 一樣」）：一個**只有一份 KLARF 的資料夾**
+現在開那份 KLARF（以前當影像資料夾）；直接給一個 `.raw` **檔案**現在走 raw（以前
+只認資料夾）。
+
+**反向**：`tests/test_ui_one_open.py` 用 ast 掃 `d4t/ui` 的字串，不准再叫使用者去按
+`Open KLARF…`／`Open images…`／`Open conditions…`（註解與 docstring 裡講歷史不算）。
+上線前那一句在六個地方寫死過。
+
+原本的四條：
 
 * CLI 那一支「從路徑判斷」搬進 `core/ingest`（一個家），CLI 與 Studio 都叫它。
 * `scope.INPUT_SOURCES` 剩一列「Open data…」（`CLAUDE.md` §5：加／改入口＝改那張表，

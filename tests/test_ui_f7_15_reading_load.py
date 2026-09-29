@@ -131,7 +131,9 @@ def test_the_empty_panel_offers_what_you_can_actually_do(window):
     from d4t.ui import scope
 
     assert window.image_stack.currentIndex() == 0
-    assert window.btn_empty_open.text() == "Open KLARF…"
+    # 字**從表上讀**：F121 期 4 把兩顆 Open 併成一顆「Open data…」，而這一條
+    # 當場紅了 —— 壞掉的不是「空白狀態有那顆鈕」這件事。
+    assert window.btn_empty_open.text() == scope.INPUT_SOURCES[0].title
     assert window.btn_empty_open.isHidden() is False
 
     if scope.SHOW_SAMPLE_DATA:
