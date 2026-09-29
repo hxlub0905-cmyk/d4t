@@ -204,7 +204,7 @@ afcb0ef78833234cc7980ea7f2148ac6831d09ba docs/USING-UNIFORMITY.md
 c02b5ed1aa8d2c33e7bfa8a9ca830a324fbd0cb4 docs/plans/F117-ui-review.md
 45f1e8d8a78055d054e6bd4d799644b046856481 docs/plans/F121-simple-input.md
 79710ff832663a05b11c2f6fe57e1bd070e5c993 docs/plans/F122-adc-and-output.md
-bf0fcfc282001eaa8492c6e77fd229ebd21e5a6d docs/plans/F123-decision-and-output-cards.md
+c25e1bd43a3e7664e630af749bf08928512f7209 docs/plans/F123-decision-and-output-cards.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py

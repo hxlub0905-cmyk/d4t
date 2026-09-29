@@ -1,6 +1,6 @@
 # F123 — Decision 與 Output 變成真的卡（做法 B）
 
-狀態：**進行中（2026-09-29）—— 期 1（Decision 變成一張卡）做完；期 2～4 未開始。**
+狀態：**進行中（2026-09-29）—— 期 1 做完；期 2（數字線與結果線）在做；期 3～4 未開始。**
 使用者定調：「我想直接做 B」；三個問題的答案見 §1。
 
 F122 期 5 的續集。那一期原本要把 Output 排在固定的一欄、判定旁邊加一行「results →」
@@ -65,3 +65,30 @@ Input ━image━▶ … ━image━▶ GLV ═numbers═▶ Decision ═results
   就不留那張卡（`RecipeModel._drop_decision_cards`）。
 * 判定的 lint 掛到那張卡（`_node_problems`），另抄的那一份拿掉。
 * 出貨 recipe 存成第 6 版；`doctor.RECIPE_VERSION` 5 → 6。
+
+## 6. 期 2 的設計（2026-09-29）
+
+**線怎麼存**：跟影像線、區域線同一個 `recipe.edges`（F42 B4：一條線就是一條線）。
+判準跟 `is_region_edge` 同一個形狀 —— **看下游那顆埠**：卡片宣告自己有哪幾顆
+「資料埠」（`Step.data_inputs`：Decision 有 ``numbers``、Output 卡有 ``results``），
+`dst_in` 落在那裡就是資料線。來源那一頭的埠名是 ``numbers``（任何一張寫數字的卡）
+或 ``results``（Decision）。JSON：``["glv", "numbers", "decision", "numbers"]``、
+``["decision", "results", "report", "results"]``。一顆資料埠**可以接很多條**
+（`ambiguous-input` 不管它）。
+
+**數字線必要，由 lint 守、引擎不動**：判定（let／樹／分數）問到的數字，產出它的
+那張卡要有一條線接進 Decision，不然是 error（`decision-not-wired`，掛在 Decision
+卡上）。Studio 與 CLI 在 error 時都不跑，所以「必要」是真的必要；而引擎照舊把整張
+數字表給判定 —— 算出來的每一個數字、黃金值都不必動。「插入數字 ▾」只列接進來的卡。
+
+**Output 寫的是線上游的東西**：一張 Output 卡的「上游」＝沿著**所有**線（影像、
+區域、數字、結果）往回走到得了的卡。寫出去的數字欄＝上游卡片的數字；上游沒有
+Decision 就沒有類別（score／bin 那兩格空著）。判準用**排除**而不是列舉：宣告
+上屬於「不在上游的卡」的數字拿掉，認不出是誰的留著 —— 列舉的話，一個宣告漏掉的
+數字會安靜地從報表上消失。Output 卡一條線都沒有＝沒有東西可寫（error）。
+Write KLARF 寫的是類別，所以它的上游要有 Decision（error）。
+
+**遷移（第 7 版）**：判定問到的每一張卡補一條數字線；每一張 Output 卡補一條從
+Decision 來的結果線（沒有 Decision 就從每一張寫數字的卡）；以前寫得出去、但不在
+新上游裡的卡，各補一條直接接 Output 的數字線 —— 舊檔案寫出來的東西逐項相同。
+
