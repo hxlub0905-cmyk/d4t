@@ -28,6 +28,22 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F122 期 4：CLI 的 export 照卡片寫（2026-09-29）
+
+使用者：「繼續期4」。
+
+* `d4t export <run_id>` 預設**跑那一輪 recipe 上的 Output 卡**（同 Studio 的
+  「Write outputs」）；`--dry-run` 列每一張卡的去處與檔名（`Step.destination`，
+  跟 `run_batch` 走同一支）。`--csv` / `--excel` / `--klarf-out` 照舊是一次性的
+  出口、不看卡片 —— 沒拿掉，因為那是廠內可能已經寫進腳本的東西（「不確定的時候
+  先收起來」那一條的精神：不刪會被用到的路，只把預設換成對的那一條）。
+* `run` 的「開資料」與「講寫了什麼」兩段抽成 `_open_data` / `_report_batch`，
+  兩個命令共用（`export` 也吃 `--raw` / `--gds` / `--source` / `--cache`）。
+* 期 3 的全套跑出一個紅：`_positive_bins_of_run` 的 `except Exception` 沒留痕
+  （鐵則 7 的 `swallowed`）—— `test_core_log` 抓到，補上。
+
+---
+
 ## F122 期 3：ADC 的方向（2026-09-29）
 
 使用者：「繼續期3」。表在計畫書 §5。

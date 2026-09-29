@@ -1,6 +1,6 @@
 # F122 — ADC 與 Output：先修安靜做錯的，再收成一種說法
 
-狀態：**進行中（2026-09-29）—— 期 1（ADC）、期 2（Output）安靜做錯的都修完；期 3（ADC 的方向）做完；期 4（CLI export 照卡片寫）還沒做；期 5（畫布上 Output 的位置）等使用者點頭。**
+狀態：**進行中（2026-09-29）—— 期 1～4 做完（ADC 與 Output 安靜做錯的、ADC 的方向、CLI export 照卡片寫）；期 5（畫布上 Output 的位置）等使用者點頭。**
 方向使用者同意（「先修會安靜做錯的，接著按照你的建議修」）。
 
 F121（入口簡單化）的續集：使用者說 Input、ADC、Output「這三張比較特別」，F121 做了
@@ -87,17 +87,27 @@ Input，這一份做另外兩張。
 `decide_unanswered = 0`（判定樹本來就寫的那一格 —— 兩份 fixture recipe 用的是舊的
 分數門檻，現在走判定樹）。重凍過一次，diff 22 行全是那一欄。
 
-## 6. 期 4／5 — 還沒做的
+## 6. 期 4 — CLI 的 export 照卡片寫 ✅ 2026-09-29
 
-* **期 4（Output）**：CLI 的 `export` 也照卡片寫（現在是另一條路）。期 2 已經做掉
-  「Write to 預設在資料旁邊」與「沒有 KLARF 就跳過並講」。
+`d4t export <run_id>` 沒有給一次性的出口（`--csv` / `--excel` / `--klarf-out`）時，
+**跑那一輪存下來的 recipe 上的 Output 卡**（同一支 `run_batch_steps`，同 Studio 的
+「Write outputs」）；`--dry-run` 列每一張卡會寫到哪、寫哪幾個檔（`Step.destination`
+跟 `run_batch` 走同一支），一個位元組都不寫。開資料的那一段（`--raw` / `--gds` /
+`--source`）與講「寫了什麼」的那一段跟 `run` 共用（`_open_data`、`_report_batch`）。
+三個一次性的旗標照舊（不看卡片）—— 以前那是唯一的路，於是 CLI 寫出來的跟 Studio
+寫的不是同一份。守門：`tests/test_cli_export_uses_the_cards.py`。
+
+期 2 已經做掉的另外兩件：「Write to」預設在資料旁邊、沒有 KLARF 就跳過並講。
+
+## 7. 期 5 — 還沒做的
+
 * **期 5（畫布，等使用者點頭）**：Input 是起點、Output 是終點，左右對稱 ——
   Output 卡一律排在判定右邊那一欄；判定右緣一個固定的「results →」（字，不是線，
   同判定框左邊的「numbers →」）；副標從「(not connected)」改成講它寫什麼到哪；
   ADC 從虛線框改成一張普通的卡（點開看樹）。**不給 Output 埠**：那條線永遠只有
   一個地方可以接、一定要接（F49 量過：不用）。
 
-## 7. 這一份不做的
+## 8. 這一份不做的
 
 * Write comparison 併進 Write report（使用者：先不併）。
 * 判定與 Output 變成真的 DAG 節點（F49 量過，結論不變）。

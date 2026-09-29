@@ -209,6 +209,17 @@ class _OutputStep(Step):
             raise StepError(self.key, wrong)
         return folder
 
+    def destination(self, params: Dict[str, Any], dataset: Any) -> str:
+        """「Write to」解出來**真的是哪裡**（乾跑用，F122 期 4）。
+
+        跟 `run_batch` 走同一支（`_folder_of` / `_path_of`）：相對路徑接在資料
+        旁邊、空著用這張卡的預設。解不出來就 raise `StepError`（那句話就是答案）。
+        """
+        p = self.validate_params(params)
+        where = _DataOnly(dataset)
+        return (self._folder_of(p, where) if self.wants_folder()
+                else self._path_of(p, where))
+
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         """**不會被呼叫**：整批一次的卡由 `run_batch_steps` 跑。
 
@@ -226,6 +237,13 @@ class _OutputStep(Step):
         if not path:
             raise StepError(self.key, "nowhere to write - fill in “Write to”.")
         return _anchor(path, bctx)
+
+
+class _DataOnly:
+    """只帶著資料集的替身 —— `_anchor` / `_path_of` 只問 ``.dataset``。"""
+
+    def __init__(self, dataset: Any) -> None:
+        self.dataset = dataset
 
 
 def _anchor(path: str, bctx: Any) -> str:

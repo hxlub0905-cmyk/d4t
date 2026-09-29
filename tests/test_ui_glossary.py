@@ -52,9 +52,12 @@ def qapp():
 # --------------------------------------------------------------------------- #
 # 1. 那張表本身
 # --------------------------------------------------------------------------- #
-def test_the_table_covers_the_five_words_the_review_named():
+def test_the_table_covers_the_words_the_screen_still_uses():
+    """走查點名了五個字；F122 期 3 收掉了第五個（「verdict」講的就是一顆 defect
+    的 class —— 畫面上那一格現在也叫 Class）。"""
     assert [name for name, _ in GLOSSARY] == [
-        "score", "decision", "class", "bin", "verdict"]
+        "score", "decision", "class", "bin"]
+    assert "Verdict" not in " ".join(text for _, text in GLOSSARY)
 
 
 def test_it_reads_in_the_order_you_meet_them():
