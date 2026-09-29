@@ -76,7 +76,13 @@ def _badge(w):
 def _feature_that_exists(w) -> str:
     # `feature_owners()` 是「特徵名 → 誰算的」，鍵就是引擎看得到的那些名字
     # （淡線與 lint 用的是同一張表，所以這裡挑出來的一定接得上）。
-    names = sorted(n for n in w.model.feature_owners() if n != "score")
+    # F123 期 2 起「接得上」還要那張卡**有一條數字線接進 Decision**（數字線
+    # 必要）—— 所以只從接進來的卡裡挑。
+    dec = w.model.decision_node()
+    wired = {e.src for e in w.model.edges
+             if e.dst == dec and e.src_out == "numbers"}
+    names = sorted(n for n, owner in w.model.feature_owners().items()
+                   if owner in wired and n != "score")
     assert names, "前提：這份 recipe 真的量得出東西"
     return names[0]
 
