@@ -2668,9 +2668,7 @@ class StudioWindow(QMainWindow):
             self.tree_pane.set_rows(self.trial_results or [])
             self.tree_pane.suggest_question("")
         for view in self._canvases():
-            view.select_card(m.decision_node())
-            view.set_tree_collapsed(False)
-        self.selected_node = m.decision_node()
+            view.set_tree_collapsed(False)   # 選到的是第一題，不是那張卡
         self._on_tree_step_clicked("")
         # **看得到才算在畫布上**：樹長在所有卡片的下面，而畫布這時多半停在
         # 別處 —— 不 fit 的話使用者按了 Decision，畫面上什麼都沒發生。

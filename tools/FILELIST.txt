@@ -169,7 +169,7 @@ ec8dcfac4cac8b7e12e16e2c0b672cdab7f7dc63 d4t/ui/run_controller.py
 f9e23c2e81ab4b7cb8769cdc447e8fbc3c58c861 d4t/ui/status_action.py
 bd45db6478fdf58b021de5a75a1d0a7ee82d7986 d4t/ui/status_log.py
 7049adc73b88e981b292b8f168e593c0519b1dd8 d4t/ui/strings.py
-2f9be021ae5dec37693e083f9817daa1c359c2f9 d4t/ui/studio.py
+5f440f1809c2dd0a64aa62ecf4513590279a2fb9 d4t/ui/studio.py
 90f60de5550962d18b15b7e8efe7fcb67636742a d4t/ui/studio_layout.py
 1657d2a467406dff1f80677b888ae916e079e74c d4t/ui/template_dialog.py
 3602605dc1bb4e8542054d518220f389dc80be28 d4t/ui/theme.py
