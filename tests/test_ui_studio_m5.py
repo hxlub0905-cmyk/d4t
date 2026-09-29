@@ -396,6 +396,9 @@ def test_the_write_action_runs_the_whole_lot(qapp, synlot, tmp_path):
         node = win.model.add_step("output_report")
         win.model.set_param(node, "folder", str(out))
         win.model.set_param(node, "contents", "table")
+        # Output 寫的是線上游的東西（F123 期 2）—— 沒接線的不准跑。
+        win.model.add_edge(win.model.decision_node(), node,
+                           src_out="results", dst_in="results")
         assert win.run_all(sync=True) is True
         assert not out.exists(), "跑不寫（2026-09-09）：寫是另一顆鈕"
         assert win.write_outputs(sync=True) is True
@@ -437,6 +440,8 @@ def test_a_trial_says_it_wrote_nothing_when_output_cards_are_wired(window,
     nid = window.model.add_step("output_report")
     assert nid
     window.model.set_param(nid, "folder", str(tmp_path / "out"))
+    window.model.add_edge(window.model.decision_node(), nid,     # F123 期 2
+                          src_out="results", dst_in="results")
     qapp.processEvents()            # 讓加卡片引發的預覽先講完它那句話
     assert window.run_trial(N, workers=1, sync=True) is True
     # ⚠ **不要在這裡 processEvents**：預覽 worker 會把狀態列蓋掉，而這一條
