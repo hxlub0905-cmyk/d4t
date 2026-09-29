@@ -82,7 +82,7 @@ def describe_migration(raw: Any, recipe: Any) -> List[str]:
             # 補上來的 Decision 卡不是「拆出來的」（F123 期 1）：判定一直都在，
             # 只是以前不是一張卡。那一句要講它是什麼。
             decided = [nid for nid in new_ids
-                       if recipe.nodes[nid].step == "decision"]
+                       if getattr(recipe.nodes[nid], "step", "") == "decision"]
             if decided:
                 says.append("put the decision on the canvas as a card")
             extra = len(new_ids) - len(decided)
