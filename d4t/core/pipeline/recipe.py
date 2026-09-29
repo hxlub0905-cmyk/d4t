@@ -44,7 +44,7 @@ from .step import (  # noqa: F401  有人從 recipe 拿 REGISTRY／Step 等（�
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
     "RouteBy", "resolve_route", "route_for", "route_miss_message",
-    "Issue", "execution_order", "validate", "is_region_edge",
+    "Issue", "execution_order", "validate", "is_region_edge", "is_data_edge",
     "region_edge_values", "hydrate_regions", "RECIPE_VERSION",
     "describe_migration",
     "referenced_features",
@@ -82,6 +82,7 @@ from .recipe_schema import (  # noqa: F401
     _tree_whens,
     _version_tuple,
     hydrate_regions,
+    is_data_edge,
     is_region_edge,
     let_names_written,
     region_edge_values,
@@ -112,6 +113,7 @@ from .recipe_migrations import (  # noqa: F401
     _migrate_also_apply,
     _migrate_chart_params_into_look,
     _migrate_compare_method_into_reference,
+    _migrate_data_lines,
     _migrate_decision_into_a_card,
     _migrate_drop_use_within,
     _migrate_folded_output_cards,
@@ -439,6 +441,7 @@ class Recipe:
             _migrate_align_into_streams(nodes, edges)
         if version < 6:      # 判定變成一張卡（F123 期 1）
             _migrate_decision_into_a_card(nodes, routes, decide, score)
+        wire = version < 7   # 數字線與結果線（F123 期 2）—— 要整份 recipe，見下面
         version = max(version, RECIPE_VERSION)
         # F110：`subtract` 拆成比較卡與融合卡。**兩道都看舊的東西在不在**
         # （鐵則 9 的正牌用法），所以不掛在版本閘底下 —— 跑第二次是 no-op。
@@ -447,7 +450,7 @@ class Recipe:
         _migrate_split_out_combine(nodes, edges)
         _migrate_absolute_into_sign(nodes)
         hydrate_regions(nodes, edges)
-        return cls(
+        rec = cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,
             nodes=nodes,
@@ -460,6 +463,9 @@ class Recipe:
             decide=decide,
             route_by=route_by,
         )
+        if wire:
+            _migrate_data_lines(rec)
+        return rec
 
     def save(self, path: Any) -> None:
         """寫成一份 recipe JSON（utf-8、``indent=2``、**atomic**，鐵則 5）。

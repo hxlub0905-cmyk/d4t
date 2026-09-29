@@ -102,8 +102,8 @@ from ..export import report as export_report
 from ..pipeline import decide_tree
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_BATCH, GROUP_OUTPUT, SCALE_LOT, ParamSpec, Step, StepError,
-    register_step,
+    CATEGORY_BATCH, GROUP_OUTPUT, RESULTS, SCALE_LOT, ParamSpec, Step,
+    StepError, register_step,
 )
 from ..log import swallowed
 from ._util import parse_key_list
@@ -127,6 +127,10 @@ class _OutputStep(Step):
     # 快取邊界改成從宣告推導之後，這一格可以講實話了。
     category = CATEGORY_BATCH
     group = GROUP_OUTPUT
+    #: **寫的是線上游的東西**（F123 期 2，使用者：「不想綁死一定要有
+    #: Decision」）：從 Decision 接 ``results`` 就有類別，直接從量測卡接
+    #: ``numbers`` 就只有那些數字。可以接很多條（`batch.rows_for_output`）。
+    data_inputs = (RESULTS,)
     # **整批一次**（F17-④）。`is_batch` 現在是這一格推導出來的 ——
     # 直接寫 `is_batch = True` 仍然認得（舊卡片、外掛），但新的卡片
     # 請宣告尺度：布林答不出「還有第三種嗎」。
@@ -975,7 +979,7 @@ class OutputReportStep(_OutputStep):
         的，而它們是使用者眼中兩個不同的類別（`verdict_rows` 的說明）。順序與
         顏色跟畫布上的樹一樣 —— 三個地方講同一件事的時候，長相也該是同一個。
         """
-        decide = getattr(bctx.recipe, "decide", None)
+        decide = bctx.decision()
         names = parse_key_list(p["plot_features"])
         if not names:
             # **判定問過的那幾個** —— 使用者想看的散布，九成是他拿來分類的那些。
@@ -1110,7 +1114,7 @@ class OutputReportStep(_OutputStep):
             CONTENT_REPORT: lambda path: export_html.write_html(
                 export_html.build_report(
                     rows, title, export_report.detail_feature_keys(rows),
-                    decide=getattr(bctx.recipe, "decide", None),
+                    decide=bctx.decision(),
                     images=images, info=run),
                 path),
             CONTENT_TABLE: lambda path: export_report.write_csv(
@@ -1181,6 +1185,9 @@ class OutputKlarfStep(_OutputStep):
     """整批的結果 → 寫回 KLARF（三種模式）。"""
 
     key = "output_klarf"
+    #: 它寫的是每一顆的類別 —— 上游要有 Decision（`data_lines` 的
+    #: ``needs-decision``）。
+    needs_decision = True
     label = "Write KLARF"
     WHAT = "KLARF file"
     help = ("Write the results back into a KLARF file when the whole lot has "
@@ -1641,7 +1648,7 @@ class OutputCharStep(_OutputStep):
                 skipped += 1
 
         # ---- ③ 判定：葉子的名字**不在 rows 裡**，要反查一次 ----------------
-        decide = getattr(bctx.recipe, "decide", None)
+        decide = bctx.decision()
         verdicts: Dict[str, Dict[str, Any]] = {}
         for entry in decide_tree.verdict_rows(decide, rows):
             for did in entry.get("ids") or []:

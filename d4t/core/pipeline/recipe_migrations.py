@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import replace
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from d4t.core.log import swallowed
 
@@ -32,7 +32,10 @@ from .recipe_schema import (
 from .step import (
     FEATURE_TYPES,
     IMAGE_TYPES,
+    NUMBERS,
     REGISTRY,
+    RESULTS,
+    SCALE_LOT,
     SINGLE_IMAGE_KINDS,
     Step,
 )
@@ -478,6 +481,63 @@ def _migrate_decision_into_a_card(nodes: Dict[str, "RecipeNode"],
                                              "scale", "") == "lot"),
                   len(order))
         routes[key] = list(order[:at]) + [nid] + list(order[at:])
+
+
+def _migrate_data_lines(recipe: Any) -> None:
+    """數字線與結果線（F123 期 2）：舊檔案補線，**判定與寫出去的東西逐項不變**。
+
+    **只對第 6 版以前的檔案**（`Recipe.from_json_dict` 的版本閘，鐵則 9 —— 第 7 版
+    起線是使用者拉的，一份刻意沒接某張卡的新 recipe 不該被補）。補三種：
+
+    1. 判定問到的每一個數字 → 產出它的卡補一條 ``numbers`` 線接進 Decision
+       （數字線是必要的，`validate` 的 ``decision-not-wired``）；
+    2. 有 Decision 的話，每一張 Output 卡補一條 Decision → Output 的 ``results``；
+    3. **以前寫得出去、補完之後不在上游的**：Output 以前寫整張數字表，現在寫的是
+       線上游的東西（`batch.rows_for_output`）—— 每一張寫數字、但不在那張 Output
+       上游的卡，各補一條直接接 Output 的 ``numbers`` 線。不補的話舊報表會安靜地
+       少幾欄。
+
+    在 `Recipe` 組好之後跑：「誰產出哪個數字」只有一份答案（`bound_specs`），而它
+    要一份完整的 recipe。只加線，不動任何卡片或參數 —— 引擎算出來的數字不變。
+    """
+    from .recipe_schema import upstream_of
+    from .recipe_validate import referenced_features
+    from .verdict_features import bound_specs   # 延後：它 import recipe
+
+    nodes, edges = recipe.nodes, recipe.edges
+    owners: Dict[str, Set[str]] = {}
+    for kind in recipe.routes:
+        try:
+            specs = bound_specs(recipe, kind)
+        except Exception:  # 壞掉的 route 由 lint 講；這裡只是少補幾條線
+            swallowed("recipe_migrations._migrate_data_lines")
+            continue
+        for b in specs:
+            if b.node_id:
+                owners.setdefault(str(b.spec.name), set()).add(b.node_id)
+    have = set(edges)
+
+    def add(edge: "Edge") -> None:
+        if edge not in have:
+            edges.append(edge)
+            have.add(edge)
+
+    decision = next((nid for nid, n in nodes.items() if n.step == "decision"), "")
+    if decision:
+        for name in sorted(referenced_features(recipe)):
+            for owner in sorted(owners.get(name, ())):
+                add(Edge(owner, decision, NUMBERS, NUMBERS))
+    writers = sorted({o for found in owners.values() for o in found})
+    for out in sorted(nid for nid, n in nodes.items()
+                      if getattr(REGISTRY.get(n.step), "scale", "") == SCALE_LOT
+                      and RESULTS in getattr(REGISTRY.get(n.step),
+                                             "data_inputs", ())):
+        if decision:
+            add(Edge(decision, out, RESULTS, RESULTS))
+        up = upstream_of(out, edges)
+        for w in writers:
+            if w not in up:
+                add(Edge(w, out, NUMBERS, RESULTS))
 
 
 def _migrate_single_into_input(nodes: Dict[str, "RecipeNode"]) -> None:

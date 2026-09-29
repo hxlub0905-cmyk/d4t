@@ -23,9 +23,11 @@ from d4t.core.pipeline.recipe import (  # noqa: E402
     DECISION_ISSUE_CODES, NON_DECISION_NODELESS_CODES,
 )
 
-# 2026-09-24 起 lint 住在 `recipe_validate.py`（`recipe.py` 拆成四支）。
-_SRC = (REPO / "d4t" / "core" / "pipeline" / "recipe_validate.py").read_text(
-    encoding="utf-8")
+# 2026-09-24 起 lint 住在 `recipe_validate.py`（`recipe.py` 拆成四支）；
+# 數字線與結果線那幾條住在 `data_lines.py`（F123 期 2）。
+_SRC = "\n".join(
+    (REPO / "d4t" / "core" / "pipeline" / name).read_text(encoding="utf-8")
+    for name in ("recipe_validate.py", "data_lines.py"))
 
 
 def _nodeless_codes() -> set:

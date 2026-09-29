@@ -894,7 +894,26 @@ def _lint_recipe(seq):
         nodes[nid] = RecipeNode(id=nid, step=key,
                                 params=get_step(key).validate_params({}))
         order.append(nid)
+    # 數字線與結果線（F123 期 2）：Output 卡**要有東西接進來**，這條路就是使用者
+    # 照著會拉的那幾條 —— 有 Decision 就從它接 results，沒有就從最後一張寫數字
+    # 的卡接 numbers。影像線照舊靠名字（這張表問的是「組得起來嗎」）。
+    from d4t.core.pipeline.recipe import Edge
+    from d4t.core.pipeline.step import NUMBERS, RESULTS
+
+    edges = []
+    for i, nid in enumerate(order):
+        cls = get_step(nodes[nid].step)
+        if RESULTS not in cls.data_inputs:
+            continue
+        for j in range(i - 1, -1, -1):
+            src = order[j]
+            src_cls = get_step(nodes[src].step)
+            sends = src_cls.data_output(nodes[src].params)
+            if sends in (NUMBERS, RESULTS):
+                edges.append(Edge(src, nid, sends, RESULTS))
+                break
     return Recipe(recipe_id="combo", routes={"ebi_patch": order}, nodes=nodes,
+                  edges=edges,
                   score=ScoreSpec(expr="0", threshold=0.0,
                                   bins={"below": 0, "above": 1}))
 
@@ -1023,6 +1042,8 @@ def test_every_visible_card_can_be_wired_up_without_a_dead_end():
         "roi_compare": ["roi_reference"],
         # 配對卡吐的那條流（配到的那顆的圖）—— 上游一樣是**另一張 Input 卡**。
         "align_to": ["pair_source"],
+        # 寫類別的那一張要有判定在上游（F123 期 2 的 `needs-decision`）。
+        "output_klarf": ["decision"],
     }
     keys = [d["key"] for d in visible_steps([s.describe() for s in list_steps()])]
     dead_ends = {}

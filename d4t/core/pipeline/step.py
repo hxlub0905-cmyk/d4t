@@ -286,6 +286,16 @@ IMAGE_TYPES = ("image_key", "image_keys")
 #: 而畫面上那條線看起來完全正常。
 REGION_TYPES = ("region_key", "region_keys")
 
+#: **數字線與結果線**的埠名（F123 期 2）。量測卡的 ``numbers`` 接進 Decision，
+#: Decision 的 ``results`` 接進 Output 卡（Output 也收量測卡直接來的 ``numbers``）。
+#:
+#: 它們**不是參數**：不寫進任何一格，線本身就是全部的資訊（「哪幾張卡的數字進了
+#: 判定」「Output 寫哪幾張卡的東西」）。所以判斷一條線是不是資料線看的是下游那張
+#: 卡宣告的 :attr:`Step.data_inputs`（`recipe_schema.is_data_edge`），跟
+#: `is_region_edge` 看下游那一格的型別同一個形狀。
+NUMBERS, RESULTS = "numbers", "results"
+DATA_PORTS = (NUMBERS, RESULTS)
+
 #: 值裡面裝著**特徵名**的型別（F37）。改名遷移照這一份走。
 #:
 #: 三種裝法不一樣，所以改寫的方式也不一樣（見
@@ -1032,6 +1042,23 @@ class Step(ABC):
     #: 的第 N 處（`tests/test_size_ceilings.py` 數著），而且它跟卡片隔了一個
     #: 目錄 —— 卡片改名的那天沒有人會想到去改它。手冊是**這張卡自己的**事。
     manual: ClassVar[str] = ""
+    #: 收**資料線**的入埠（F123 期 2；見 :data:`NUMBERS`）。一顆資料埠**接很多
+    #: 條**，跟影像埠「一顆一條」相反。預設沒有。
+    data_inputs: ClassVar[Tuple[str, ...]] = ()
+
+    @classmethod
+    def data_output(cls, params: Dict[str, Any]) -> str:
+        """這張卡的資料出埠：寫數字的卡是 :data:`NUMBERS`，其餘 ``""``。
+
+        「寫數字」＝宣告了特徵（`resolve_features`）。整批一次的卡是終點
+        （Output 段不吐東西）；Decision 覆寫成 :data:`RESULTS`。
+        """
+        if cls.scale == SCALE_LOT:
+            return ""
+        try:
+            return NUMBERS if cls.resolve_features(params) else ""
+        except Exception:  # 宣告壞了由 lint 講；這裡只是一顆埠
+            return ""
 
     # ---- 參數 -------------------------------------------------------------
     @classmethod

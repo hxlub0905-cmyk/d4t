@@ -301,7 +301,11 @@ FILE_CEILINGS = {
     # 的那一道）與它的轉入口一行。版本閘拆成兩段（`< 5` / `< 6`）是必要的：
     # 第 5 版以前那三道**不能**對第 5 版的檔案再跑一次（F68 那一道會把逐框比較
     # 的參照釘回舊行為）。
-    "d4t/core/pipeline/recipe.py": 653,
+    # 2026-09-29（F123 期 2）：653 → 659（+6）。第 7 版遷移要**整份 recipe**
+    # （「誰產出哪個數字」只有 `bound_specs` 一份答案），所以它排在組好之後：
+    # `rec = cls(...)` ／ `if wire:` 那幾行與 `is_data_edge` 的轉出口。內容住在
+    # `recipe_migrations._migrate_data_lines` 與新的 `data_lines.py`。
+    "d4t/core/pipeline/recipe.py": 659,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右
@@ -652,9 +656,11 @@ COUNT_CEILINGS = {
     # 那句話有答案**：兩份出貨 recipe 與 `dual_route_basic.json` 都寫著
     # `load_single`，不遷移的話它們開起來是一條 `unknown-step`。
     "recipe_migrations": (
+        # 2026-09-29（F123 期 2）：24 → 25。數字線與結果線（第 7 版）：舊檔案補
+        # 線，判定與寫出去的東西逐項不變。
         # 2026-09-29（F123 期 1）：23 → 24。判定變成一張卡（第 6 版）。
-        24,
-        "recipe_migrations.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 6）",
+        25,
+        "recipe_migrations.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 7）",
         _migration_count,
     ),
 }

@@ -7,7 +7,8 @@ Output card 的定位（理論上 input = output）」→「我想直接做 B」
 以前判定不是一張卡：它是 recipe 最上層的 ``decide``，畫布上畫成一個紫色虛線框
 （`tree_scene._ZoneItem`），卡片庫裡有一張叫「Decision」的偽卡（``__score__``）。
 這一張卡讓它跟 Input、Output 同一種身分 —— 從卡片庫加、在畫布上拖、刪得掉，
-下一期（F123 期 2）它會有埠：數字從量測卡接進來、結果接出去給 Output。
+而且有埠（F123 期 2）：數字從量測卡接進來（``numbers``）、結果接出去給 Output
+（``results``）。
 
 **判定的內容仍然住在 ``recipe.decide``**（let ／ 樹 ／ 分數）。這張卡是它在
 畫布上的**那一張**：一份 recipe 最多一張（`validate` 的 ``duplicate-decision``），
@@ -22,7 +23,8 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from ..pipeline.context import Context
-from ..pipeline.step import CATEGORY_ADC, GROUP_ADC, Step, register_step
+from ..pipeline.step import (CATEGORY_ADC, GROUP_ADC, NUMBERS, RESULTS, Step,
+                             register_step)
 
 
 @register_step
@@ -38,6 +40,14 @@ class DecisionStep(Step):
     reads = []
     writes = []
     features_out = []
+    #: 量測卡的數字從這裡接進來（F123 期 2）。判定問得到的數字**只有**接進來的
+    #: 那幾張卡的（`validate` 的 ``decision-not-wired``）；引擎照舊把整張數字表
+    #: 給判定 —— 必要性由 lint 守（error 不跑），算出來的數字一個都不動。
+    data_inputs = (NUMBERS,)
+
+    @classmethod
+    def data_output(cls, params: Dict[str, Any]) -> str:
+        return RESULTS            # 類別（與判定自己算的數字）接給 Output
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         # 判定在整條 pipeline 跑完之後才算（`engine._eval_score`）——

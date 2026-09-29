@@ -379,6 +379,13 @@ class BatchContext:
     #: 症狀都是「報表慢了十倍」而不是一個錯誤。
     cache: Any = None
     dataset_token: str = ""
+    #: 這張 Output 卡的上游有沒有 Decision（F123 期 2，`data_lines.rows_for_output`）。
+    #: 沒有 = 沒有類別：``rows`` 的 score／bin 是空的，:meth:`decision` 回 None。
+    decided: bool = True
+
+    def decision(self) -> Any:
+        """這張卡看得到的判定（上游沒有 Decision 就是 ``None``）。"""
+        return getattr(self.recipe, "decide", None) if self.decided else None
 
     def rerun(self, item: Any, sources: Optional[Dict[str, Any]] = None):
         """重跑**一顆**，拿回它的 Context（出圖那幾張卡走這一支）。

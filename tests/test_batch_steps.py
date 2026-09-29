@@ -37,7 +37,7 @@ from d4t.core.pipeline import (  # noqa: E402
     BatchContext, get_step, run_batch, run_batch_steps, run_defect,
 )
 from d4t.core.pipeline.recipe import (  # noqa: E402
-    Recipe, RecipeNode, ScoreSpec,
+    Edge, Recipe, RecipeNode, ScoreSpec,
 )
 from d4t.core.pipeline.step import REGISTRY  # noqa: E402
 
@@ -59,15 +59,26 @@ def _recipe(out_dir, **over):
     params = {"folder": str(out_dir), "contents": "table"}
     params.update(over)
     return Recipe(
-        recipe_id="t", routes={KIND: ["load", "glv", "out"]},
+        recipe_id="t", routes={KIND: ["load", "glv", "dec", "out"]},
         nodes={
             "load": RecipeNode("load", "load_patch", {}),
             "glv": RecipeNode("glv", "glv_stats",
                               {"source": "test", "metrics": "glv_max"}),
+            "dec": RecipeNode("dec", "decision", {}),
             "out": RecipeNode("out", "output_report", params),
         },
+        edges=_LINES("out"),
         score=ScoreSpec(expr="glv_max", threshold=1.0,
                         bins={"below": 0, "above": 1}))
+
+
+def _LINES(out):
+    """影像線、GLV 的數字接進 Decision、Decision 的結果接進 Output（F123 期 2：
+    Output 寫的是**線**上游的東西 —— 沒接線的 Output 沒有東西可寫，而靠名字
+    隱式綁的影像流不算一條線，所以 Input 卡那一條也畫出來）。"""
+    return [Edge("load", "glv", "test", "source"),
+            Edge("glv", "dec", "numbers", "numbers"),
+            Edge("dec", out, "results", "results")]
 
 
 # --------------------------------------------------------------------------- #
@@ -291,13 +302,15 @@ def test_nothing_configured_yet_points_at_the_field(tmp_path):
 # --------------------------------------------------------------------------- #
 def _out_recipe(node_id, step, params):
     return Recipe(
-        recipe_id="out", routes={KIND: ["load", "glv", node_id]},
+        recipe_id="out", routes={KIND: ["load", "glv", "dec", node_id]},
         nodes={
             "load": RecipeNode("load", "load_patch", {}),
             "glv": RecipeNode("glv", "glv_stats",
                               {"source": "test", "metrics": "glv_max"}),
+            "dec": RecipeNode("dec", "decision", {}),
             node_id: RecipeNode(node_id, step, params),
         },
+        edges=_LINES(node_id),
         score=ScoreSpec(expr="glv_max", threshold=1.0,
                         bins={"below": 0, "above": 1}))
 

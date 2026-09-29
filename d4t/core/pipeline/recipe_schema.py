@@ -13,7 +13,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type
+from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set,
+                    Tuple, Type)
 
 from d4t.core.log import swallowed
 
@@ -759,6 +760,45 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
             return spec.type in REGION_TYPES
     return False
 
+
+def is_data_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
+                 registry: Optional[Dict[str, Type[Step]]] = None) -> bool:
+    """這條線是**數字線／結果線**嗎（F123 期 2）——「``dst_in`` 是不是下游那張卡
+    的資料入埠」（`Step.data_inputs`：Decision 的 ``numbers``、Output 的
+    ``results``）。
+
+    跟 :func:`is_region_edge` 同一個形狀，理由也一樣：**全 repo 只准用這一支
+    判斷**（畫布、排版、引擎、健檢都要分得出三種線），而判準住在下游那張卡上
+    —— 那一顆埠收什麼是它宣告的。來源那一頭（``src_out`` 是 ``numbers`` 還是
+    ``results``、它真的吐那一種嗎）由 lint 講（``data-port-mismatch``）。
+    """
+    if registry is None:
+        registry = REGISTRY
+    if not edge.dst_in:
+        return False
+    node = nodes.get(edge.dst)
+    step_cls = registry.get(node.step) if node is not None else None
+    return step_cls is not None and edge.dst_in in step_cls.data_inputs
+
+
+def upstream_of(node_id: str, edges: Sequence["Edge"]) -> Set[str]:
+    """沿**所有**線（影像、區域、數字、結果）往回走得到的卡，不含自己（F123 期 2）。
+
+    「Output 寫的是線上游的東西」的那個「上游」，也是「判定接得到哪幾張卡」
+    的答案的一半 —— 兩個問題問同一支，才不會一個說得到、一個說不到。
+    """
+    parents: Dict[str, Set[str]] = {}
+    for e in edges:
+        parents.setdefault(e.dst, set()).add(e.src)
+    seen: Set[str] = set()
+    stack = [str(node_id)]
+    while stack:
+        for p in parents.get(stack.pop(), ()):
+            if p not in seen and p != node_id:
+                seen.add(p)
+                stack.append(p)
+    return seen
+
 #: 目前這一版 recipe 的形狀（F42 B3，2026-08-27）。
 #:
 #: 1 = 區域依賴存在**參數**裡（F12 §3）；
@@ -778,6 +818,9 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
 #: 6 = **判定是一張卡**（F123 期 1）：有判定（``decide`` 或舊的分數門檻）的
 #:     recipe 在 ``nodes`` 裡有一張 ``decision``。只能靠版本號判斷：第 6 版起
 #:     「有判定就有那張卡」是存檔就成立的事，「卡不在」不是舊檔案的記號。
+#: 7 = **數字線與結果線**（F123 期 2）：判定問到的卡接一條 ``numbers`` 進
+#:     Decision、Output 卡的東西從接進來的線來。第 7 版起線是使用者拉的，
+#:     「線不在」不是舊檔案的記號（`_migrate_data_lines`）。
 #:
 #: 新建的 recipe 就是「這一版寫的」，所以 :class:`Recipe` 的預設值是它 ——
 #: 那不是裝飾：遷移以 ``version < RECIPE_VERSION`` 為判準，而一份記憶體裡組出來
@@ -785,7 +828,7 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
 #: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
 #: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
 #: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
-RECIPE_VERSION = 6
+RECIPE_VERSION = 7
 
 
 def _cycles_with(edges: List["Edge"], extra: "Edge",

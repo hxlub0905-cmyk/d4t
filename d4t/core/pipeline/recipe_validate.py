@@ -60,6 +60,7 @@ DECISION_ISSUE_CODES = frozenset({
     "ambiguous-decision", "bad-bins", "bad-let", "bad-rule",
     "deep-tree", "no-rules", "score-expr", "unknown-feature",
     "conflicting-outcome", "unknown-outcome",                  # F119
+    "decide-without-card",                                     # F123
 })
 
 #: 沒有節點、但**不是**判定的那幾條（見上）。兩張表合起來要蓋滿。
@@ -1889,6 +1890,9 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 title="Two Decision cards", route=str(k), advice=advice,
                 detail="route '%s' has %d Decision cards. %s"
                        % (k, len(cards), advice)))
+        # 數字線與結果線（F123 期 2）：數字線必要、Output 寫上游的東西。
+        from .data_lines import data_line_issues
+        issues.extend(data_line_issues(recipe, k, order, registry))
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
         # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於

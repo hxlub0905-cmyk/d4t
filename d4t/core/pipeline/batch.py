@@ -790,7 +790,26 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
                 continue
             try:
                 params = step_cls.validate_params(node.params)
-                step_cls().run_batch(bctx, params)
+                step_cls().run_batch(_view_for(bctx, nid, step_cls,
+                                               route_keys, reg), params)
             except Exception as e:  # 鐵則 7 的跨顆版
                 bctx.errors[nid] = str(e)
     return bctx
+
+
+def _view_for(bctx: Any, nid: str, step_cls: Any, route_keys: Sequence[str],
+              reg: Dict[str, Any]) -> Any:
+    """一張 Output 卡看到的那一份：**線上游的東西**（F123 期 2）。
+
+    結果表換成 `data_lines.rows_for_output` 過濾過的；其餘（``outputs`` /
+    ``warnings`` / ``errors`` 那幾格）是**同一個物件**，所以這張卡寫的、報的都
+    回到整批那一份。沒有資料入埠的卡看整份（它們不是 Output）。
+    """
+    import dataclasses
+
+    from .data_lines import rows_for_output
+
+    if not getattr(step_cls, "data_inputs", ()):
+        return bctx
+    rows, decided = rows_for_output(bctx.recipe, nid, bctx.rows, route_keys, reg)
+    return dataclasses.replace(bctx, rows=rows, decided=decided)

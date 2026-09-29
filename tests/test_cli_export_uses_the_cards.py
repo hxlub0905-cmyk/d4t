@@ -26,18 +26,25 @@ sys.path.insert(0, str(REPO / "tools"))
 
 import d4t.core.steps  # noqa: F401,E402 — 觸發卡片註冊
 from d4t.__main__ import main  # noqa: E402
-from d4t.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec  # noqa: E402
+from d4t.core.pipeline.recipe import (  # noqa: E402
+    Edge, Recipe, RecipeNode, ScoreSpec,
+)
 from d4t.core.store import RunStore  # noqa: E402
 
 
 def _recipe(**outputs):
     nodes = {"load": RecipeNode("load", "load_patch", {}),
              "glv": RecipeNode("glv", "glv_stats",
-                               {"source": "test", "metrics": "glv_max"})}
+                               {"source": "test", "metrics": "glv_max"}),
+             "dec": RecipeNode("dec", "decision", {})}
+    # 線都畫出來（F123 期 2：Output 寫的是線上游的東西，沒接線的不准跑）。
+    edges = [Edge("load", "glv", "test", "source"),
+             Edge("glv", "dec", "numbers", "numbers")]
     for nid, (step, params) in outputs.items():
         nodes[nid] = RecipeNode(nid, step, params)
+        edges.append(Edge("dec", nid, "results", "results"))
     return Recipe(recipe_id="exp", routes={"ebi_patch": list(nodes)},
-                  nodes=nodes,
+                  nodes=nodes, edges=edges,
                   score=ScoreSpec(expr="glv_max", threshold=1.0,
                                   bins={"below": 0, "above": 1}))
 

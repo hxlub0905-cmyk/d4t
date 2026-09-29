@@ -63,7 +63,7 @@ def recipe_for(folder, glv=None, **over):
     gp.update(glv or {})
     r = Recipe(
         recipe_id="unif_demo",
-        routes={KIND: ["load", "roi", "glv", "out"]},
+        routes={KIND: ["load", "roi", "glv", "dec", "out"]},
         nodes={
             "load": RecipeNode("load", "load_patch",
                                {"channel_map": "1:single"}),
@@ -75,11 +75,15 @@ def recipe_for(folder, glv=None, **over):
                 # 新的 `doubled-prefix` lint 當場咬住這一份。
                 "roi_out": "cells", "place": "crossing", "pick": "none"}),
             "glv": RecipeNode("glv", "glv_stats", gp),
+            "dec": RecipeNode("dec", "decision", {}),
             "out": RecipeNode("out", "output_uniformity", params),
         },
         edges=[Edge("load", "roi", "single", "source"),
                Edge("roi", "glv", "cells", "roi"),
-               Edge("load", "glv", "single", "source")],
+               Edge("load", "glv", "single", "source"),
+               # F123 期 2：Output 寫的是線上游的東西。
+               Edge("glv", "dec", "numbers", "numbers"),
+               Edge("dec", "out", "results", "results")],
         score=ScoreSpec(expr="glv_worst_score", threshold=3.0,
                         bins={"below": 0, "above": 1}))
     # ⚠ **手搭的 Recipe 要自己水合區域線。** `roi="cells"` 那一格是從線上

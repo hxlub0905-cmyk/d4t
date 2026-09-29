@@ -310,6 +310,7 @@ d4t/
 │   │   ├── recipe.py         #   Recipe(DAG) ＋ 執行順序；對外唯一入口（其餘三支從這裡轉出口）
 │   │   ├── recipe_schema.py  #   節點／線／判定樹／分流的資料模型與 JSON 形狀（2026-09-24 拆出）
 │   │   ├── recipe_migrations.py # 每一道版本遷移（呼叫順序在 `Recipe.from_json_dict`）
+│   │   ├── data_lines.py     #   數字線與結果線（F123）：lint 與「Output 寫線上游的東西」
 │   │   ├── recipe_validate.py #  lint 式 validate
 │   │   ├── expression.py     #   score 表達式引擎（自寫 parser，**不用 eval**）
 │   │   ├── decide_tree.py    #   判定樹怎麼走 —— 引擎與 UI 共用同一支
