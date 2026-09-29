@@ -222,7 +222,9 @@ def test_an_old_two_item_edge_still_loads():
     assert r.edges == [Edge(src="load", dst="snr", src_out="", dst_in="")]
     # 讀進來之後寫出去就是新格式，而**執行順序沒有變**
     assert r.to_json_dict()["edges"] == [["load", "", "snr", ""]]
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
+    # 舊檔案有判定（分數門檻）→ 第 6 版的遷移補一張 Decision 卡在最後
+    # （F123 期 1）。原本那三張的順序沒有變。
+    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decision"]
 
 
 def test_an_edge_with_ports_round_trips():

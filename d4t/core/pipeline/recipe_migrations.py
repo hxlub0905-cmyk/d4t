@@ -443,6 +443,35 @@ def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
                                         enabled=node.enabled)
 
 
+def _migrate_decision_into_a_card(nodes: Dict[str, "RecipeNode"],
+                                  routes: Dict[str, List[str]],
+                                  decide: Optional["DecideSpec"],
+                                  score: "ScoreSpec") -> None:
+    """有判定的舊檔案 → 畫布上補一張 Decision 卡（F123 期 1）。
+
+    **只對第 5 版以前的檔案**（`Recipe.from_json_dict` 的版本閘；鐵則 9：第 6 版
+    起「有判定就有那張卡」是存檔時就成立的事，所以不能拿「卡不在」當判準 ——
+    一份手寫的新 recipe 刻意沒有那張卡，不該被補）。
+
+    有判定＝有 ``decide``，或舊的分數門檻（`recipe_schema.legacy_decision` 會把它
+    變成一題樹）。卡排在每一條 route 上**第一張 Output 卡的前面**：沒有線的卡照
+    route 的排列跑、也照它排版，而判定在量測之後、Output 之前。卡沒有參數，判定
+    的內容照舊住在 ``decide`` —— 所以引擎算出來的數字一個都不變。
+    """
+    if decide is None and not str(getattr(score, "expr", "") or "").strip():
+        return
+    if any(n.step == "decision" for n in nodes.values()):
+        return
+    nid = _fresh_id(nodes, "decision")
+    nodes[nid] = RecipeNode(id=nid, step="decision", params={})
+    for key, order in routes.items():
+        at = next((i for i, x in enumerate(order)
+                   if x in nodes and getattr(REGISTRY.get(nodes[x].step),
+                                             "scale", "") == "lot"),
+                  len(order))
+        routes[key] = list(order[:at]) + [nid] + list(order[at:])
+
+
 def _migrate_single_into_input(nodes: Dict[str, "RecipeNode"]) -> None:
     """``load_single``「SEM image」→ ``load_patch``「Input」（F121 期 2）。
 

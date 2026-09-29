@@ -112,6 +112,7 @@ from .recipe_migrations import (  # noqa: F401
     _migrate_also_apply,
     _migrate_chart_params_into_look,
     _migrate_compare_method_into_reference,
+    _migrate_decision_into_a_card,
     _migrate_drop_use_within,
     _migrate_folded_output_cards,
     _migrate_folded_region_cards,
@@ -430,13 +431,15 @@ class Recipe:
         # 區域參數 → 線（F42 B3）。**以版本號為判準**，而且要排在
         # `hydrate_regions` **前面** —— 它補的線正是下一行要讀的東西。
         version = _as_int(d.get("version", 1), "recipe 'version'")
-        if version < RECIPE_VERSION:
+        if version < 5:
             _migrate_region_params_into_edges(nodes, routes, edges)
             # 逐框比較的參照怎麼取（F68）—— 舊檔案釘回當時的行為。
             _migrate_glv_ref_pairing(nodes)
             # align 換形狀（F109）—— 連下游指著 `ref_aligned` 的地方一起改。
             _migrate_align_into_streams(nodes, edges)
-            version = RECIPE_VERSION
+        if version < 6:      # 判定變成一張卡（F123 期 1）
+            _migrate_decision_into_a_card(nodes, routes, decide, score)
+        version = max(version, RECIPE_VERSION)
         # F110：`subtract` 拆成比較卡與融合卡。**兩道都看舊的東西在不在**
         # （鐵則 9 的正牌用法），所以不掛在版本閘底下 —— 跑第二次是 no-op。
         # ⚠ 換卡那一道要排在 `absolute` 那一道**前面**：換完之後的節點已經不是

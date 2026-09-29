@@ -775,13 +775,17 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
 #:     `absolute` 那一道跟第 4 版同一個理由只能靠版本號 —— 它有預設值，
 #:     舊檔案多半沒寫它。
 #:
+#: 6 = **判定是一張卡**（F123 期 1）：有判定（``decide`` 或舊的分數門檻）的
+#:     recipe 在 ``nodes`` 裡有一張 ``decision``。只能靠版本號判斷：第 6 版起
+#:     「有判定就有那張卡」是存檔就成立的事，「卡不在」不是舊檔案的記號。
+#:
 #: 新建的 recipe 就是「這一版寫的」，所以 :class:`Recipe` 的預設值是它 ——
 #: 那不是裝飾：遷移以 ``version < RECIPE_VERSION`` 為判準，而一份記憶體裡組出來
 #: 的 recipe（Studio 的 ``to_recipe()``）也會走
 #: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
 #: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
 #: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
-RECIPE_VERSION = 5
+RECIPE_VERSION = 6
 
 
 def _cycles_with(edges: List["Edge"], extra: "Edge",

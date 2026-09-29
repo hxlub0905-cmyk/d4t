@@ -29,6 +29,8 @@ from d4t.core.steps._util import centre_name, others_name
 from d4t.core.ingest.dataset import data_profile
 from d4t.core.steps.load import channel_map_for
 from d4t.core.steps.glv_stats import EACH_BOX, POOLED
+from d4t.core.steps.decision import DecisionStep
+from d4t.core.pipeline.recipe_schema import legacy_decision
 
 #: GLV 卡最上面那三顆「要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
 #: 沒有新欄位，選了只動 roi / reference_region 兩條線與 across_boxes 那一格
@@ -444,10 +446,41 @@ class RecipeModel:
             i += 1
         return f"{base}{i}"
 
+    def decision_node(self) -> str:
+        """畫布上那一張 Decision 卡的 id（沒有回 ``""``）—— F123 期 1。
+
+        判定是一張卡之後，「這份 recipe 有沒有判定」有兩個問法：``decide``
+        （內容）與這張卡（它在畫布上的位置）。它們是**同一件事**，所以加卡與刪卡
+        讓兩邊一起動（:meth:`add_step` / :meth:`remove`），而認這張卡只有這一處。
+        """
+        return next((nid for nid in self.node_order
+                     if nid in self.nodes
+                     and self.nodes[nid].step == DecisionStep.key), "")
+
     def add_step(self, step_key: str, at: Optional[int] = None) -> str:
         step_cls = get_step(step_key)          # 未知 key 會 raise KeyError
+        deciding = step_key == DecisionStep.key
+        if deciding and self.decision_node():
+            # 一份 recipe 判一次（`validate` 的 duplicate-decision）—— 已經有了
+            # 就回那一張，呼叫端把它選起來，而不是生出第二張同一棵樹。
+            return self.decision_node()
         self._push_undo()
         node_id = self._new_id(step_key)
+        if deciding:
+            # 卡與內容一起來（同一步復原）：沒有判定就給一個空的 —— 還沒有問題的
+            # 判定樹，由呼叫端（Studio 的 `add_decision`）接著建議第一題。
+            if self.decide is None:
+                self.decide = legacy_decision(
+                    ScoreSpec(self.expr, self.threshold, self.bins)) \
+                    or DecideSpec(let=[], rules=[], otherwise_bin=0,
+                                  otherwise_label="", score="")
+                self.expr = ""
+            if at is None:
+                # 排在第一張 Output 卡前面：判定在量測之後、寫出去之前。
+                at = next((i for i, nid in enumerate(self.node_order)
+                           if nid in self.nodes and getattr(
+                               get_step(self.nodes[nid].step), "scale", "")
+                           == "lot"), None)
         # **剛加進來的卡前後都是空的**（F10，使用者定調 2026-08-17）：
         # 全預設之後把每一格輸入清掉。畫布上沒有線，這張卡就沒有來源 ——
         # 而在這之前，一張新卡帶著 ``source="diff"`` 這種預設值進來，畫布照著
@@ -482,6 +515,10 @@ class RecipeModel:
         """
         if node_id in self.nodes:
             self._push_undo()
+            if self.nodes[node_id].step == DecisionStep.key:
+                # 刪掉 Decision 卡＝拿掉判定（同一步復原；見 `decision_node`）。
+                self.decide = None
+                self.expr = ""
             del self.nodes[node_id]
             self.node_order = [n for n in self.node_order if n != node_id]
             gone = [(e.dst, e.dst_in) for e in self.edges

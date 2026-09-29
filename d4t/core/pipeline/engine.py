@@ -760,10 +760,14 @@ def _eval_score(recipe: Recipe,
     decide = getattr(recipe, "decide", None)
     if decide is None:
         decide = legacy_decision(recipe.score)
-        if decide is None:
-            ctx.features.pop("score", None)
-            return None, None
-        recipe = replace(recipe, decide=decide)
+        if decide is not None:
+            recipe = replace(recipe, decide=decide)
+    # **停用的 Decision 卡不判**（F123 期 1）：判定是一張卡之後，「停用的卡不會
+    # 跑」這一條也要對它成立。沒有那張卡（手寫的 recipe）照舊判。
+    cards = [n for n in recipe.nodes.values() if n.step == "decision"]
+    if decide is None or (cards and not any(n.enabled for n in cards)):
+        ctx.features.pop("score", None)
+        return None, None
     return _eval_decision(recipe, ctx)
 
 

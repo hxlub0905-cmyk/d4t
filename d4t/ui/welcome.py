@@ -142,8 +142,10 @@ def axes_note() -> str:
 GLOSSARY = (
     ("score", "One number per defect, worked out from what the cards "
               "measured. You write the expression."),
-    ("decision", "The tree on the canvas. Each step asks the score (or any "
-                 "other number) a question."),
+    # 「Decision」大寫：F123 期 1 起它是一張卡（卡片庫與畫布上就叫這個名字）。
+    ("Decision", "The card on the canvas that sorts the defects - open it to "
+                 "see its tree. Each step asks the score (or any other number) "
+                 "a question."),
     ("class", "Where a defect ends up on that tree - you name it yourself "
               "(“a spot stands out”). The chip beside the preview shows the "
               "class one defect got, with its bin."),

@@ -1879,6 +1879,16 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             regions |= set(step_cls.resolve_regions_out(p))
 
         issues.extend(_output_collisions(recipe, k, clean_params, registry))
+        cards = [nid for nid in route if nid in recipe.nodes
+                 and recipe.nodes[nid].step == "decision"]
+        if len(cards) > 1:
+            advice = ("A recipe decides once - remove the extra Decision "
+                      "card (its tree is the same one).")
+            issues.append(Issue(
+                code="duplicate-decision", level="error", node_id=cards[1],
+                title="Two Decision cards", route=str(k), advice=advice,
+                detail="route '%s' has %d Decision cards. %s"
+                       % (k, len(cards), advice)))
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
         # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於

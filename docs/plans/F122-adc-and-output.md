@@ -1,6 +1,6 @@
 # F122 — ADC 與 Output：先修安靜做錯的，再收成一種說法
 
-狀態：**進行中（2026-09-29）—— 期 1～4 做完（ADC 與 Output 安靜做錯的、ADC 的方向、CLI export 照卡片寫）；期 5（畫布上 Output 的位置）等使用者點頭。**
+狀態：**期 1～4 做完（2026-09-29）；期 5（畫布上的位置）改走 F123（做法 B：Decision、Output 變成真的卡，見 `F123-decision-and-output-cards.md`）。等使用者說收，再搬進 `docs/history/plans/`。**
 方向使用者同意（「先修會安靜做錯的，接著按照你的建議修」）。
 
 F121（入口簡單化）的續集：使用者說 Input、ADC、Output「這三張比較特別」，F121 做了

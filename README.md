@@ -33,7 +33,7 @@ d4t 的第一原則是：
 | | |
 |---|---|
 | **輸入** | 三種 source：`ebi_patch`（KLARF ＋ 多頁 patch TIFF，`.tif` 或 `.I01`）、`rsem`（KLARF ＋ 每顆一個影像檔）、`folder`（一個資料夾的影像、或單獨一張，無 KLARF；`.raw` 也在這條）。⚠ `doe_folder`（一個子目錄一顆）2026-09-24 刪掉（使用者：設計錯了；DOE 的資料走 `folder`）。⚠ `tiff_stack` 2026-09-18 從產品面拿掉（使用者「我們用不到」），`ingest` 那一支還在 |
-| **組裝** | 19 張步驟卡片（卡片庫現行可見 19 張 —— `HIDDEN_STEPS` 目前是空的）；節點畫布拉線接卡，recipe 即 DAG |
+| **組裝** | 20 張步驟卡片（卡片庫現行可見 20 張 —— `HIDDEN_STEPS` 目前是空的）；節點畫布拉線接卡，recipe 即 DAG |
 | **量測** | GLV 統計與區域對比（含 SNR）、逐框比較找出最異常的那一格（`worst_*`，框即 ROI 自己）、CD 次像素邊緣定位（同一趟給 LWR／LER）、對焦品質指標 |
 | **輸出** | 四張 Output 卡（跑完先看 Results，按 `Write outputs` 才寫、只跑一次）：**報表資料夾**（`Write report` —— 勾選決定裡面有什麼：`report.html`／`defects.csv`／`report.xlsx`／`spread.html` box plot／`images/*.jpg`／`recipe.json`，6000 顆量級一次出得完）、**寫回 KLARF**（class／bin／DSIZE，或 Top-N 新檔）、**點對點比較報表**（`Write comparison`，一顆一列兩張圖）、**均勻度圖**（`Write charts` —— 一顆一頁、一個點是一格量測框，見 [`docs/USING-UNIFORMITY.md`](docs/USING-UNIFORMITY.md)）|
 | **介面** | PySide6 桌面編輯器（Studio）＋ CLI（可排程、可腳本化）。Results 視窗：縮圖與表格同一份排序／篩選、點一顆主畫面跟著跳、`Re-run` 改了判定樹只重判（秒級）、`Write outputs` 看過了才寫 |
@@ -62,8 +62,8 @@ Input → Enhance → ROI → Measure → Compare → ADC → Output
 補值變成那一行的「missing ⇒」屬性。唯一出處是 `pipeline/step.py` 的 `GROUP_ORDER`。）
 
 兩個軸各有用途，不合併；詳見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
-ADC 判定不是一張卡片，而是 recipe 頂層的 `decide` 區塊 —— 一棵**判定樹**，
-在畫布上有自己的判定區（拖得動、拿得掉），可分出兩類以上；
+ADC 判定是一張卡（`decision`「Decision」，F123）—— 點開是一棵**判定樹**，
+內容住在 recipe 頂層的 `decide` 區塊（一份 recipe 一張），可分出兩類以上；
 另有 `route_by` 讓不同 CLASSNUMBER 走不同的卡片。
 
 **畫布上的每一條線都是使用者拉的。** 影像流的身分是 `(節點, 埠)` 而非全域名稱；

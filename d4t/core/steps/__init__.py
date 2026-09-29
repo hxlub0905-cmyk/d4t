@@ -10,6 +10,7 @@
   align, subtract, align_to, pair_source,
   roi_reference,
   glv_stats, cd_measure, focus_quality,
+  decision,
   output_report, output_klarf, output_char, output_uniformity
 
 **2026-09-02：``roi_mask``（Mask from regions）刪掉了。** 使用者：「請幫我拿掉
@@ -105,10 +106,12 @@ from . import roi_reference  # roi_reference（三種找法 → 具名區域）
 from . import glv_stats      # glv_stats（GLV：stats / compare）
 from . import cd             # cd_measure（CD）
 from . import quality        # focus_quality（Focus index）
+from . import decision       # decision（ADC：判定樹是一張卡，F123）
 from . import output         # Output 段（report / klarf / comparison / charts）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith", "combine",
     "quality", "glv_stats",
+    "decision",
     "output",
 ]
