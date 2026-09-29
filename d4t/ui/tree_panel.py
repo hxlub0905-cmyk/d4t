@@ -752,7 +752,9 @@ class TreePanel(QWidget):
             # 而一格空白會把使用者丟回原點，那才是要避免的東西。
             rows = list(self._rows)
         lets = [str(x.name) for x in getattr(self._model.decide, "let", [])]
-        cond = suggest_condition(rows, prefer=lets)
+        # 只建議**接進 Decision** 的數字（F123 期 2：數字線必要）。
+        wired = [x.split("\t", 1)[0] for x in self._model.decision_numbers()]
+        cond = suggest_condition(rows, prefer=lets, allowed=wired + lets)
         if cond is None:
             return False
         self._model.set_tree_when(str(path), format_condition(*cond))

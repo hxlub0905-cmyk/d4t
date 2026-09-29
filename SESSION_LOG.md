@@ -28,6 +28,37 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F123 期 2：數字線與結果線（2026-09-29）
+
+使用者：「繼續做第二期」；中途「附上畫布截圖」。三個答案見計畫書 §1，設計在 §6。
+
+* **core**（`data_lines.py`，新）：埠由卡片宣告（`Step.data_inputs` / `data_output`），
+  `is_data_edge` 看下游那顆埠 —— 跟 `is_region_edge` 同一個形狀，線照舊住
+  `recipe.edges`。lint：`decision-not-wired`（error，數字線必要）、
+  `output-not-connected`、`needs-decision`（Write KLARF）、`data-port-mismatch`、
+  `decide-without-card`。**引擎一個數字都沒動**：必要性靠 Studio／CLI 在 error 時
+  不跑來守。
+* **Output 寫的是線上游的東西**（`rows_for_output`）：上游沒有 Decision 就沒有
+  score／bin；判準是**排除**（屬於不在上游的卡的數字拿掉、認不出是誰的留著）。
+  ⚠ 「上游」只沿**線**走：靠名字隱式綁的影像流不算 —— 從舊檔案遷移上來的不受影響
+  （第 3 步替每一張寫數字、但不在上游的卡補一條直接的線），記憶體裡手組的 recipe
+  要把線畫出來（十幾支測試因此補線）。
+* **第 7 版遷移** `_migrate_data_lines`：判定問到的卡補數字線、Decision 補結果線、
+  以前寫得出去但不在新上游裡的卡補直接的線。出貨三份存成第 7 版；doctor 6 → 7。
+* **畫布**：紫色方埠（數字／結果），`numbers` 標籤小一號放得下；拉線的第三條岔路
+  `edit_plan._plan_data`（擋得住的四件事各講一句話）、剪一條就是一條
+  （`canvas_edges`）、刪卡不提議補資料線；`card_menu` 列得出資料線能接到哪；
+  「插入數字 ▾」與樹的起手建議只列接進 Decision 的卡（`decision_numbers`、
+  `suggest_condition(allowed=)`）。
+* 全套抓到的一個真的：一份 recipe 多一張同名的 GLV 時，`glv_max` 的值來自新的
+  那一張，而判定問的正是它 —— 那張沒接進 Decision，新規則當場擋下（以前是一條
+  「撞名」的 warning，跑下去用的是另一張卡的數字）。
+* 規模尺：`recipe.py` 653 → 659、遷移道數 24 → 25、`canvas.py` 3,154 → 3,193（簽）；
+  `studio.py` 4,186 → 4,168、方法 191 → 190（判定摘要搬進 `tree_scene`）。
+* 還沒做：Tidy up 換行之後結果線會從右上拉回左下、穿過別的卡（期 4 一起看）。
+
+---
+
 ## F123 期 1：Decision 變成一張真的卡（2026-09-29）
 
 使用者：「我會覺得對畫布來說很奇怪，不管是 ADC card 或者是 Output card 的定位

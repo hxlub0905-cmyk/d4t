@@ -31,6 +31,7 @@ recipe JSON 的結構沒有 ``pos`` 欄位，為了在畫布上存座標而改�
 """
 from __future__ import annotations
 from d4t.core.log import swallowed
+from d4t.core.pipeline.step import DATA_PORTS
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -434,6 +435,15 @@ def _diamond(centre: QPointF, r: float) -> QPainterPath:
     return path
 
 
+def _accepts(spec: Dict[str, Any], kind: str) -> bool:
+    """這顆輸入埠收不收 ``kind`` 那種線（``accepts`` 沒寫就是它自己的那一種）。
+
+    Output 的 ``results`` 埠兩種都收（F123 期 2：直接接量測卡也可以）。
+    """
+    return str(kind) in (spec.get("accepts")
+                         or [str(spec.get("kind") or "image")])
+
+
 def _port_label_text(spec: Dict[str, Any]) -> str:
     """一顆輸入埠旁邊寫什麼字（F68）。
 
@@ -461,7 +471,9 @@ def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
 
     ``lit``（F68）：拖線拖到一半時，接得上的埠會亮起來、放大一點。
     """
-    col = region_color() if kind == "region" else QColor(TOKENS["canvas_edge"])
+    data = kind in DATA_PORTS               # 數字／結果（F123 期 2）：方埠
+    col = (region_color() if kind == "region" else
+           QColor(TOKENS["seg_adc"]) if data else QColor(TOKENS["canvas_edge"]))
     if lit:
         col = QColor(TOKENS["canvas_edge_active"])
     pen = QPen(col, 2.0 if lit else 1.2)
@@ -472,6 +484,12 @@ def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
     if kind == "region":
         p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
         p.drawPath(_diamond(anchor, _REGION_PORT_R + grow))
+        return
+    if data:
+        r = _PORT_R + grow
+        p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
+        p.drawRoundedRect(QRectF(anchor.x() - r, anchor.y() - r, 2 * r, 2 * r),
+                          1.5, 1.5)
         return
     p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
     p.drawEllipse(anchor, _PORT_R + grow, _PORT_R + grow)
@@ -770,7 +788,7 @@ class _NodeItem(QGraphicsItem):
         except Exception:  # 畫圖用，壞了就不亮
             return set()
         return {str(sp.get("name") or "") for sp in self.in_specs()
-                if str(sp.get("kind") or "image") == str(kind)}
+                if _accepts(sp, str(kind))}
 
     def in_anchors_local(self) -> List[QPointF]:
         """每個輸入埠在本地座標的位置（由上而下均分節點左緣）。
@@ -826,7 +844,7 @@ class _NodeItem(QGraphicsItem):
                 best, best_d2 = i, d2
         return best
 
-    def in_param_at(self, pos: QPointF) -> str:
+    def in_param_at(self, pos: QPointF, kind: str = "") -> str:
         """``pos`` 落在哪一個輸入**參數**上（``a`` / ``b`` / ``streams``…）。
 
         放開滑鼠的地方不一定準準地在埠上 —— 使用者多半是往卡片上一丟。
@@ -836,10 +854,16 @@ class _NodeItem(QGraphicsItem):
         specs = self.in_specs()
         if not specs:
             return ""
+        # ``kind``（F123 期 2）：拖的是數字線就落在收數字的那顆 —— 一張卡上有
+        # 影像埠也有資料埠時，「最近的那一顆」會把數字線丟進影像埠。都不收就
+        # 照舊取最近的（接不上由 `edit_plan` 講出為什麼）。
+        ok = [i for i, sp in enumerate(specs) if kind and _accepts(sp, kind)]
+        if len(ok) == 1:
+            return str(specs[ok[0]].get("name", ""))
         idx = self.in_port_at(pos)
         if idx is None:
             anchors = self.in_anchors_local()
-            idx = min(range(len(anchors)),
+            idx = min(ok or range(len(anchors)),
                       key=lambda i: (pos - anchors[i]).y() ** 2)
         return str(specs[min(idx, len(specs) - 1)].get("name", ""))
 
@@ -873,6 +897,9 @@ class _NodeItem(QGraphicsItem):
         outs += [{"name": str(r), "kind": "region"}
                  for r in (self.info.get("regions_out") or [])
                  if str(r)][:_MAX_REGION_PORTS]
+        data = str(self.info.get("data_out") or "")   # 數字／結果（F123 期 2）
+        if data:
+            outs.append({"name": data, "kind": data})
         return outs
 
     def out_kinds(self) -> List[str]:
@@ -1139,6 +1166,18 @@ class _NodeItem(QGraphicsItem):
                             else TOKENS["text_secondary"]))
             # 同左邊那一側：放不下要看得出來被切了（`layout_label` 以前畫成
             # `layout_`，讀起來像一條真的叫那個名字的流）。
+            if kind in DATA_PORTS:
+                # 資料埠的字是固定的兩個（`numbers` / `results`，F123 期 2）：
+                # 小一號、寬到 boundingRect 邊上（NODE_W+58）為止 —— 不然
+                # 永遠被切成 `nu…rs`，而那是一個讀不出來的字。
+                p.save()
+                f = p.font()
+                f.setPixelSize(theme.font_px("font_tiny"))
+                p.setFont(f)
+                _draw_elided(p, QRectF(anchor.x() + 4, anchor.y() - 7,
+                                       _PORT_LABEL_W, 14), name)
+                p.restore()
+                continue
             _draw_elided(p, QRectF(anchor.x() + 4, anchor.y() - 7,
                                    _PORT_LABEL_W - 10, 14), name,
                          mode=Qt.ElideMiddle)
@@ -1419,7 +1458,7 @@ class _EdgeItem(QGraphicsItem):
         # 滑鼠移上來要出現「斷開」的 ×（F7-22）。
         self.setAcceptHoverEvents(True)
         what = ("region “%s”" % self.out_name() if self.kind() == "region"
-                else "image")
+                else self.kind() if self.kind() in DATA_PORTS else "image")
         self.setToolTip("%s → %s  (%s; click the × to disconnect)"
                         % (src.node_id, dst.node_id, what))
 
@@ -2738,16 +2777,16 @@ class PipelineCanvas(QGraphicsView):
             self._link_line = None
         if src is None:
             return
+        specs = src.out_specs()
+        kind = (str(specs[port].get("kind") or "image")
+                if 0 <= port < len(specs) else "image")
         for item in self._scene.items(scene_pos):
             if isinstance(item, _NodeItem) and item is not src:
                 self.edge_added.emit(
                     src.node_id, item.node_id, self.stream_of(src, port),
-                    item.in_param_at(item.mapFromScene(scene_pos)))
+                    item.in_param_at(item.mapFromScene(scene_pos), kind))
                 return
         # 落在空白處：講出來，讓 Studio 開一張「接得上的卡」的選單。
-        specs = src.out_specs()
-        kind = (str(specs[port].get("kind") or "image")
-                if 0 <= port < len(specs) else "image")
         self.link_dropped.emit(src.node_id, kind, self.stream_of(src, port),
                                float(scene_pos.x()), float(scene_pos.y()))
 

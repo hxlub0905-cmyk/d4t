@@ -222,7 +222,10 @@ FILE_CEILINGS = {
     # 2026-09-29（F123 期 1）：4,236 → **4,186**（−50）。Decision 變成一張卡：
     # 卡片庫的 `__score__` 偽卡、`_decision_problem`（判定的 lint 走卡片那條路）
     # 拿掉，`remove_decision` 的確認搬進 `canvas_edges`。
-    "d4t/ui/studio.py": 4186,
+    # 2026-09-29（F123 期 2）：4,186 → **4,168**（−18）。判定摘要搬進
+    # `tree_scene.score_summary_text`（騰出位子給資料埠那一行，`canvas_edges.
+    # data_ports`）。
+    "d4t/ui/studio.py": 4168,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -355,7 +358,13 @@ FILE_CEILINGS = {
     # 淺色只有 **1.03** 的對比（那條框等於不存在）。多的三行是那句說明。
     # 2026-09-29（F123 期 1）：3,163 → 3,154（−9）。判定區的外框拿掉了（樹掛在
     # Decision 卡底下、拖卡就拖樹），整區拖曳那一族（位移、重設）跟著走。
-    "d4t/ui/canvas.py": 3154,
+    # 2026-09-29（F123 期 2）：3,154 → 3,193（+39）。**第三種埠**：數字／結果
+    # 的方埠（`_draw_port`）、一顆埠收哪幾種線（`_accepts`：Output 的 results
+    # 兩種都收）、數字線丟在卡上落在資料埠而不是最近的影像埠（`in_param_at`
+    # 的 kind）、資料出埠、放得下 `numbers` 的標籤。每一條都是「畫一顆埠、
+    # 判斷一條線落在哪」—— 畫布的本分；線的**規矩**住 `edit_plan` 與
+    # `canvas_edges`（接、剪、給埠）。
+    "d4t/ui/canvas.py": 3193,
     # `CLAUDE.md` **每個 session 都會被讀進去**。2026-09-09 之前它是 647 行，
     # 一半是「某年某月使用者說了什麼」的故事 —— 規則留下、故事搬進
     # `docs/history/CLAUDE-2026-09-09.md`，瘦到 319 行。這一格擋它長回去：
@@ -501,7 +510,9 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        191,
+        190,
+        # 2026-09-29（F123 期 2）：191 → 190。`_score_summary_text` 搬進
+        # `tree_scene.score_summary_text`。
         # 2026-09-29（F123 期 1）：192 → 191。`_decision_problem` 拿掉 —— 判定的
         # lint 現在掛在 Decision 卡上，走跟每一張卡同一條路（`_node_problems`）。
         # 2026-09-29（F122 期 3）：197 → 192。舊門檻那條路退役：分數直方圖上的
@@ -731,8 +742,10 @@ HARD_CAPS = {
     # `_uses_a_threshold`、`_refresh_bin_summary`、`_accuracy_text` 整族拿掉。
     # 2026-09-29（F123 期 1）：行 4,236 → 4,186（−50）、方法 192 → 191。
     # Decision 變成一張卡：`__score__` 偽卡、`_decision_problem` 拿掉。
-    "d4t/ui/studio.py": 4186,
-    "studio_window_methods": 191,
+    # 2026-09-29（F123 期 2）：行 4,186 → 4,168、方法 191 → 190（判定摘要搬進
+    # `tree_scene`）。
+    "d4t/ui/studio.py": 4168,
+    "studio_window_methods": 190,
     "studio_window_attributes": 261,
 }
 

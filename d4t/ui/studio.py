@@ -113,6 +113,7 @@ from . import open_dialogs
 from . import baseline
 from . import fit_screen
 from .canvas import NODE_H, NODE_W, SUMMARY_SEP, PipelineCanvas, run_status_from
+from .tree_scene import score_summary_text
 from .gauge_panel import GaugePanel
 from .preview_overlays import PreviewOverlays
 from . import studio_layout
@@ -1106,7 +1107,7 @@ class StudioWindow(QMainWindow):
         畫布也要跟著說得出來，否則搬家只搬了一半。
         """
         if node.step == DecisionStep.key:
-            return [self._score_summary_text()]   # 它的設定就是那棵樹
+            return [score_summary_text(self.model.decide)]   # 它的設定就是那棵樹
         parts = self._node_summary_parts(
             node, shown=(list(reads) + list(writes) + list(regions_out)
                          + [d["stream"] for d in region_inputs]))
@@ -1398,6 +1399,8 @@ class StudioWindow(QMainWindow):
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
             })
+            canvas_edges.data_ports(nodes[-1], self.model, nid, step_cls,
+                                    bool(missing))    # 數字線與結果線（F123）
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         self._sync_params_pane()
@@ -1420,27 +1423,7 @@ class StudioWindow(QMainWindow):
             # 「這一批分兩條路跑」，而不是只有工具列一個下拉。
             view.set_prefilter(prefilter)
             view.set_selected(self.selected_node)
-            view.set_score_summary(self._score_summary_text())
-
-    def _score_summary_text(self) -> str:
-        """判定段現在在做什麼，一句話。
-
-        三種樣子各講各的：判定樹講「幾個問題」、規則清單講「幾條規則」、
-        什麼都沒有就講沒有。（二元門檻那一句 F25 之後不會再出現 ——
-        開起來的 recipe 一律是樹。）
-        """
-        from .tree_scene import display_tree, layout_cells
-
-        d = getattr(self.model, "decide", None)
-        if d is None:
-            return "no decision yet"
-        if getattr(d, "tree", None) is not None:
-            steps = sum(1 for c in layout_cells(display_tree(d), d)
-                        if c["kind"] == "step")
-            return "decision tree · %d question%s" % (steps,
-                                                      "" if steps == 1 else "s")
-        return "decision · %d rule%s" % (len(d.rules),
-                                         "" if len(d.rules) == 1 else "s")
+            view.set_score_summary(score_summary_text(self.model.decide))
 
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:
         """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
@@ -1503,7 +1486,7 @@ class StudioWindow(QMainWindow):
         self.decide_panel.set_tree_collapsed(
             getattr(getattr(self, "pipeline", None), "tree_collapsed",
                     bool)())
-        self.pipeline.set_score_summary(self._score_summary_text())
+        self.pipeline.set_score_summary(score_summary_text(self.model.decide))
 
     def _on_decide_mode(self, on: bool) -> None:
         """切了「分成好幾類」—— 分數的直方圖與判定那一塊跟著重畫。"""
@@ -1512,7 +1495,7 @@ class StudioWindow(QMainWindow):
 
     def _refresh_feature_combo(self) -> None:
         """判定面板的「插入數字 ▾」清單（F21-B）。"""
-        self.decide_panel.set_features(self.model.labelled_features())
+        self.decide_panel.set_features(self.model.decision_numbers())
 
     # ---- Spread（F18 第 2 步：它從量測卡的儀表搬來這裡）--------------------
     def _features_in_results(self, results: Sequence[Dict[str, Any]]) -> List[str]:
@@ -2689,7 +2672,7 @@ class StudioWindow(QMainWindow):
             return
         self.model.ensure_tree()
         info = self._decision_info()
-        self.tree_pane.set_features(self.model.labelled_features())
+        self.tree_pane.set_features(self.model.decision_numbers())
         self.tree_pane.set_counts(None if not info else info.get("counts"))
         # 導引式問題的滑桿範圍與「幾顆說 yes」吃這一批的結果（F25）。
         self.tree_pane.set_rows(self.trial_results or [])

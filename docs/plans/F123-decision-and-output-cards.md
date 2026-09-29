@@ -1,6 +1,6 @@
 # F123 — Decision 與 Output 變成真的卡（做法 B）
 
-狀態：**進行中（2026-09-29）—— 期 1 做完；期 2（數字線與結果線）在做；期 3～4 未開始。**
+狀態：**進行中（2026-09-29）—— 期 1、期 2 做完；期 3～4 未開始。**
 使用者定調：「我想直接做 B」；三個問題的答案見 §1。
 
 F122 期 5 的續集。那一期原本要把 Output 排在固定的一欄、判定旁邊加一行「results →」
@@ -91,4 +91,14 @@ Write KLARF 寫的是類別，所以它的上游要有 Decision（error）。
 **遷移（第 7 版）**：判定問到的每一張卡補一條數字線；每一張 Output 卡補一條從
 Decision 來的結果線（沒有 Decision 就從每一張寫數字的卡）；以前寫得出去、但不在
 新上游裡的卡，各補一條直接接 Output 的數字線 —— 舊檔案寫出來的東西逐項相同。
+
+## 7. 期 2 的紀錄
+
+* core `data_lines.py`、`_migrate_data_lines`（第 7 版）、`Step.data_inputs/data_output`、
+  `is_data_edge`／`upstream_of`；`BatchContext.decided` 與 `decision()`（Output 卡
+  讀判定只走這一支）。
+* 畫布：方埠、`edit_plan._plan_data`、`canvas_edges.data_ports`（Studio 組好的 info
+  再加資料埠 —— `studio.py` 那一格只准往下）、`card_menu` 的資料線、`decision_numbers`。
+* 沒做的：Tidy up 換行後的結果線走向（期 4）；Output 卡「用名字吃數字」的那幾格
+  （`rank_by` 等）的清單還是全部，沒有只列上游的（期 3 看 Output 自己的輸入時一起）。
 

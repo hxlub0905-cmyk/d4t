@@ -349,6 +349,23 @@ def _cell_pos(cell: Dict[str, Any], origin: QPointF) -> QPointF:
                    origin.y() + cell["row"] * CELL_H)
 
 
+def score_summary_text(d: Any) -> str:
+    """判定段現在在做什麼，一句話（畫布的 Decision 卡與狀態列讀它）。
+
+    判定樹講「幾個問題」、規則清單講「幾條規則」、什麼都沒有就講沒有。
+    （F123 期 2 從 `studio.py` 搬來：那一格只准往下。）
+    """
+    if d is None:
+        return "no decision yet"
+    if getattr(d, "tree", None) is not None:
+        steps = sum(1 for c in layout_cells(display_tree(d), d)
+                    if c["kind"] == "step")
+        return "decision tree · %d question%s" % (steps,
+                                                  "" if steps == 1 else "s")
+    return "decision · %d rule%s" % (len(d.rules),
+                                     "" if len(d.rules) == 1 else "s")
+
+
 def _nobody_makes(when: str, owners: Any) -> List[str]:
     """這一題用到的數字裡，**這條 pipeline 沒有人產出**的那幾個（F122 期 3）。
 

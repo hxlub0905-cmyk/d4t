@@ -23,8 +23,9 @@ from d4t.core.pipeline import (
 from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       TreeLeaf, TreeStep, _tree_from_json,
                                       _tree_to_json, feature_referrers,
-                                      is_region_edge, region_edge_values,
-                                      rules_to_tree)
+                                      is_data_edge, is_region_edge,
+                                      region_edge_values, rules_to_tree)
+from d4t.core.pipeline.step import NUMBERS
 from d4t.core.steps._util import centre_name, others_name
 from d4t.core.ingest.dataset import data_profile
 from d4t.core.steps.load import channel_map_for
@@ -589,8 +590,10 @@ class RecipeModel:
             return []
 
         def image_edges(pick):
+            # 數字線與結果線也不算（F123 期 2）：它們不「穿過」任何一張卡。
             return [e for e in self.edges
-                    if pick(e) and not is_region_edge(e, self.nodes)]
+                    if pick(e) and not is_region_edge(e, self.nodes)
+                    and not is_data_edge(e, self.nodes)]
 
         up = self._through_edge(node, image_edges(lambda e: e.dst == node_id))
         if up is None:
@@ -1165,6 +1168,22 @@ class RecipeModel:
                        for x in out):
                 out.append(s.name + self.FEATURE_LABEL_SEP + label)
         return out
+
+    def decision_numbers(self) -> List[str]:
+        """判定的「插入數字 ▾」：`labelled_features` 裡**接進 Decision** 的那幾張
+        卡的（F123 期 2，使用者：數字線必要 —— 判定只問得到接進來的卡）。
+
+        沒有 Decision 卡（手寫的 recipe）就沒有東西可接，整份照舊。
+        """
+        nid = self.decision_node()
+        if not nid:
+            return self.labelled_features()
+        wired = {e.src for e in self.edges
+                 if e.dst == nid and e.src_out == NUMBERS
+                 and is_data_edge(e, self.nodes)}
+        owners = self.feature_owners()
+        return [x for x in self.labelled_features()
+                if owners.get(x.split(self.FEATURE_LABEL_SEP, 1)[0]) in wired]
 
     def feature_owners(self) -> Dict[str, str]:
         """特徵名 → 產出它的**節點 id**（幽靈線／淡線用，F24 ④）。

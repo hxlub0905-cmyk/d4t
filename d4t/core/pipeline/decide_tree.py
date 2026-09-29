@@ -205,7 +205,7 @@ def count_yes(rows: Any, name: str, op: str, value: float):
 _NOT_A_QUESTION = ("score", "route_taken")
 
 
-def suggest_condition(rows: Any, prefer: Any = ()):
+def suggest_condition(rows: Any, prefer: Any = (), allowed: Any = None):
     """幫使用者挑一個起手的問題：``(名字, ">", 門檻)``；挑不出來回 ``None``。
 
     規則刻意簡單、而且講得出理由：**挑這一批上分得最開的那個數字**
@@ -215,7 +215,11 @@ def suggest_condition(rows: Any, prefer: Any = ()):
 
     ``prefer`` 是這份 recipe 的 working numbers（`decide.let` 的名字）——
     使用者自己組出來的數字優先，那是他心裡的量。
+
+    ``allowed``（F123 期 2）：只挑這幾個名字 —— 判定只問得到**接進 Decision**
+    的卡的數字，建議一個沒接線的數字等於建議一個 lint error。``None`` = 不限。
     """
+    allowed = None if allowed is None else {str(x) for x in allowed}
     stats: Dict[str, List[float]] = {}
     for r in rows or []:
         if not r.get("ok"):
@@ -224,6 +228,8 @@ def suggest_condition(rows: Any, prefer: Any = ()):
             k = str(k)
             if k in _NOT_A_QUESTION or k.endswith("_missing") \
                     or k.endswith("_raw"):
+                continue
+            if allowed is not None and k not in allowed:
                 continue
             if isinstance(v, (int, float)):
                 stats.setdefault(k, []).append(float(v))

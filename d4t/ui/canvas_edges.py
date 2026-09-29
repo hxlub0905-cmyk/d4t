@@ -28,10 +28,11 @@
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
 from d4t.core.pipeline import ParamError, get_step
-from d4t.core.pipeline.recipe import is_region_edge
+from d4t.core.pipeline.step import NUMBERS, RESULTS
+from d4t.core.pipeline.recipe import Edge, is_data_edge, is_region_edge
 
 from . import card_menu
 from . import edit_plan
@@ -202,6 +203,37 @@ def on_edge_added(win: "StudioWindow", src: str, dst: str, stream: str = "",
     with win.model.compound("connect"):
         connect(win, src, dst, stream, str(dst_in or ""))
 
+def data_ports(info: Dict[str, Any], model: Any, node_id: str,
+               step_cls: Any, unwired: bool) -> None:
+    """畫布上這張卡的**資料埠**（F123 期 2）：加進 Studio 組好的那份 info。
+
+    * 入埠：Decision 的 ``numbers``、Output 的 ``results``（``accepts`` 講它收
+      哪幾種線 —— Output 兩種都收，拖線時亮哪幾顆埠看它）。
+    * 出埠：寫數字的卡一顆 ``numbers``、Decision 一顆 ``results``。還沒接上
+      來源的卡不長（F10：前後都是空的）。
+    * 副標：有資料線接進來才講（``numbers → results``）；沒有就照舊說
+      ``(not connected)`` —— 那正是實情。
+
+    住在這裡而不是 `studio.py`：這件事從頭到尾都是線的事，而 `studio.py`
+    那一格只准往下（CLAUDE.md §4）。
+    """
+    if step_cls is None:
+        return
+    for port in step_cls.data_inputs:
+        info["inputs"].append({
+            "name": port, "label": port, "stream": "", "role": "",
+            "kind": port,
+            "accepts": [RESULTS, NUMBERS] if port == RESULTS else [port]})
+    out = "" if unwired else step_cls.data_output(model.nodes[node_id].params)
+    info["data_out"] = out
+    if step_cls.data_inputs and any(
+            e.dst == node_id and is_data_edge(e, model.nodes)
+            for e in model.edges):
+        info["reads"] = list(info.get("reads") or []) + list(step_cls.data_inputs)
+        if out:
+            info["produces"] = [out]
+
+
 def remove_card(win: "StudioWindow", node_id: str) -> None:
     """刪掉一張卡（F117 J4 把它從 `studio.py` 搬過來）。
 
@@ -221,8 +253,9 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
             # 它那一格是**水合**出來的 —— 在線還在的時候先把它清掉，
             # 「參數 ＝ 線說的」那條不變量就當場破了（而它是常開的斷言）。
             # `model.remove` 拿掉線之後水合會把它空出來，這裡不必動它。
-            if is_region_edge(e, win.model.nodes):
-                continue
+            if is_region_edge(e, win.model.nodes) or is_data_edge(
+                    e, win.model.nodes):
+                continue                  # 資料線沒有下游那一格要空（F123）
             unpoint_stream(win, e.dst, e.src_out, e.dst_in)
         # 區域線**不必**在這裡處理了（F42 B2）：它現在是一條真的 Edge，
         # 而 `RecipeModel.remove` 刪卡時本來就會把它兩端的線一起拿掉 ——
@@ -320,6 +353,15 @@ def connect(win: "StudioWindow", src: str, dst: str, stream: str,
         return
     if plan.kind == edit_plan.REGION:
         _connect_region(win, src, dst, stream, plan)
+        return
+    if plan.kind == edit_plan.DATA:
+        # 數字線與結果線（F123 期 2）：一條線就是全部，沒有參數要指、沒有舊線
+        # 要擠掉（一顆資料埠接很多條）。成環由 `add_edge` 擋。
+        if win.model.add_edge(src, dst, src_out=stream, dst_in=plan.param):
+            win._status("Connected %s → %s (%s)" % (src, dst, stream))
+        else:
+            win._status("Cannot connect %s → %s — that would make the "
+                        "pipeline loop back on itself." % (src, dst), "error")
         return
     if not win.model.add_edge(src, dst, src_out=stream,
                                dst_in=plan.param):
@@ -495,6 +537,13 @@ def _apply_edge_removed(win: "StudioWindow", src: str, dst: str, stream: str = "
     # **區域線現在是一條真的 Edge**（F42 B2）：剪它跟剪影像線一樣，
     # 而「那一格跟著空掉」是水合的自然結果（`RecipeModel._hydrate_regions`）
     # —— 不必在這裡另外清一次。以前它沒有 Edge 可刪，所以清參數就是全部。
+    if dst_in and is_data_edge(Edge(src, dst, stream, dst_in),
+                               win.model.nodes):
+        # 數字線與結果線（F123 期 2）：一條就是一條，剪掉它不動任何參數。
+        if win.model.remove_edge(src, dst, src_out=stream or None,
+                                 dst_in=dst_in):
+            win._status("Disconnected %s → %s (%s)" % (src, dst, stream))
+        return
     if _is_region_param(win, dst, dst_in):
         node = win.model.nodes.get(dst)
         before = dict(node.params) if node is not None else {}
