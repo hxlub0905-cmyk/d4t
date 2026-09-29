@@ -263,7 +263,12 @@ def test_wiring_a_card_lands_on_the_input_you_dropped_it_on(window):
 def test_route_order_draws_no_dashed_lines(window, qapp):
     assert window.load_recipe_path(str(EXAMPLE / "die_to_die_basic.json"),
                                    sync=True) is True
-    assert window.pipeline._edges == [], "route 順序不該畫成任何線"
+    # 第 7 版遷移補的數字線是一條**真的線**（存在 recipe.edges，F123 期 2）；
+    # 這一條問的是「route 順序不畫成線」，所以只看影像線。
+    data = [e for e in window.model.edges
+            if e.src_out in ("numbers", "results")]
+    assert len(window.pipeline._edges) == len(data), \
+        "route 順序不該畫成任何線"
     # 親手拉一條 → 唯一的線是實線
     window._on_edge_added("load", "sub", "test")
     assert len(window.pipeline._edges) >= 1
