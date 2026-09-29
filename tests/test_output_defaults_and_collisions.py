@@ -144,13 +144,15 @@ def test_sharing_a_folder_without_sharing_a_file_is_fine():
 # 4. 左右兩張圖是名字
 # --------------------------------------------------------------------------- #
 def test_a_mistyped_picture_stream_is_a_warning():
+    # 右邊那顆是必要的影像埠（F123 期 3）—— 空著是 not-connected，而沒接上
+    # 的卡不再往下檢查。接一條真的流，問的是打錯的左邊。
     r = _recipe(c=("output_char", {"folder": "x", "main_stream": "tset",
-                                   "pair_stream": ""}))
+                                   "pair_stream": "ref"}))
     got = _codes(r)
     assert got["stale-stream-ref"].level == "warning"
     assert "tset" in got["stale-stream-ref"].detail
     ok = _recipe(c=("output_char", {"folder": "x", "main_stream": "test",
-                                    "pair_stream": ""}))
+                                    "pair_stream": "ref"}))
     assert "stale-stream-ref" not in _codes(ok)
 
 
