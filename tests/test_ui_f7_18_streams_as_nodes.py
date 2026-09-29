@@ -176,7 +176,9 @@ def test_old_recipes_with_also_apply_still_load_and_mean_the_same_thing(tmp_path
             "dn": {"step": "denoise",
                    "params": {"target": "test", "also_apply": "ref"}},
         },
-        "score": {"expr": "1", "threshold": 0.0, "bins": {"below": 0, "above": 1}},
+        # 空的分數＝沒有判定：第 6 版那一道（補 Decision 卡，F123）不動它 ——
+        # 這一條問的是 also_apply 拆卡。
+        "score": {"expr": "", "threshold": 0.0, "bins": {"below": 0, "above": 1}},
     }
     path = tmp_path / "legacy.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
