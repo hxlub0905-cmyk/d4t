@@ -1,0 +1,166 @@
+# F124 — 畫布是一條從頭接到尾的資料流
+
+狀態：**計畫（2026-09-29）—— 使用者看過六張示意圖說「可以」；還沒動程式。**
+前一份：[`F123`](../history/plans/F123-decision-and-output-cards.md)（Decision 與 Output
+變成真的卡）。這一份修 F123 期 2 的規則，F123 其餘三期照留。
+
+---
+
+## 1. 使用者定調（2026-09-29）
+
+一路問下來的五句話，每一句都推翻了前一版的一部分：
+
+| 使用者 | 推掉了什麼 |
+|---|---|
+| 「我現在又覺得有數字線很奇怪」 | F123 期 2 的原樣 |
+| 「也許不要分什麼線，USER 就統一拉線即可 … user 不能有太多的學習成本」 | 線分四種、要瞄準那一顆埠 |
+| 「畫布描述的是資料流（資料怎麼走、做到哪步會變成怎樣），有 input 就要有 output；之前的版本（Output 沒有線）對 user 來說會非常突兀」 | 「數字和結果都不拉線」 |
+| 「還是很怪，這樣為何要有數字線？Feature 就可以處理了，而且可用的參數更多（可以在 ADC card 當作 attribute）」 | 「線決定判定問得到哪些數字」 |
+| 「Decision 前面沒接線也很怪 … 希望 user 看得懂、講得出來畫布在幹嘛，不然中間突然斷掉會很奇怪」 | 「Decision 不接線、靠位置排在後面」 |
+
+然後看了六張示意圖（ebi-die-to-die、rsem-worst-box、one-image-uniformity、
+characterization、「用到沒接過來的數字」的提醒、拉線跳出的小選單）：「可以」。
+
+## 2. 一句話
+
+**線只講「資料流到哪裡」，不講「准你用哪些數字」。** 量測卡把量完的 defect 送進
+Decision，Decision 把分好類的 defect 送進 Output —— 一條從 Input 接到 Output、
+中間不斷的流。流過去的是**整顆 defect**：它身上每一個 feature（量測卡的、上游每一張
+卡順手記的、Input 帶進來的 KLARF 欄位）都跟著走，判定樹可以全部拿來當 attribute。
+
+**驗收標準**：使用者看著畫布，能用一句話講完它在做什麼，而且句子裡每一段剛好是
+畫布上的一條線。例（ebi-die-to-die）：
+
+> Input 讀進 test 和 ref → 兩張各自 Normalize → 相減得到 diff → 去雜訊 → GLV 量灰階
+> → 量完送進 Decision → 分好類寫成報表。
+
+## 3. 跟 F123 比
+
+| | F123 做完的樣子 | F124 |
+|---|---|---|
+| 誰有送去判定的埠 | 任何一張記了數字的卡（Input、Normalize、Denoise、ROI 都有）| **只有量測卡**：GLV、CD、Focus index、H2H |
+| 判定問得到哪些數字 | 只有**直接**接進 Decision 的卡的 | **流進 Decision 的一切**＝沿線往回走得到的每一張卡的 feature |
+| 問到一張沒流進來的卡的數字 | error，不能跑 | **提醒**（warning）＋一顆「Connect ＿」；照常跑 |
+| 「插入數字 ▾」 | 只列接進來的卡 | 全部列出，照卡片分組；沒流進來的排在後面並註明 |
+| Output 寫什麼 | 只寫上游卡片的數字（排除式）| **整張表**；Decision 在它上游就加上類別 |
+| Write charts 畫哪些框 | 只畫上游那幾張 GLV 的 | 每一張 GLV 的（回到 F123 之前）|
+| 埠上的字 | `numbers` / `results` | `measured` / `classified`（只是顯示；recipe 裡的鍵不變）|
+| Decision／Output 完全沒有東西流進來 | error | error（照舊 —— 那就是畫布斷掉）|
+
+照留的：Decision 是真的卡、判定樹掛在它下面（F123 期 1）；Write comparison 的左圖右圖
+是影像埠（期 3）；線照資料種類上色、停上去整條路徑亮、換行的線繞著走（期 4）。
+
+## 4. 逐張卡看過的結果（2026-09-29）
+
+| 卡 | 左邊（收）| 右邊（吐）| 有沒有「送去判定」的埠 | 丟上去會不會問（§5 期 4）|
+|---|---|---|---|---|
+| Input | — | `test`、`ref`，或自己命名的 channel | 沒有（`n_channels`、KLARF 欄位跟著流）| — |
+| layout(GDS) | — | `layout_label` | 沒有 | — |
+| Pair source | — | `paired` | 沒有（`pair_found` 跟著流）| — |
+| Normalize | 要處理的流（多條）＋ Borrow range from／Match it to | 處理過的流 | 沒有（`clip_frac`）| **會**：兩格角色不同 |
+| Denoise、Adjust tone、Flatten | 要處理的流（多條）| 同名 | 沒有 | 不會 |
+| Align | 要對齊的流（多條）＋ …on this one | 對齊後的流 | 沒有（`align_*` 跟著流）| **會** |
+| Compare | First、Second | `diff`（＋原樣送出）| 沒有 | **會**：a、b 反過來正負號反 |
+| Image Combination | 要合併的流（多條）| `merged` | 沒有 | 不會 |
+| H2H | Small image、Search inside | `aligned` | **有**（`ncc_score` 是它的產出）| **會** |
+| ROI | Image 或 Layout labels（依 method 一次一格）| 區域（每個三個名字）＋原樣送出 | 沒有 | 不會 |
+| GLV | Measure on（多條）、Ref image；Region（多條）、Ref region | 原樣送出 | **有** | **會**：量測 vs 參考 |
+| CD、Focus index | 圖（多條）、Region（多條）| 原樣送出 | **有** | 不會 |
+| Decision | `measured`（多條）| `classified` | — | 不會 |
+| Write report／KLARF／charts | `classified` 或 `measured` | — | — | 不會 |
+| Write comparison | Left picture、Right picture、`classified` | — | — | 圖會問左還是右 |
+
+characterization 那條流因此是 Pair source → H2H → Decision：判定第一題問的
+`pair_found` 跟著 defect 經過 H2H 流進來，不用從 Pair source 跳過 H2H 拉一條線。
+
+## 5. 分期
+
+每一期結束：`ruff check`、`python tools/typecheck.py`、`python tools/freeze_golden.py
+--check`（引擎的數字一個都不准動）、`python tools/run_tests.py`、SESSION_LOG。
+
+### 期 1 — core：流進 Decision 的東西
+
+* `Step.measures: ClassVar[bool] = False`；GLV、CD、Focus index、H2H 設 `True`。
+  `Step.data_output` 只在 `measures` 而且這張卡真的寫數字時回 `NUMBERS`。
+* **判定問得到什麼＝Decision 的上游**（`recipe_schema.upstream_of`，沿所有線）。
+  `decision-not-wired` 改成 warning、判準改成「那個數字的卡不在上游」；Issue 帶上
+  「接哪一張卡就好」的結構（新的選配欄位，給期 2 那顆按鈕用），`advice` 照 F118 寫。
+  `output-number-not-upstream` 同一套判準與結構。
+* `data_lines.rows_for_output`：寫整張表；`decided`＝上游有一張啟用的 Decision；沒有
+  Decision 時判定自己寫的數字照舊不寫。**⚠ 這一條不改的話，報表會安靜地少掉量測
+  欄位**（逐張看卡時發現的：F123 的排除式判準碰到「量測卡沒有數字埠」就把它的數字
+  全排掉）。
+* Write charts：`output._upstream_notes`、`charts-need-each-box`、`unknown-chart-metric`
+  回到看每一張 GLV。
+* 「插入數字 ▾」：`RecipeModel.decision_numbers` 與 Output 卡的 `labelled_features`
+  列全部，照卡片分組，沒流進來的排後面並註明。
+* **第 8 版遷移**（`version < 8`，判準是「舊東西在」：從不再有數字埠的卡拉出來的
+  數字線）：拿掉；拿掉之後那張 Decision／Output 一條資料線都不剩的話，改接它下游
+  最近的量測卡；沒有就留給 lint 講。`to_json → from_json` 必須是 identity（鐵則 9）。
+  `RECIPE_VERSION` 7 → 8、`tools/doctor.py` 跟著；三份出貨 recipe 存成第 8 版（它們都
+  只有 GLV → Decision，線不變）。
+* one-image-uniformity 那張 Write report 的 id 叫 `numbers` —— 副標會印成
+  「numbers · classified」，看起來像數字線。改名（先 grep 誰在用）。
+* 測試：`test_data_lines.py`、`test_output_lines.py`、`test_ui_data_lines.py` 裡
+  跟「必要」「只列接進來的」「只寫上游」有關的改寫；新增：只有四張卡有數字埠、
+  上游卡的附帶數字不提醒、另一條支線上的卡會提醒、遷移。
+
+### 期 2 — 畫布的樣子
+
+* 埠上的字：`measured` / `classified`，走 `ui/strings.py`（recipe 的鍵 `numbers` /
+  `results` 不動 —— CLAUDE.md §3「參數名是 recipe 的鍵，不是給人看的字」）。
+  Decision 副標「measured → classified」，Output 副標寫它收到什麼。
+* **原樣送出、沒接線的埠**畫小、畫淡；有接線的照常畫。判準用畫布的定義（`produces`
+  ／`regions_produced` 以外的就是原樣送出 —— `docs/PITFALLS.md` 的「那張卡有哪些
+  輸出埠有兩個答案」）。
+* **埠名不截斷**：左右兩側的字寬 52 → 約 80 px、小一號字；`boundingRect`、欄距、
+  數像素的那幾條測試跟著調。示意圖上「Ref image」「Ref region」「Left picture」都
+  放得下；「Borrow range from」仍會切 —— 要不要改短字另外問。
+* **提醒的那顆鈕**：Decision 的在判定面板頂端（點 Decision 卡時右邊那一塊）、
+  Output 的在它的設定區。按下去走 `canvas_edges.connect` —— 跟手拉的線同一條路
+  （`bridge` 的理由），一步復原。
+
+### 期 3 — 線不從卡背後穿過、「整理」照流排
+
+* **同一列的線**：直直的那條曲線會壓到夾在中間的卡時（rsem-worst-box 的
+  Input → GLV 從 ROI · on_pattern 背後穿過去，看起來像是 ROI 吐出來的），改走列上方
+  的空隙，跟期 4（F123）換行的線同一種折法。放新模組（`canvas.py` 在規模尺上）。
+  測試照 F123 期 4 那條：**用描邊比**，不用 `QPainterPath.intersects`。
+* **「整理」**：characterization 那幾張卡現在會排成 Pair source 在 Input 右邊、Decision
+  換到下一列、線交叉；目標是示意圖 ④ 那種（Input、Pair source 疊在第一欄，H2H、
+  Decision、Write comparison 往右）。先查 `layout_columns` 為什麼沒照深度排，再決定
+  怎麼改。
+
+### 期 4 — 拉線：丟在卡上就好
+
+* 現在「丟在卡上沒丟準埠」會**安靜地挑高度最近的那一格**（`canvas.in_param_at` 的
+  退路）—— 丟在 Compare 偏上面就接 a、偏下面就接 b，使用者看不出來。改成：
+  * 丟在埠上 → 接那一顆（跟現在一樣）。
+  * 丟在卡上、只有一格接得上 → 直接接。
+  * 兩格以上 → 在放手的地方跳小選單，只列接得上的那幾格；單一格已經有線的寫明
+    「會取代 ＿ 那條」。
+  * 一格都接不上 → 不接，一句白話說為什麼（`edit_plan` 本來就講得出）。
+* 放新模組（`ui/link_drop.py`）。選單要有關得掉的旗標（CLAUDE.md §4 F91：headless
+  測試會永遠停在 modal 上）。
+
+### 文件（跟著各期）
+
+* `docs/USING-CHARACTERIZATION.md` §3／§3.1 還寫著「Output 段不用接線、副標寫
+  `(not connected)` 是正常的」—— F123 之後就不對了，期 1 一起改。
+* `docs/ARCHITECTURE.md`（`data_lines.py` 那一行）、ROADMAP、CLAUDE.md 鐵則 10 若有
+  需要補一句「線講流到哪裡；判定問得到的是流進它的」。
+
+## 6. 不變的
+
+* 引擎算出來的數字、黃金值（每一期都跑 `freeze_golden --check`）。
+* 判定的內容仍在 `recipe.decide`；recipe 裡線的存法（`recipe.edges`、埠名 `numbers`
+  ／`results`）。
+* 鐵則 10：每一條線都是使用者拉的 —— 提醒那顆鈕是使用者按的，遷移補的線只給舊檔案。
+* 鐵則 11：Studio 跑不寫。
+
+## 7. 示意圖
+
+2026-09-29 在對話裡給使用者看的六張，是用當時的程式碼加一支臨時腳本改畫法截的
+（repo 沒動）：① ebi-die-to-die ② rsem-worst-box ③ one-image-uniformity
+④ characterization（手動排版）⑤ 判定問到另一條支線上的 CD 時的提醒 ⑥ 從 Denoise
+丟到 Write comparison 時的小選單。⑤ 的提醒框、⑥ 的虛線與選單是手畫的。

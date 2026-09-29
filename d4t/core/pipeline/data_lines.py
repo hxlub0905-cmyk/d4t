@@ -2,7 +2,7 @@
 """**數字線與結果線**：量測卡 → Decision → Output 的那兩種線（F123 期 2）。
 
 使用者（2026-09-29）選了做法 B：Decision、Output 跟 Input 一樣是真的卡，線由
-使用者拉。三個答案（`docs/plans/F123-decision-and-output-cards.md` §1）：
+使用者拉。三個答案（`docs/history/plans/F123-decision-and-output-cards.md` §1）：
 
 * **數字線必要** —— 判定樹只能問「有線接進 Decision 的那幾張卡」的數字；
 * **Output 寫的是線上游的東西** —— 接 Decision 有類別，直接接量測卡沒有；

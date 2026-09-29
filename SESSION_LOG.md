@@ -28,6 +28,30 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F124 開案：畫布是一條從頭接到尾的資料流（2026-09-29）
+
+使用者看完 F123 的畫布：「我現在又覺得有數字線很奇怪」。沒有動程式，來回五輪、
+每一輪都截示意圖（臨時腳本改畫法，repo 沒動），最後六張說「可以」。計畫書
+`docs/plans/F124-measured-flow.md`；F123 搬進 `docs/history/plans/`（期 2 的規則由
+F124 修正，其餘三期照留）。
+
+* **定調**（計畫書 §1 五句話）：畫布描述資料流、中間不能斷（Output、Decision 都要有
+  線進來）；但線不准限制判定問得到哪些數字 —— feature 用名字就找得到，而且全部都該
+  能當 ADC 的 attribute。
+* **結論**：線只講「流到哪裡」。送去判定的埠只長在量測卡（GLV、CD、Focus index、
+  H2H）；流過去的是整顆 defect，上游每一張卡順手記的數字跟著走；問到沒流進來的卡
+  → 提醒＋一顆「Connect」，不擋。
+* **逐張看卡時找到、F123 沒發現的**：① Output 的排除式判準碰到「量測卡沒有數字埠」
+  會把量測欄位全排掉（報表安靜地少欄）—— 期 1 必改；② 丟在卡上沒丟準埠時
+  `in_param_at` 安靜地挑高度最近的那一格（Compare 的 a／b 看丟的高低）；
+  ③ rsem-worst-box 的 Input → GLV 從 ROI 卡背後穿過，看起來像 ROI 吐出來的；
+  ④ `USING-CHARACTERIZATION.md` §3.1 還寫著「Output 段不用接線」；⑤ one-image-uniformity
+  的 Write report id 叫 `numbers`，副標會被讀成數字線。
+* **中途推翻過的提案**（留著，下次有人想「再簡化一點」時先看）：右邊合併成一個出口
+  （Input 多 channel、ROI 一個區域三個名字、Align 吐兩條 → 一半的卡每拉一次都要選）；
+  左邊的埠名平常不印（F10／F68 修過的 a／b、量測／參考區域會回來）；區域線改同色
+  （U20 量過：50% 縮放下虛實分不出來）。
+
 ## F123 期 4：線的顏色照資料種類（2026-09-29）
 
 使用者：「繼續」。紀錄在計畫書 §9。
@@ -96,7 +120,7 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 使用者：「我會覺得對畫布來說很奇怪，不管是 ADC card 或者是 Output card 的定位
 （理論上 input = output）」→ 看了做法 A 的截圖 →「我想直接做 B」。計畫書
-`docs/plans/F123-decision-and-output-cards.md`；三個問題的答案在它的 §1。
+`docs/history/plans/F123-decision-and-output-cards.md`；三個問題的答案在它的 §1。
 
 * **core**：註冊 `decision`「Decision」（ADC 段、沒有參數、`run` 是 no-op ——
   判定照舊在整條 pipeline 跑完之後由引擎算）。內容仍住在 `recipe.decide`（搬進卡的
