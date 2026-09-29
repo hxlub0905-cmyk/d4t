@@ -38,7 +38,9 @@ def _route_recipe() -> Recipe:
             "glv_b": RecipeNode("glv_b", "glv_stats",
                                 {"source": "test", "metrics": "glv_mean"}),
         },
-        score=ScoreSpec(expr="1.0", threshold=0.5,
+        # 沒有判定（F122：以前這裡是常數 "1.0"，而常數的分數打開時會照畫面改成
+        # 「沒有判定」—— 這一份測的是 route 的來回，不是判定）。
+        score=ScoreSpec(expr="", threshold=0.5,
                         bins={"below": 0, "above": 1}),
         route_by=RouteBy(column="CLASSNUMBER",
                          map={"1": "a_route", "2": "b_route"}))
