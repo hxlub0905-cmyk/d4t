@@ -91,6 +91,12 @@ def _wire(win, out_path, step="output_report", **params):
         win.model.set_param(out, name, value)
     win.model.set_expr("glv_max")
     win.model.set_threshold(1.0)
+    # F123 期 2：判定是一張卡、Output 寫的是線上游的東西 —— 線都畫出來。
+    win.model.use_decide(True)
+    dec = win.model.decision_node()
+    win.model.add_edge(load, glv, src_out="test", dst_in="source")
+    win.model.add_edge(glv, dec, src_out="numbers", dst_in="numbers")
+    win.model.add_edge(dec, out, src_out="results", dst_in="results")
     return load, glv, out
 
 
