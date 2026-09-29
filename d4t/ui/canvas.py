@@ -444,6 +444,22 @@ def _accepts(spec: Dict[str, Any], kind: str) -> bool:
                          or [str(spec.get("kind") or "image")])
 
 
+def _rounded_path(pts: Sequence[QPointF], r: float) -> QPainterPath:
+    """一串折點 → 轉角圓掉的路徑（繞行的線用，F123 期 4）。"""
+    p = QPainterPath(pts[0])
+    for prev, cur, nxt in zip(pts, pts[1:], pts[2:]):
+        d1, d2 = cur - prev, nxt - cur
+        l1 = (d1.x() ** 2 + d1.y() ** 2) ** 0.5
+        l2 = (d2.x() ** 2 + d2.y() ** 2) ** 0.5
+        if l1 < 1e-6 or l2 < 1e-6:
+            continue
+        rr = min(r, l1 / 2.0, l2 / 2.0)
+        p.lineTo(cur - d1 * (rr / l1))
+        p.quadTo(cur, cur + d2 * (rr / l2))
+    p.lineTo(pts[-1])
+    return p
+
+
 def _port_label_text(spec: Dict[str, Any]) -> str:
     """一顆輸入埠旁邊寫什麼字（F68）。
 
@@ -1491,11 +1507,17 @@ class _EdgeItem(QGraphicsItem):
         「藍色 = 被選中的線」這第二層意思，而調濃只是把原本就在那裡的線索
         講大聲一點。
         """
-        base = QColor(TOKENS["canvas_edge"])
-        gid = str(self.src.info.get("group", "") or "")
-        if not gid:
-            return base
-        return QColor(theme.mix_hex(theme.group_hex(gid),
+        # **F123 期 4 起照資料種類，不照來源階段**（使用者：「線的顏色偏亂」→
+        # 選了「照資料種類」）：影像一個中性色、數字／結果 ADC 紫，區域線不走
+        # 這一支（它是那個區域自己的顏色，見 `line_pen`）。整張畫布因此最多三種
+        # 意思，每一種講一件事；「這條從哪裡來」改由滑鼠停上去時整條路徑亮起來
+        # 回答（`PipelineCanvas.set_hover_path`）。``strength`` 的意思不變。
+        if self.kind() in DATA_PORTS:
+            # 紫要**認得出來**：混一半的話跟影像線的灰只差一點點（實測
+            # #7c779c 對 #6c7582），一眼分不出兩種線 —— 那正是換顏色的目的。
+            return QColor(theme.mix_hex(TOKENS["seg_adc"], TOKENS["canvas_edge"],
+                                        max(float(strength), 0.85)))
+        return QColor(theme.mix_hex(TOKENS["text_secondary"],
                                     TOKENS["canvas_edge"], float(strength)))
 
     # ---- 選中一張卡時，它的線要跟著講話（F78）-----------------------------
@@ -1509,6 +1531,10 @@ class _EdgeItem(QGraphicsItem):
         的理由通常正是「它接了誰」—— 那個問題在畫面上要用眼睛沿著線走才答
         得出來，一張擠了十條線的畫布上根本走不完。
         """
+        path = self.canvas.hover_path()
+        if path:
+            # 滑鼠停在一條線上：它與它**上游整條路徑**亮、其他淡（F123 期 4）。
+            return "near" if self in path else "far"
         if not self.canvas.has_node_selection():
             return "flat"
         return "near" if (self.src.isSelected() or self.dst.isSelected()) else "far"
@@ -1528,6 +1554,7 @@ class _EdgeItem(QGraphicsItem):
 
     def hoverEnterEvent(self, e) -> None:  # Qt hook
         self._hover = True
+        self.canvas.set_hover_path(self)
         # 提到節點之上（節點是 0）。滑鼠已經在這條線上了，這時候它就是使用者
         # 正在瞄的東西 —— 而它平常畫在卡片底下，中點只要被任何一張卡蓋到，
         # 那顆 × 就既看不見也按不到。抬起來之後「看得到的」與「按得到的」
@@ -1538,6 +1565,7 @@ class _EdgeItem(QGraphicsItem):
 
     def hoverLeaveEvent(self, e) -> None:  # Qt hook
         self._hover = False
+        self.canvas.set_hover_path(None)
         self.setZValue(_Z_EDGE)
         self.update()
         super().hoverLeaveEvent(e)
@@ -1594,11 +1622,17 @@ class _EdgeItem(QGraphicsItem):
             h = max(COL_GAP * 0.67, dx * 0.5)
             p.cubicTo(a + QPointF(h, 0), b - QPointF(h, 0), b)
             return p
+        # **繞行**（F123 期 4）：從來源右邊出來、走到目標那一列旁邊的空隙、沿
+        # 空隙水平走、再進目標左邊的埠。以前是一條從右上直接彎到左下的曲線，
+        # 中段斜穿過夾在中間的卡（截圖上結果線穿過 Write charts）。水平那一段
+        # 落在列與列之間，所以不壓任何卡；兩端仍只超出 ``BACK_REACH``。
         h = self.BACK_REACH
-        v = max(30.0, abs(b.y() - a.y()) * 0.5)
-        sign = 1.0 if b.y() >= a.y() else -1.0
-        p.cubicTo(a + QPointF(h, sign * v), b - QPointF(h, sign * v), b)
-        return p
+        top = self.dst.scenePos().y()
+        gy = (top - ROW_GAP / 2.0 if b.y() >= a.y()
+              else top + self.dst.height() + ROW_GAP / 2.0)
+        return _rounded_path([a, QPointF(a.x() + h, a.y()),
+                              QPointF(a.x() + h, gy), QPointF(b.x() - h, gy),
+                              QPointF(b.x() - h, b.y()), b], 12.0)
 
     def boundingRect(self) -> QRectF:
         # ``_CUT_R + 2`` 是那顆 × 的半徑。**boundingRect 必須涵蓋所有畫得出去的
@@ -1952,6 +1986,7 @@ class PipelineCanvas(QGraphicsView):
         # （使用者在拉線／刪卡的時候看到的那一串 traceback）。
         # 空表回答得出「沒有東西被選中」，而那句話在這個瞬間剛好是真的。
         self._items, self._edges = {}, []
+        self._hover_path = set()           # 同理：停著的那條線要被銷毀了
         self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._ghost_items, self._ghost_cards = [], []   # 同理：別留著殘骸
         self._tree_items, self._tree_at = [], None       # 同理（`follow_decision`）
@@ -2385,6 +2420,35 @@ class PipelineCanvas(QGraphicsView):
             item.update()
 
     # ---- 選中一張卡 → 它的線跟著講話（F78）--------------------------------
+    def hover_path(self) -> set:
+        """滑鼠停著的那條線與它上游的每一條線（沒有停在線上就是空的）。"""
+        return getattr(self, "_hover_path", None) or set()
+
+    def set_hover_path(self, edge: Any) -> None:
+        """滑鼠停在 ``edge`` 上：它與它**上游整條路徑**亮起來（F123 期 4）。
+
+        線不再用來源的顏色講「從哪裡來」（照資料種類上色之後同一種線同一色），
+        所以這個問題改成一個手勢：停上去，路徑自己亮。``None`` = 移開。
+        """
+        path: set = set()
+        if edge is not None:
+            path.add(edge)
+            todo, seen = [edge.src.node_id], set()
+            while todo:
+                nid = todo.pop()
+                if nid in seen:
+                    continue
+                seen.add(nid)
+                for e in self._edges:
+                    if e.dst.node_id == nid:
+                        path.add(e)
+                        todo.append(e.src.node_id)
+        if path == self.hover_path():
+            return
+        self._hover_path = path
+        for e in self._edges:
+            e.update()
+
     def has_node_selection(self) -> bool:
         """現在有沒有選中任何一張卡（`_EdgeItem.focus_state` 問的就是這個）。
 

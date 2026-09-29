@@ -177,3 +177,58 @@ def test_an_output_cards_number_list_is_what_is_upstream_of_it(window):
     names = [x.split("\t")[0] for x in window.model.labelled_features(
         upto_node="report", include_upto=False)]
     assert "glv_max" not in names, "GLV 不在報表上游了，清單不該再列它"
+
+
+# --------------------------------------------------------------------------- #
+# F123 期 4：線的顏色照資料種類、停上去看整條路徑、換行的線不穿過卡
+# --------------------------------------------------------------------------- #
+def test_hovering_a_line_lights_the_path_that_leads_to_it(window):
+    view = window.pipeline
+    edge = next(e for e in view._edges if e.pair() == ("glv", "decision"))
+    view.set_hover_path(edge)
+    try:
+        states = {e.pair(): e.focus_state() for e in view._edges}
+        assert states[("glv", "decision")] == "near"
+        assert states[("dn", "glv")] == "near", "上游那一段也要亮"
+        assert states[("decision", "report")] == "far", "下游不是它的來處"
+    finally:
+        view.set_hover_path(None)
+    assert all(e.focus_state() == "flat" for e in view._edges), "移開就回來"
+
+
+def test_a_line_that_wraps_to_the_next_row_goes_around_the_cards(qapp):
+    """換行的線以前從右上直接彎到左下，中段穿過夾在中間的卡（截圖上結果線
+    穿過 Write charts）。改成沿著列與列之間的空隙繞 —— 一張卡都不壓。
+
+    ⚠ 比的是**描邊之後**的外形：`QPainterPath.intersects` 問的是填滿的面積，
+    一條開放的折線會被自動閉合成一大塊（第一版這樣寫，新舊兩種都「壓到」）。
+    1400 寬、一列兩張的時候，舊的那條曲線（實測）穿過 Write charts。
+    """
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainterPathStroker, QPen
+
+    from d4t.ui.canvas import NODE_W
+
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        win.resize(1400, 900)
+        win.show()
+        assert win.load_recipe_path(
+            str(REPO / "recipes" / "one-image-uniformity.json"), sync=True)
+        view = win.pipeline
+        view.tidy()
+        back = [e for e in view._edges
+                if e.dst.in_port(e.dst_port).x() < e.src.out_port(e.port).x()]
+        assert ("decision", "numbers") in [e.pair() for e in back], \
+            "前提：結果線要換行（一列兩張）"
+        pen = QPainterPathStroker(QPen(Qt.black, 2.0))
+        for e in back:
+            line = pen.createStroke(e.path())
+            for nid, card in view._items.items():
+                if nid in (e.src.node_id, e.dst.node_id):
+                    continue
+                body = QRectF(card.scenePos().x(), card.scenePos().y(),
+                              NODE_W, card.height())
+                assert not line.intersects(body), (e.pair(), nid)
+    finally:
+        win.close()

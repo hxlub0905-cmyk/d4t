@@ -184,22 +184,35 @@ def test_the_card_is_big_enough_for_three_lines_of_text(qapp):
     assert canvas_mod.COL_GAP >= 2 * canvas_mod._PORT_LABEL_W
 
 
-def test_a_line_carries_the_colour_of_the_card_it_leaves(qapp):
-    """十條線的畫布上，「這條是從哪裡出來的」不該只能用眼睛沿著線走。"""
+def test_a_line_is_coloured_by_what_it_carries_not_where_it_leaves(qapp):
+    """F123 期 4（使用者：線的顏色偏亂 → 「照資料種類」）：影像一個中性色，
+    數字／結果 ADC 紫。**從哪一段出來不再改變顏色** —— 那一句以前是 F13-⑤ 的
+    「線帶著來源卡的階段色」；「這條從哪裡來」改由滑鼠停上去時整條路徑亮起來
+    回答（`tests/test_ui_data_lines.py`）。"""
     from d4t.ui import theme as theme_mod
 
     view = canvas_mod.PipelineCanvas()
     try:
         view.set_nodes(
             [{"node_id": "a", "label": "A", "group": "input",
-              "writes": ["test"], "reads": [], "inputs": []},
+              "writes": ["test"], "reads": [], "inputs": [],
+              "data_out": "numbers"},
+             {"node_id": "e", "label": "E", "group": "enhance",
+              "writes": ["test"], "reads": ["test"],
+              "inputs": [{"name": "streams", "label": "Streams",
+                          "stream": "test"}]},
              {"node_id": "b", "label": "B", "group": "measure",
               "writes": [], "reads": ["test"],
-              "inputs": [{"name": "source", "label": "Source", "stream": "test"}]}],
-            [("a", "b", "test", "source")])
-        edge = view._edges[0]
-        assert edge.line_color().name() != theme_mod.TOKENS["canvas_edge"]
-        # **調淡一半** —— 線平常畫在卡片底下，它是背景不是主角。
-        assert edge.line_color().name() != theme_mod.group_hex("input")
+              "inputs": [{"name": "source", "label": "Source", "stream": "test"},
+                         {"name": "numbers", "label": "numbers", "stream": "",
+                          "kind": "numbers"}]}],
+            [("a", "e", "test", "streams"), ("e", "b", "test", "source"),
+             ("a", "b", "numbers", "numbers")])
+        by = {(e.pair(), e.kind()): e.line_color().name() for e in view._edges}
+        img_a, img_e = by[(("a", "e"), "image")], by[(("e", "b"), "image")]
+        num = by[(("a", "b"), "numbers")]
+        assert img_a == img_e, "兩條影像線從不同段出來，顏色要一樣"
+        assert num != img_a, "數字線要跟影像線分得開"
+        assert img_a != theme_mod.group_hex("input")
     finally:
         view.deleteLater()
