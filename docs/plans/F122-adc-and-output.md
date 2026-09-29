@@ -1,6 +1,6 @@
 # F122 — ADC 與 Output：先修安靜做錯的，再收成一種說法
 
-狀態：**進行中（2026-09-29）—— 期 1（ADC）、期 2（Output）安靜做錯的都修完；期 3／4 照建議做；期 5（畫布上 Output 的位置）等使用者點頭。**
+狀態：**進行中（2026-09-29）—— 期 1（ADC）、期 2（Output）安靜做錯的都修完；期 3（ADC 的方向）做完；期 4（CLI export 照卡片寫）還沒做；期 5（畫布上 Output 的位置）等使用者點頭。**
 方向使用者同意（「先修會安靜做錯的，接著按照你的建議修」）。
 
 F121（入口簡單化）的續集：使用者說 Input、ADC、Output「這三張比較特別」，F121 做了
@@ -74,20 +74,30 @@ Input，這一份做另外兩張。
 順手：`batch.run_batch_steps`、`output.py` 模組說明、`step.py` 三處過期的字（「Export
 精靈」、「三張卡」、「五張」）；`recipes/README.md` 那一格「相對於你啟動程式的位置」。
 
-## 5. 期 3／4／5 — 方向
+## 5. 期 3 — ADC 的方向 ✅ 2026-09-29
 
-* **期 3（ADC）**：舊門檻路整條退役（引擎、rescore、viewmodel、studio 的門檻線；
-  舊檔案由遷移轉成樹）；一個名字；判定看資料（問不出來的題目在樹上變紅）；
-  「好消息」只用 outcome 一個判準（準確率現在看 `bin ≠ 0`）。
-* **期 4（Output）**：「Write to」預設在資料旁邊；Write KLARF 在沒有 KLARF 的資料上
-  跳過並講；CLI 的 `export` 也照卡片寫。
+| 做了什麼 | 怎麼做 | 守門 |
+|---|---|---|
+| **舊門檻那條路退役：判定只剩一種算法** | 檔案格式照舊讀得進來，但「一條分數公式＋門檻＋兩個 bin」在引擎裡換成**一模一樣的一題樹**（`recipe_schema.legacy_decision`：`score >= 門檻`，分數表達式照舊）再走判定樹。CLI `rescore`（以前自己有第三份門檻比法）、Studio 開檔的轉換、宣告層（`verdict_features`）都叫同一支。Studio 分數直方圖上那條拖得動的門檻線、它的 handler、重算 bin 數與準確率整族拿掉（`studio.py` −57 行、方法 −5）| `test_no_decision_means_no_bin.py`、`test_ui_tree_canvas.py`、`test_rescore_decide.py` |
+| **一個名字** | 卡片庫那張偽卡「Score / Bin」→「Decision」（階段欄仍叫 ADC）；引擎寫的數字在特徵表裡歸在「Decision」底下；預覽旁那一格「Verdict」→「Class」；歡迎頁的名詞表收成四個字；公式錯誤不再一律說「score expression」| `test_ui_welcome.py` 等 |
+| **判定看得出問不出來的題目** | 畫布上那一題用到一個這條 pipeline 沒有人產出的數字 → 紅色虛線菱形，tooltip 講「每一顆都答『否』」與怎麼補（加卡／勾 Carry these columns）。「誰產出什麼」只問 `feature_owners` 那一份 | `test_ui_tree_canvas.py` |
+| **「好消息」只有一個判準** | `decide_tree.called_real`：標了壞消息＝判成真的，好消息／中性＝不是，**沒標的照舊** `bin ≠ 0`。CLI 的正確率、Studio 的 baseline 條、Results 表上「判錯了」的格子都用它（出貨的 EBI recipe 上「nothing to measure」以前被算成誤殺）| `test_good_news_is_one_rule.py` |
+
+**黃金值**：三份逐項相同的只有分數、bin 與每一個量測數字；每一顆**多了一欄**
+`decide_unanswered = 0`（判定樹本來就寫的那一格 —— 兩份 fixture recipe 用的是舊的
+分數門檻，現在走判定樹）。重凍過一次，diff 22 行全是那一欄。
+
+## 6. 期 4／5 — 還沒做的
+
+* **期 4（Output）**：CLI 的 `export` 也照卡片寫（現在是另一條路）。期 2 已經做掉
+  「Write to 預設在資料旁邊」與「沒有 KLARF 就跳過並講」。
 * **期 5（畫布，等使用者點頭）**：Input 是起點、Output 是終點，左右對稱 ——
   Output 卡一律排在判定右邊那一欄；判定右緣一個固定的「results →」（字，不是線，
   同判定框左邊的「numbers →」）；副標從「(not connected)」改成講它寫什麼到哪；
   ADC 從虛線框改成一張普通的卡（點開看樹）。**不給 Output 埠**：那條線永遠只有
   一個地方可以接、一定要接（F49 量過：不用）。
 
-## 6. 這一份不做的
+## 7. 這一份不做的
 
 * Write comparison 併進 Write report（使用者：先不併）。
 * 判定與 Output 變成真的 DAG 節點（F49 量過，結論不變）。

@@ -46,6 +46,7 @@ __all__ = [
     "LEAF_PALETTE", "leaf_color", "verdict_rows", "NUISANCE_HEX",
     "cuts_on",
     "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY", "UNANSWERED_KEY",
+    "called_real", "positive_bins",
 ]
 
 
@@ -572,6 +573,43 @@ def features_used(decide: Any) -> List[str]:
         take(getattr(x, "expr", ""))
     take(getattr(decide, "score", ""))
     return order
+
+
+def called_real(bin_: Any, outcomes: Optional[Dict[int, str]] = None
+                ) -> Optional[bool]:
+    """這個 bin 算不算「判成真缺陷」（F122 期 3：**好消息只有一個判準**）。
+
+    F119 讓使用者在每一類上標「好消息／壞消息／中性」，顏色照它畫；而正確率、
+    抓漏、誤殺、Results 表上紅著的格子以前一律看 ``bin != 0`` —— 同一份 recipe
+    兩個答案（例：「nothing to measure」bin 9 標成中性，卻被算成「判成真的」）。
+    現在：標了 ``bad`` ＝判成真的；``good`` / ``neutral`` ＝不是；**沒標的照舊**
+    ``bin != 0``（舊 recipe 一個數字都不變）。``None``（沒判定）→ ``None``。
+    """
+    if bin_ is None:
+        return None
+    try:
+        b = int(bin_)
+    except (TypeError, ValueError):
+        return None
+    marked = (outcomes or {}).get(b)
+    if marked in ("good", "neutral"):
+        return False
+    if marked == "bad":
+        return True
+    return b != 0
+
+
+def positive_bins(decide: Any, results: Any) -> Optional[List[int]]:
+    """`export.summarize(positive_bins=…)` 要的那一串（F122 期 3）。
+
+    一類都沒標 → ``None``（`summarize` 的預設 ``bin != 0``，逐位元組照舊）。
+    """
+    outcomes = decide.bin_outcomes() if decide is not None else {}
+    if not outcomes:
+        return None
+    seen = {int(r["bin"]) for r in (results or [])
+            if r.get("bin") is not None} | set(outcomes)
+    return sorted(b for b in seen if called_real(b, outcomes))
 
 
 def leaf_color(bin_: int, nuisance: str = NUISANCE_HEX) -> str:

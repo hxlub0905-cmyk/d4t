@@ -217,7 +217,9 @@ FILE_CEILINGS = {
     # 上那張「你要開哪一種」的選單拿掉（見下面 `HARD_CAPS` 那一段）。
     # 2026-09-29（F122 期 2）：4,302 → **4,293**（−9）。「這一批的底稿」搬進
     # `RunController.snapshot`（它多記了判定的簽章）。
-    "d4t/ui/studio.py": 4293,
+    # 2026-09-29（F122 期 3）：4,293 → **4,236**（−57）。舊門檻那條路退役：
+    # 分數直方圖上的門檻線、它的兩個 handler、重算 bin 數與準確率那兩支。
+    "d4t/ui/studio.py": 4236,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -486,7 +488,10 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        197,
+        192,
+        # 2026-09-29（F122 期 3）：197 → 192。舊門檻那條路退役：分數直方圖上的
+        # 門檻線那一族五支（兩個 handler、`_uses_a_threshold`、
+        # `_refresh_bin_summary`、`_accuracy_text`）。
         # 2026-09-19（F116 第 6 步）：210 → 197。搬走 16 支，回來三支門面
         # （`_on_edge_added` **191 處／21 個測試檔**、`_connect` 17／3、
         # `_on_edge_removed` 16／5）——門面留**舊名字**，所以那 191 處一個字
@@ -556,7 +561,9 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        266,
+        261,
+        # 2026-09-29（F122 期 3）：266 → 261。同上那一族拿掉，掉的是它們讀的
+        # `self.model.threshold` / `self.trial_scores` 那幾個參照。
         # 2026-09-19（F116 第 6 步）：279 → 266。這一族**沒有任何自己的狀態**
         # （全部讀寫 `win.model`），掉的是那 437 行裡的 `self.*` 參照。
         # 2026-09-19（F116 第 5 步）：292 → 279。只有 `_trial_t0` 與
@@ -700,9 +707,13 @@ HARD_CAPS = {
     # （`_last_run` 那個 dict）搬進 `RunController.snapshot` —— 它要多記判定的
     # 簽章（Write outputs 拿來擋「改了判定沒按 Re-run 就寫」），而那一行不該
     # 加在這裡。方法與 `self.*` 沒動。
-    "d4t/ui/studio.py": 4293,
-    "studio_window_methods": 197,
-    "studio_window_attributes": 266,
+    # 2026-09-29（F122 期 3）：行 4,293 → 4,236（−57）、方法 197 → 192、
+    # `self.*` 266 → 261。舊門檻那條路退役（判定只剩判定樹）：分數直方圖上
+    # 那條拖得動的門檻線、`_on_threshold_changed/_committed`、
+    # `_uses_a_threshold`、`_refresh_bin_summary`、`_accuracy_text` 整族拿掉。
+    "d4t/ui/studio.py": 4236,
+    "studio_window_methods": 192,
+    "studio_window_attributes": 261,
 }
 
 

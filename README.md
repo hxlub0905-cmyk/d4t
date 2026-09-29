@@ -113,7 +113,7 @@ python -m d4t validate <recipe>.json
 python -m d4t run <recipe>.json /tmp/lot/LOT_SYN.001 \
     --workers 4 --cache /tmp/cache --db /tmp/runs.db --csv features.csv
 python -m d4t runs   --db /tmp/runs.db             # 批次歷史
-python -m d4t rescore <run_id> --db /tmp/runs.db --threshold 60 --save
+python -m d4t rescore <run_id> --db /tmp/runs.db --save  # 用存下來的數字重判，不重跑影像
 python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
     --klarf-out out.001 --csv feat.csv --excel report.xlsx
 ```

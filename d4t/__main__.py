@@ -321,8 +321,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if gt:
         from d4t.core.export import summarize
         from d4t.core.export.report import UNBINNED_KEY
+        from d4t.core.pipeline.decide_tree import positive_bins
 
-        summary = summarize(payload, ground_truth=gt)
+        # 「判成真的」看每一類標的好消息／壞消息（F122 期 3）——跟 Studio 同一條。
+        summary = summarize(payload, ground_truth=gt,
+                            positive_bins=positive_bins(recipe.decide, payload))
         g = (summary.get("ground_truth") or {})
         print(f"\n對照 ground truth（{gt_path}）：")
         if g.get("n_evaluated"):
@@ -408,6 +411,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"[錯誤] 輸出卡 '{nid}'：{msg}", file=sys.stderr)
         return 1
     return 0
+
+
+def _positive_bins_of_run(run, results):
+    """存下來那一輪的 recipe 說哪幾個 bin 是「判成真的」（F122 期 3）。
+    讀不出來就 ``None``（`summarize` 的預設 ``bin != 0``）。"""
+    from d4t.core.pipeline.decide_tree import positive_bins
+    from d4t.core.pipeline.recipe import Recipe
+
+    try:
+        recipe = Recipe.from_json_dict(json.loads(run.get("recipe_json") or ""))
+    except Exception:  # CLI 邊界：舊的 run 可能沒有存 recipe
+        return None
+    return positive_bins(recipe.decide, results)
 
 
 def _cmd_runs(args: argparse.Namespace) -> int:
@@ -514,7 +530,8 @@ def _cmd_export(args: argparse.Namespace) -> int:
     if args.ground_truth:
         with open(args.ground_truth, encoding="utf-8") as f:
             gt = json.load(f)
-    s = summarize(results, ground_truth=gt)
+    s = summarize(results, ground_truth=gt,
+                  positive_bins=_positive_bins_of_run(run, results))
     print(f"成功 {s.get('n_ok')} / 失敗 {s.get('n_fail')}；"
           f"bin 分佈 " + " · ".join(f"bin {b}={c}"
                                    for b, c in sorted((s.get('bin_counts') or {}).items(),

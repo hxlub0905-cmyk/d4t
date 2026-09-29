@@ -88,7 +88,8 @@ def ran(window, qapp):
 
 @pytest.fixture()
 def scored(ran, qapp):
-    """把畫面切回**分數的直方圖**，而且是門檻真的在決定事情的那條路。
+    """把畫面切回**分數的直方圖**（F122 期 3 起那張圖上沒有門檻線了；這個 fixture
+    留著給「點長條篩 Gallery」那幾條用）。
 
     ⚠ 兩件事 2026-08-24 變了，而底下那幾條門檻互動的測試各踩到一個：
 
@@ -337,13 +338,15 @@ def test_real_click_on_bar_does_not_move_the_threshold(scored, qapp):
     window._score_filter = None
 
 
-def test_real_drag_still_commits_the_threshold(scored, qapp):
-    """按下 + 拖過去 + 放開 = 拖門檻（老行為不能壞）。"""
+def test_a_drag_on_the_score_histogram_commits_nothing(scored, qapp):
+    """F122 期 3：分數直方圖上沒有門檻可拖了（舊門檻那條路整條退役）。
+    按下 + 拖過去 + 放開不 commit 任何東西，model 的門檻一動也不動，也不被
+    當成點長條。以前這一條守的是「拖門檻（老行為不能壞）」。"""
     window = scored
     hist = window.histogram
     hist.resize(520, 200)
     qapp.processEvents()
-    before_visible = window.results_visible()
+    before = window.model.threshold
 
     bars = []
     hist.bar_clicked.connect(lambda a, b: bars.append((a, b)))
@@ -360,10 +363,9 @@ def test_real_drag_still_commits_the_threshold(scored, qapp):
     _mouse(hist, QEvent.MouseMove, end, Qt.NoButton, Qt.LeftButton)
     _mouse(hist, QEvent.MouseButtonRelease, end, Qt.LeftButton, Qt.NoButton)
 
-    assert bars == [], "拖曳不該被當成點長條"
-    assert len(committed) == 1
-    assert window.model.threshold == pytest.approx(committed[0])
-    assert window.results_visible() == before_visible   # 拖門檻不改變視窗狀態
+    assert committed == []
+    assert window.model.threshold == pytest.approx(before)
+    assert hist.threshold() is None
 
 
 # --------------------------------------------------------------------------- #

@@ -27,6 +27,7 @@ from .decide_tree import features_used
 from .engine import feature_prefixes, qualified_feature_name
 from .expression import ExpressionError, parse_expression
 from .recipe import Recipe, RecipeError, execution_order, is_region_edge
+from .recipe_schema import legacy_decision
 from .step import FeatureSpec, REGISTRY, Step
 
 __all__ = [
@@ -161,7 +162,7 @@ class BoundSpec:
     """一個特徵的**完整**身分：spec ＋ 它掛在哪個節點上（PR-3）。
 
     ``node_id == ""`` 是**引擎/判定段**（score / decide_unanswered /
-    route_taken / let 那些）—— UI 對映到「Score / Bin」那張偽卡。
+    route_taken / let 那些）—— UI 對映到「Decision」那張偽卡（F122 期 3 以前叫「Score / Bin」：一個東西五個名字，只留一個）。
     """
     node_id: str
     label: str
@@ -170,7 +171,7 @@ class BoundSpec:
 
 #: 引擎/判定段那一組在 UI 上的名字 —— 跟 `studio._SCORE_LIBRARY_ENTRY` 的
 #: label 同一個字（那邊是它的別名，這裡是家）。
-ENGINE_LABEL = "Score / Bin"
+ENGINE_LABEL = "Decision"
 
 
 def _regions_in_wiring_order(recipe: Recipe,
@@ -309,9 +310,11 @@ def bound_specs(recipe: Recipe, kind: str,
             out.append(BoundSpec("", ENGINE_LABEL,
                                  FeatureSpec(name=name, family="engine", **kw)))
 
-    decide = recipe.decide
-    has_score = bool((decide.score if decide is not None
-                      else recipe.score.expr).strip())
+    # 舊的「分數＋門檻」檔案在引擎裡是一題樹（F122 期 3，`legacy_decision`）——
+    # 宣告層問**同一支**，不然引擎多寫的 `decide_unanswered` 這裡不知道。
+    decide = recipe.decide if recipe.decide is not None \
+        else legacy_decision(recipe.score)
+    has_score = bool(str(decide.score if decide is not None else "").strip())
     if has_score:
         engine("score", base="score", metric="score")
     if decide is not None:

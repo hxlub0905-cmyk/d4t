@@ -135,27 +135,15 @@ def test_the_write_button_in_results_reaches_the_studio(window):
 
 
 # --------------------------------------------------------------------------- #
-# 3. **搬家不可以弄丟秒回**
+# 3. 門檻線退役（F122 期 3）
 # --------------------------------------------------------------------------- #
-def test_threshold_drag_is_still_the_pure_rescore_path(window):
-    """拖曳中只重算 bin 數（不寫 model、不重跑影像），放開才 commit。"""
+def test_there_is_no_threshold_to_drag(window):
+    """F122 期 3：分數直方圖上的門檻線退役（判定只剩判定樹）。這裡以前守的是
+    「拖曳中只重算、放開才寫回 model」—— 那條規矩現在住在判定樹那一步的
+    直方圖上（`tree_panel`）。"""
     window.run_trial(8, workers=1, sync=True)
-    window._on_threshold_committed(40.0)
-    before = window.model.threshold
-
-    window._on_threshold_changed(77.25)
-    assert window.model.threshold == pytest.approx(before), \
-        "拖曳中絕對不可以動到 model —— 那會觸發重跑"
-    live = window.histogram.bin_summary_text()
-    # 前綴比對：合成資料旁邊有 ground_truth.json，同一行後面還會接一段準確率
-    # （Phase 1）。這一條要驗的是 bin 數跟著門檻走，不是那一行長什麼樣子。
-    assert live.startswith("   ".join(
-        "bin %s=%s" % (k, v)
-        for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
-                                        window.model.bins).items())))
-
-    window._on_threshold_committed(55.0)
-    assert window.model.threshold == pytest.approx(55.0)
+    assert window.histogram.threshold() is None
+    assert not hasattr(window, "_on_threshold_committed")
 
 
 def test_bar_click_filters_the_gallery_in_the_same_window(window):
@@ -254,20 +242,21 @@ def test_a_feature_spread_does_not_pretend_the_threshold_applies(window):
     assert window.results.spread_hint_text() == ""
 
 
-def test_the_threshold_line_is_still_there_for_a_binary_recipe(window):
-    """**而沒有判定樹的時候它要在。**
+def test_no_threshold_line_even_without_a_tree(window):
+    """**沒有判定樹的時候也沒有門檻線**（F122 期 3 翻過來的那一條）。
 
-    這一條接住上面那一條讓出來的地盤：R1 拿掉的是「門檻在不該出現的時候
-    出現」，不是門檻本身 —— 二元 score 那條老路仍然靠它調。
+    R1 當初拿掉的是「門檻在不該出現的時候出現」，留下「二元 score 那條老路
+    仍然靠它調」。那條老路 F122 期 3 整條退役（舊檔案開起來就是一題樹），而
+    「沒有判定樹」現在的意思是「還沒有判定」—— 那時候拖一條線什麼都不決定。
     """
     keep = window.model.decide
     try:
         window.model.decide = None
         window.results.show_feature(window.results.SCORE)
         window._refresh_spread()
-        assert window.histogram.is_interactive() is True
-        assert window.histogram.threshold() is not None
-        assert "bin " in window.histogram.bin_summary_text()
+        assert window.histogram.is_interactive() is False
+        assert window.histogram.threshold() is None
+        assert window.histogram.bin_summary_text() == ""
     finally:
         window.model.decide = keep
         window._refresh_spread()

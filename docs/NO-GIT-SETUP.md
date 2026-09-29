@@ -371,8 +371,8 @@ python tools\make_sample.py C:\temp\lot --n 100
 python -m d4t gui
 ```
 
-在 Studio 裡：**開啟 KLARF** 選剛才的 `LOT_SYN.001` → 從左邊的卡片庫把流程組起來
-→ **試跑** → 拖下方的門檻線看 bin 數變化 → **存 Recipe**。
+在 Studio 裡：**Open data…** 選剛才的 `LOT_SYN.001` → 從左邊的卡片庫把流程組起來
+→ **試跑** → 在判定樹上調一題的門檻、看每一類幾顆 → **存 Recipe**。
 
 > 這裡以前寫的是「載入範本（die-to-die）」。範例 recipe 已於 2026-08-16 全部
 > 移除，那個入口跟著收起來了 —— 現在第一條 pipeline 是自己從卡片庫組的。

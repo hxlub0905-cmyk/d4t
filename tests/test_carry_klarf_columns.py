@@ -66,7 +66,10 @@ def test_nothing_ticked_carries_nothing(dataset):
     assert columns_for_main(_recipe().nodes.values()) == []
     res = run_defect(_recipe(), dataset.items[0], dataset.kind)
     assert res.ok, res.error
-    assert set(res.features) == {"n_channels", "score"}, sorted(res.features)
+    # `decide_unanswered`：舊的分數門檻在引擎裡是一題樹（F122 期 3），判定樹
+    # 本來就寫這一格。carry 沒勾就一欄 KLARF 都不帶 —— 這一條守的是那一件。
+    assert set(res.features) == {"n_channels", "score", "decide_unanswered"}, \
+        sorted(res.features)
 
 
 def test_the_declaration_follows_the_parameter(dataset):

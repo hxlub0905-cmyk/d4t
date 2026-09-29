@@ -366,17 +366,27 @@ class _DiamondItem(QGraphicsItem):
     """
 
     def __init__(self, when: str, path: str, canvas: Any = None,
-                 selected: bool = False):
+                 selected: bool = False, missing: Sequence[str] = ()):
         super().__init__()
         self.when = str(when)
         self.tree_path = str(path)
         self._canvas = canvas
         self._selected = bool(selected)
+        #: 這一題用到、但這條 pipeline **沒有人產出**的數字（F122 期 3）。
+        #: 那一題問不出來 → 每一顆都答「否」，而它在畫面上以前長得跟一題正常的
+        #: 問題一模一樣（只有入口卡上一個要點開才讀得到的徽章）。
+        self.missing = [str(n) for n in missing]
         # 幽靈線（F24 ④）：滑鼠停上來 → 這一步用到的數字各自亮出它的來源卡。
         self.setAcceptHoverEvents(True)
-        self.setToolTip("%s ?\n\nyes goes right, no goes down. "
-                        "Click to edit this step."
-                        % (self.when or "(empty question)"))
+        tip = ("%s ?\n\nyes goes right, no goes down. Click to edit this step."
+               % (self.when or "(empty question)"))
+        if self.missing:
+            tip = ("%s\n\nNothing in this pipeline measures %s, so this "
+                   "question cannot be asked - every defect is answered 'no' "
+                   "here. Add the card that measures it, or tick it under "
+                   "“Carry these columns” on the Input card if it is a KLARF "
+                   "column." % (tip, ", ".join(self.missing)))
+        self.setToolTip(tip)
 
     def mousePressEvent(self, e) -> None:  # Qt hook
         if e.button() == Qt.LeftButton and self._canvas is not None:
@@ -418,9 +428,14 @@ class _DiamondItem(QGraphicsItem):
             p.setPen(QPen(halo, 6.0))
             p.setBrush(Qt.NoBrush)
             p.drawPath(self._diamond())
-        p.setPen(QPen(QColor(TOKENS["accent"]) if self._selected else col,
-                      2.0 if self._selected else 1.4))
-        p.setBrush(QColor(TOKENS["bg_surface"]))
+        pen = QPen(QColor(TOKENS["accent"]) if self._selected else col,
+                   2.0 if self._selected else 1.4)
+        if self.missing:
+            # 問不出來的那一題：紅色虛線框 —— 跟卡片上的錯誤同一個顏色。
+            pen = QPen(QColor(TOKENS["danger_text"]), 1.8, Qt.DashLine)
+        p.setPen(pen)
+        p.setBrush(QColor(TOKENS["danger_bg"] if self.missing
+                          else TOKENS["bg_surface"]))
         p.drawPath(self._diamond())
         p.setPen(QColor(TOKENS["text_primary"]))
         f = p.font()
@@ -614,6 +629,22 @@ def _cell_pos(cell: Dict[str, Any], origin: QPointF) -> QPointF:
     return QPointF(x, y)
 
 
+def _nobody_makes(when: str, owners: Any) -> List[str]:
+    """這一題用到的數字裡，**這條 pipeline 沒有人產出**的那幾個（F122 期 3）。
+
+    「誰產出什麼」只有一份答案：`RecipeModel.feature_owners`（＝
+    `verdict_features.bound_specs`，有一把對照引擎的尺）。不知道（``None``）就
+    不講 —— 講錯比不講糟。題目解析不出來由 lint 講，這裡不重複。
+    """
+    if not isinstance(owners, dict) or not str(when or "").strip():
+        return []
+    try:
+        names = parse_expression(str(when)).variables
+    except Exception:  # 語法錯由 lint 講
+        return []
+    return sorted(n for n in names if n not in owners)
+
+
 def build_zone(scene: Any, canvas: Any,
                info: Dict[str, Any], origin: QPointF,
                collapsed: bool = False,
@@ -648,8 +679,9 @@ def build_zone(scene: Any, canvas: Any,
         pos = _cell_pos(cell, origin)
         sel = selected_path == cell["path"]
         if cell["kind"] == "step":
-            it: QGraphicsItem = _DiamondItem(cell["when"], cell["path"],
-                                             canvas, selected=sel)
+            it: QGraphicsItem = _DiamondItem(
+                cell["when"], cell["path"], canvas, selected=sel,
+                missing=_nobody_makes(cell["when"], info.get("feat_owner")))
         else:
             c = None if counts is None else int(counts.get(cell["path"], 0))
             it = _TrayItem(cell, c, stats.get(cell["path"]), canvas,

@@ -1023,7 +1023,9 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     vrow.setContentsMargins(0, 0, 0, 0)
     vrow.setSpacing(8)
     win.verdict = VerdictChip(win.verdict_live)
-    vrow.addWidget(QLabel("Verdict", win.verdict_live))
+    # 「Class」（F122 期 3）：以前叫「Verdict」—— 同一件事的第五個名字。膠囊上
+    # 寫的就是這一顆落在哪一類（樹上那片葉子的名字）＋ bin。
+    vrow.addWidget(QLabel("Class", win.verdict_live))
     vrow.addWidget(win.verdict)
     vrow.addStretch(1)
     vcol.addLayout(vrow)
@@ -1032,7 +1034,7 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     vrow2.setSpacing(8)
     # **score 那個數字跟 bin 一起常駐**（F76 刀 4 之後）。以前它是特徵表
     # 最後一列、粗體、永遠不被收合走的那一格 —— 理由是「它是這張表的
-    # 結論」。新面板把它歸進 `Score / Bin` 那一段，而那一段收得起來，
+    # 結論」。新面板把它歸進 `Decision` 那一段，而那一段收得起來，
     # 所以那條不變量搬到這裡：結論跟判定在同一塊，永遠看得到。
     win.verdict_score = QLabel("", win.verdict_live)
     win.verdict_score.setStyleSheet("font-weight:700;")

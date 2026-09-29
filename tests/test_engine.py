@@ -521,7 +521,10 @@ def test_no_collision_means_no_extra_columns():
                    "m1": RecipeNode("m1", "t_f93_measure", {"value": 7.0})},
             expr="glv_max")
         r = run_defect(rec, make_item(), "ebi_patch")
-        assert sorted(r.features) == ["glv_max", "score"], sorted(r.features)
+        # `decide_unanswered` 是判定樹本來就寫的（舊的分數門檻在引擎裡是一題樹，
+        # F122 期 3）；撞名的欄一個都沒有 —— 這一條守的是那一件。
+        assert sorted(r.features) == ["decide_unanswered", "glv_max",
+                                      "score"], sorted(r.features)
     finally:
         for k in keys:
             REGISTRY.pop(k, None)

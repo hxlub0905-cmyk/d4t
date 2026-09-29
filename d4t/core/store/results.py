@@ -366,14 +366,13 @@ def rescore(store: RunStore, run_id: str, *,
     那條路上 ``expr`` / ``threshold`` / ``bins`` 沒有東西可以改 ——
     傳了就 ``ValueError`` 講一句白話，而不是安靜地忽略。
 
-    以下是**老路**（單一分數門檻）的行為，一個位元都沒動：
+    舊的單一分數門檻 recipe（F122 期 3 起跟判定樹同一條路算，見下面）：
 
     - ``expr`` / ``threshold`` / ``bins``：None → 沿用該 run recipe 的設定。
     - 每顆的變數 = 存下來的 features **排除 "score"**（避免舊分數污染新式）。
-    - 判定與 engine 相同：``score < threshold → bins["below"]``，否則
-      ``bins["above"]``。
-    - 某顆 features 缺變數（或值是 None，例如原本是 nan）→ 該顆
-      score=None、bin=None、記入 ``n_errors``，**絕不炸整批**。
+    - 判定與 engine 相同 —— 因為**就是**引擎那一支（`redecide`）。
+    - 某顆 features 缺變數 → 該顆 score=None、bin=None、記入 ``n_errors``，
+      **絕不炸整批**；卡片出錯的那幾顆照舊是失敗（F122 期 1）。
     - ``save_as``：字串 → 以該 id 存成**新 run**；True → 自動 id；
       新 run 帶更新後的 recipe_json、原 run 的 klarf_path/dataset_kind、
       ``notes``；新 id 放在回傳的 ``saved_run_id``。
@@ -429,57 +428,10 @@ def rescore(store: RunStore, run_id: str, *,
             .format(run_id))
     rdict["score"] = spec
 
-    expression = parse_expression(str(spec["expr"]))  # 語法錯誤 → 直接 raise（recipe 寫錯要讓人看到）
-    thr = float(spec.get("threshold", 0.0))
-    bins_used = dict(spec.get("bins") or {})
-    b_below = int(bins_used.get("below", 0))
-    b_above = int(bins_used.get("above", 1))
-
-    # ---- 純 python dict 迴圈重算（10k 顆遠低於 5 s）----
-    n = 0
-    n_errors = 0
-    scores: List[float] = []
-    bin_counts: Dict[int, int] = {}
-    new_rows: List[Dict[str, Any]] = []
-    for r in store.iter_results(run_id):
-        n += 1
-        feats = r["features"]
-        variables = {k: v for k, v in feats.items() if k != "score"}
-        try:
-            s = expression.eval(variables)
-            b = b_below if s < thr else b_above
-        except Exception as e:  # 缺變數 / 值不是數字 → 該顆記錯，不殺整批
-            n_errors += 1
-            feats["score"] = None
-            new_rows.append({
-                "defect_id": r["defect_id"], "ok": False, "error": str(e),
-                "features": feats, "score": None, "bin": None})
-            continue
-        scores.append(s)
-        bin_counts[b] = bin_counts.get(b, 0) + 1
-        feats["score"] = s
-        new_rows.append({
-            "defect_id": r["defect_id"], "ok": True, "error": None,
-            "features": feats, "score": s, "bin": b})
-
-    # ---- 存成新 run（選配）----
-    saved_run_id: Optional[str] = None
-    if save_as:
-        saved_run_id = store.save_run(
-            rdict, new_rows,
-            klarf_path=run.get("klarf_path", ""),
-            dataset_kind=run.get("dataset_kind", ""),
-            notes=notes,
-            run_id=(None if save_as is True else str(save_as)))
-
-    return {
-        "run_id": run_id,
-        "n": n,
-        "n_errors": n_errors,
-        "bin_counts": bin_counts,
-        "score_min": min(scores) if scores else None,
-        "score_median": statistics.median(scores) if scores else None,
-        "score_max": max(scores) if scores else None,
-        "elapsed_s": time.perf_counter() - t0,
-        "saved_run_id": saved_run_id,
-    }
+    parse_expression(str(spec["expr"]))  # 語法錯誤 → 直接 raise（recipe 寫錯要讓人看到）
+    # **判定只有一種算法**（F122 期 3）：這裡以前是第三份門檻比法（`score <
+    # threshold → below`），而且把每一列都重算 —— 連卡片出錯的那幾顆也拿殘缺的
+    # features 得到一個 bin。現在跟判定樹同一條路：引擎把這個 ``score`` 區塊換成
+    # 一模一樣的一題樹（`recipe_schema.legacy_decision`）再判。
+    return _rescore_with_decide(store, run, run_id, rdict, t0,
+                                save_as=save_as, notes=notes)

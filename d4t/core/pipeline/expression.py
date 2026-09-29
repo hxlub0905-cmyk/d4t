@@ -56,7 +56,7 @@ class ExpressionError(ValueError):
         self.text = text
         self.pos = max(0, int(pos))
         msg = (
-            f"Problem in the score expression (near character "
+            f"Problem in the formula (near character "
             f"{self.pos + 1}): {desc}\n"
             f"{_INDENT}{text}\n"
             f"{_INDENT}{' ' * self.pos}^"

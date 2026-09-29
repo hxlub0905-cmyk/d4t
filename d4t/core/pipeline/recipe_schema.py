@@ -265,6 +265,45 @@ def rules_to_tree(spec: "DecideSpec") -> Any:
     return node
 
 
+def legacy_decision(score: "ScoreSpec") -> Optional["DecideSpec"]:
+    """舊的「一條分數公式＋門檻＋兩個 bin」→ **一模一樣的一題判定樹**（F122 期 3）。
+
+    使用者（2026-09-29）：舊門檻那條路**整條退役**，舊檔案自動轉成樹。檔案格式
+    照舊讀得進來（磁碟上那個 ``score`` 區塊永遠要認得），但**判定只剩一種算法**：
+    引擎、CLI 的 rescore、Studio 開檔都叫這一支，而不是各有一份門檻的比法
+    （`store.rescore` 以前真的自己寫了一份，而它漂過一次）。
+
+    樹問的是 ``score >= 門檻``，分數表達式就是原本那一條 —— 分數在判定之前算
+    （F122 期 1），所以這一題問得到它；而它是一個**單純的比較**，Studio 的導引式
+    編輯器（挑數字 ▾／比什麼 ▾／多少）認得它。結果跟老路逐項相同：老路是
+    ``score < 門檻 → below``，這裡是 ``score >= 門檻 → above``，兩者互為補集
+    （表達式頂層的 NaN 早就是 0，見 `expression.py`）。多出來的只有判定樹本來
+    就寫的 ``decide_unanswered``（永遠 0：分數算不出來那一顆是失敗，不是問不出來）。
+
+    沒有分數表達式 → ``None``（沒有判定）。
+    """
+    expr = str(getattr(score, "expr", "") or "").strip()
+    if not expr:
+        return None
+    bins = dict(getattr(score, "bins", None) or {})
+    thr = float(getattr(score, "threshold", 0.0) or 0.0)
+    return DecideSpec(
+        tree=TreeStep(when="score >= %s" % _fmt_number(thr),
+                      yes=TreeLeaf(bin=int(bins.get("above", 1)),
+                                   label="score at or above %s"
+                                   % _fmt_number(thr)),
+                      no=TreeLeaf(bin=int(bins.get("below", 0)),
+                                  label="score below %s" % _fmt_number(thr))),
+        score=expr)
+
+
+def _fmt_number(x: float) -> str:
+    """門檻寫進題目裡的樣子：``50.0`` → ``50``、``5.4`` → ``5.4``（``repr`` 的精度，
+    一個位元都不丟 —— 題目比的就是這個數）。"""
+    x = float(x)
+    return str(int(x)) if x.is_integer() and abs(x) < 1e15 else repr(x)
+
+
 def let_names_written(decide: Optional["DecideSpec"],
                       upto: Optional[int] = None) -> List[str]:
     """判定段的 ``let`` 會寫進 features 的**每一個名字**，照行序（2026-09-09）。

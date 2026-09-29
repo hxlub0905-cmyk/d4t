@@ -97,8 +97,9 @@ from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline import sampling
 from d4t.core.pipeline.step import SCALE_DEFECT, SCALE_LOT
 from d4t.core.pipeline.recipe import (
-    describe_migration, route_for, version_skew,
+    ScoreSpec, describe_migration, route_for, version_skew,
 )
+from d4t.core.pipeline.recipe_schema import legacy_decision
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from . import autosave
@@ -147,8 +148,7 @@ from .scope import (
 )
 from .numbers import format_feature_value
 from .viewmodel import (GLV_INTENTS, RecipeModel,
-                        is_a_constant_expression, accuracy_at, histogram,
-                        rebin)
+                        is_a_constant_expression, histogram)
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .workbench import MODES as LAYOUT_MODE_NAMES
 from .welcome import (
@@ -169,16 +169,16 @@ __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR"
            "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
            "DEMO_DIR", "DEMO_DEFECTS", "DEMO_SEED", "generate_demo_lot"]
 
-#: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
+#: 卡片庫「ADC」段固定顯示的 Decision 項目（F122 期 3 以前叫「Score / Bin」）。它不是 registry 裡的
 #: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
 #: 使用者要能在庫裡看到「影像 → 算法 → ADC 判定」三段都有東西。點它 = 去編輯分數。
 _SCORE_LIBRARY_KEY = "__score__"
 _SCORE_LIBRARY_ENTRY = {
     "key": _SCORE_LIBRARY_KEY,
-    "label": "Score / Bin",
+    "label": "Decision",
     "category": "adc",
     "group": "adc",
-    "help": "Combine the measured features into a score and split into bins by a threshold — every pipeline has exactly one; click to edit it.",
+    "help": "Sort the defects into bins with a decision tree — questions about the numbers the cards measured. One per recipe; click to put it on the canvas.",
     "requires_ref": False,
     "params": [],
     "reads": [],
@@ -727,8 +727,6 @@ class StudioWindow(QMainWindow):
                 self.image_view_b, self.image_view, s, o))
 
         self.results.shown_feature_changed.connect(self._on_spread_feature_changed)
-        self.histogram.threshold_changed.connect(self._on_threshold_changed)
-        self.histogram.threshold_committed.connect(self._on_threshold_committed)
         self.histogram.bar_clicked.connect(self.gallery_ctl._on_bar_clicked)
 
         self.gallery.thumbs_requested.connect(
@@ -988,7 +986,7 @@ class StudioWindow(QMainWindow):
         # 分流（F23 期2）：route 清單與編輯區塊跟著 model 走。
         self._refresh_route_switcher()
         self.route_box.refresh()
-        self._sync_threshold_line()
+        self._sync_score_histogram()
         self._update_action_states()
         self._refresh_library_badges()
         region_check.refresh_region_button(self)
@@ -999,7 +997,7 @@ class StudioWindow(QMainWindow):
         self._sync_score_widgets()
         self._sync_verdict_block()      # F76 刀 5：有判定才畫 Verdict 那一塊
         self._refresh_feature_combo()
-        self._sync_threshold_line()
+        self._sync_score_histogram()
         self._update_action_states()
         self._refresh_library_badges()
 
@@ -1550,12 +1548,8 @@ class StudioWindow(QMainWindow):
         self.pipeline.set_score_summary(self._score_summary_text())
 
     def _on_decide_mode(self, on: bool) -> None:
-        """切了「分成好幾類」—— 門檻線只對二元那一種有意義。
-
-        ⚠ 這裡以前自己判一次（``None if on else …``），而 `_refresh_spread`
-        每跑一次就把它蓋回去。判斷現在只有一份（`_uses_a_threshold`）。
-        """
-        self._sync_threshold_line()
+        """切了「分成好幾類」—— 分數的直方圖與判定那一塊跟著重畫。"""
+        self._sync_score_histogram()
         self._sync_score_widgets()
 
     def _refresh_feature_combo(self) -> None:
@@ -1664,7 +1658,7 @@ class StudioWindow(QMainWindow):
                 "(Score distribution appears after a trial run)")
             edges, counts = histogram(self.trial_scores)
             self.histogram.set_data(edges, counts)
-            self._sync_threshold_line()
+            self._sync_score_histogram()
             self.results.set_spread_hint("")
             return
 
@@ -1779,27 +1773,15 @@ class StudioWindow(QMainWindow):
         self.results.set_filter({"mode": "ids", "ids": list(row.get("ids") or ()),
                                  "label": "%s only" % name})
 
-    def _uses_a_threshold(self) -> bool:
-        """**這份 recipe 真的有一條門檻在決定事情嗎。**
+    def _sync_score_histogram(self) -> None:
+        """分數的直方圖**沒有門檻線**（F122 期 3：舊門檻那條路整條退役）。
 
-        R1（2026-08-24）修的那個 bug 的形狀是：這個判斷散在四個地方，而其中
-        三個沒有做 —— 於是「關掉門檻線」與「無條件把門檻線設回去」在同一次
-        重新整理裡互相蓋，最後贏的是錯的那一個。畫面上的下場是每一張縮圖說
-        `bin 3`、150px 底下的圖例說 `bin 1=24`，還附一行用那條門檻算出來的
-        準確率。同一批 24 顆，兩個答案。
-
-        所以判斷收成這一支，四個呼叫端都問它。F25 之後幾乎永遠是 False
-        （每一份 recipe 一打開就是一棵樹），但二元那條老路仍然走得到。
+        以前這裡問「這份 recipe 有沒有一條門檻在決定事情」，有的話畫一條拖得動的
+        線、底下一行重算的 bin 數與準確率。F25 之後每一份舊檔案一打開就是一棵樹，
+        剩下走得到那條線的只有**還沒有判定**的 recipe —— 而那時候拖一條線什麼都
+        不決定（F122 期 1：沒有判定＝沒有 bin）。判定的門檻現在在樹的每一步上
+        （`tree_panel` 的直方圖），這裡只剩「分數長什麼樣」。
         """
-        return getattr(self.model, "decide", None) is None
-
-    def _sync_threshold_line(self) -> None:
-        """門檻線與它底下那行字 —— **有門檻才畫**（見 `_uses_a_threshold`）。"""
-        if self._uses_a_threshold():
-            self.histogram.set_interactive(True)
-            self.histogram.set_threshold(self.model.threshold)
-            self._refresh_bin_summary(self.model.threshold)
-            return
         self.histogram.set_interactive(False)
         self.histogram.set_threshold(None)
         # 樹判出來的顆數是**真的那一份**，不是重算的，而它在判定段上已經有
@@ -1807,40 +1789,17 @@ class StudioWindow(QMainWindow):
         self._refresh_decide_counts()
         self.histogram.set_bin_summary(None)
 
-    def _refresh_bin_summary(self, threshold: float) -> None:
-        self._refresh_decide_counts()
-        if not self.trial_scores:
-            self.histogram.set_bin_summary(None)
-            return
-        self.histogram.set_bin_summary(
-            rebin(self.trial_scores, float(threshold), self.model.bins),
-            extra=self._accuracy_text(float(threshold)))
-
-    def _accuracy_text(self, threshold: float) -> str:
-        """有 ground truth 時，這個門檻下的正確率／抓漏／誤殺（一行字）。
-
-        沒有 ground truth 就回空字串 —— **不要放一行「N/A」**：那會佔掉版面
-        而且每次都在提醒使用者少了一個他可能根本沒有的東西。
-        """
-        g = accuracy_at(self.trial_results, threshold, self.model.bins,
-                        self.ground_truth)
-        if not g or not g.get("n_evaluated"):
-            return ""
-        return ("accuracy %.0f%%  missed %d  false alarms %d"
-                % (100.0 * float(g.get("accuracy") or 0.0),
-                   int(g.get("fn") or 0), int(g.get("fp") or 0)))
-
-    def _publish_run_snapshot(self, threshold: Optional[float] = None) -> None:
+    def _publish_run_snapshot(self) -> None:
         """把這一批壓成一塊交給 Results 的 baseline 條（X1）。
 
-        **門檻拖到哪就用哪一個**：使用者拖著那條線看的正是「這樣調準不準」，
-        而 baseline 那一行答的是「比上一次好還是壞」—— 兩者不同步的話，
-        畫面上會有兩個算法不同、看起來都像現在這一批的正確率。
+        「判成真的」看判定上每一類標的好消息／壞消息（F122 期 3），跟 Results
+        表上紅著的格子同一條規矩。（以前這裡還跟著分數直方圖上的門檻線走 ——
+        那條線 F122 期 3 退役了。）
         """
         try:
             snap = baseline.snapshot(
-                self.trial_results, self.ground_truth, self.model.bins,
-                threshold=threshold)
+                self.trial_results, self.ground_truth,
+                decide=getattr(self.model, "decide", None))
         except Exception:  # 顯示用，壞了就不講
             swallowed("studio._publish_run_snapshot")
             return
@@ -1904,7 +1863,7 @@ class StudioWindow(QMainWindow):
         # 講同一件事而不一樣）。
         self._refresh_verdict()
         self._refresh_spread()
-        self._publish_run_snapshot(None)
+        self._publish_run_snapshot()
         if wrote:
             self._status(truth_marks.summary_text(
                 merged, len(self.trial_results or []), wrote))
@@ -2718,11 +2677,9 @@ class StudioWindow(QMainWindow):
         說謊 —— 所以正確的行為就是照畫面存。想留住舊檔就 `Ctrl+Shift+S`
         另存一份（那也是每個編輯器的慣例）。
 
-        ⚠ 一個誠實的落差：`use_decide` 產出的規則是 ``expr >= threshold``，
-        而老路是 ``score < threshold`` 判 below —— 兩者在**分數是 NaN** 的
-        時候會分到不同的 bin（老路進 above、新的進 otherwise）。留 ``>=``
-        是因為它讀起來才是正著的（「大於就是這一類」）；NaN 的分數本來就是
-        一份算壞了的 recipe。
+        **轉出來的樹跟引擎跑的是同一棵**（F122 期 3）：`recipe_schema.legacy_decision`
+        —— 引擎對沒開過 Studio 的舊檔案也是這樣換的，所以畫面上那一題（``score
+        >= 門檻``）就是 CLI 跑的那一題，逐項同一個 bin。
         """
         m = self.model
         if getattr(m, "decide", None) is not None:
@@ -2733,8 +2690,9 @@ class StudioWindow(QMainWindow):
         # 正是不要發生這件事。見 `viewmodel.is_a_constant_expression`。
         if is_a_constant_expression(getattr(m, "expr", "")):
             return False
-        m.use_decide(True)
-        m.ensure_tree()
+        m.decide = legacy_decision(ScoreSpec(m.expr, m.threshold, m.bins))
+        m.expr = ""              # 並存是 error（`ambiguous-decision`）
+        m._changed()             # 畫布與面板跟上（判定區要畫出來）
         m.dirty = False          # 使用者什麼都還沒做，關窗不要問他要不要存
         m.clear_history()        # 「復原」不該把他退回一個看不到編輯器的狀態
         return True
@@ -2896,21 +2854,6 @@ class StudioWindow(QMainWindow):
     # 分數編輯
     # ==================================================================== #
 
-    # ---- 直方圖門檻線 -----------------------------------------------------
-    def _on_threshold_changed(self, value: float) -> None:
-        """拖曳中：**只**重算 bin 數（秒回），絕不寫 model、不重跑。"""
-        self._refresh_bin_summary(float(value))
-        self._status("Threshold %.3g (applied when you release the mouse)" % float(value))
-
-    def _on_threshold_committed(self, value: float) -> None:
-        """放開滑鼠：這時才寫回 model（會觸發刷新與預覽）。"""
-        self.model.set_threshold(float(value))
-        # baseline 那一行也跟著這個門檻（X1）。**在放開的時候，不是拖曳中**：
-        # 拖曳中那條路是「秒回」的（只重算 bin 數），而算一次 baseline 是一趟
-        # 完整的 `summarize` —— 直方圖底下那行正確率已經在跟著動了，
-        # 這一行慢半拍不會少講任何事。
-        self._publish_run_snapshot(float(value))
-        self._status("Threshold set to %.3g" % float(value))
 
     # ==================================================================== #
     # 資料集
@@ -3916,7 +3859,7 @@ class StudioWindow(QMainWindow):
         # X1：baseline 那一行吃的是**引擎判出來的 bin**（不是某個門檻重算的），
         # 因為使用者剛剛看到的就是它。拖門檻線時 `_refresh_bin_summary` 會用
         # 那個門檻再餵一次。
-        self._publish_run_snapshot(None)
+        self._publish_run_snapshot()
         self.results.set_run_all_enabled(bool(results),
                                          self.run_ctl._enabled_output_cards())
         # ⚠ **狀態列只講工具列沒講的那一半**（R4，2026-08-24）。

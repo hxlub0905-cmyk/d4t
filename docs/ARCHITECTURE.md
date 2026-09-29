@@ -446,7 +446,7 @@ d4t/
     │                         #     （「加一張卡，UI 零修改」的執行機構）
     ├── chips.py              #   設定區的膠囊：統計量、`chip_choice` 那一排
     ├── library.py            #   三段式卡片庫
-    ├── histogram.py          #   分數分佈 ＋ 可拖曳的門檻線（秒回是它的立身條件）
+    ├── histogram.py          #   分數／數字的分佈（點長條篩 Gallery）；門檻線那一半 F122 期 3 起沒人用
     ├── feature_text.py       #   特徵名怎麼變成人看得懂的字 ＋ VerdictChip
     ├── wiring_slot.py        #   設定區的一格接線：符號＋現在接的是什麼＋一顆「換」
     │                         #     （F68；挑了走的是跟畫布拉線同一條路）

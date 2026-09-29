@@ -60,7 +60,7 @@ def why_rows(trace: Any) -> List[Dict[str, Any]]:
 
     每列 ``{"kind", "text", "name", "note"?}``；``kind`` ∈ head / let / step
     / leaf / score / missing。``name`` 是點下去要跳的特徵名（"" = 不可點）
-    —— let 列是 let 自己的名字（引擎的、對映 Score / Bin 偽卡），step 列是
+    —— let 列是 let 自己的名字（引擎的、對映 Decision 偽卡），step 列是
     那一題最先問到的名字。
     """
     rows: List[Dict[str, Any]] = []

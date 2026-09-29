@@ -126,8 +126,9 @@ def axes_note() -> str:
     return strings.tr(AXES_NOTE) % len(GROUPS)
 
 
-#: 判定那一段的五個字（F117 D4）。**順序是使用者遇到它們的順序**，不是
-#: 字母序 —— 這張表要讀起來像一句話：分數 → 問題 → 類別 → 編號 → 結果。
+#: 判定那一段的四個字（F117 D4；F122 期 3 收掉第五個「verdict」—— 它講的就是
+#: 一顆 defect 的 class，現在畫面上那一格也叫 Class）。**順序是使用者遇到它們的
+#: 順序**，不是字母序 —— 這張表要讀起來像一句話：分數 → 問題 → 類別 → 編號。
 #:
 #: 為什麼需要它
 #: ------------
@@ -144,11 +145,10 @@ GLOSSARY = (
     ("decision", "The tree on the canvas. Each step asks the score (or any "
                  "other number) a question."),
     ("class", "Where a defect ends up on that tree - you name it yourself "
-              "(“a spot stands out”)."),
+              "(“a spot stands out”). The chip beside the preview shows the "
+              "class one defect got, with its bin."),
     ("bin", "The number that class writes into the KLARF. One class, one "
             "bin."),
-    ("verdict", "What one defect got: its class name and its bin, on the "
-                "chip beside the preview."),
 )
 
 

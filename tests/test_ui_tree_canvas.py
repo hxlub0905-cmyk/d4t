@@ -317,7 +317,12 @@ def test_opening_a_threshold_recipe_puts_a_tree_on_the_canvas(qapp, tmp_path):
     try:
         assert w.load_recipe_path(str(path), sync=True)
         assert w.model.decide is not None
-        assert w.model.tree_node("").when.startswith("glv_max")
+        # F122 期 3：轉出來的就是引擎跑的那一棵（`legacy_decision`）——
+        # 問的是分數，分數表達式是原本那一條。
+        from d4t.core.pipeline.recipe_schema import legacy_decision
+        assert w.model.decide == legacy_decision(recipe.score)
+        assert w.model.tree_node("").when == "score >= 3"
+        assert w.model.decide.score == "glv_max"
         assert w.pipeline.decision_items(), "畫布上沒有判定區"
         assert not w.model.dirty, "只是打開一個檔案，不該算成使用者改過"
     finally:
@@ -388,3 +393,34 @@ def test_collapsing_is_a_view_state_not_recipe_content(qapp):
     code = ast.dump(ast.Module(body=fn.body, type_ignores=[]))
     for leak in ("recipe", "set_param", "to_json", "model"):
         assert leak not in code, leak
+
+
+# --------------------------------------------------------------------------- #
+# F122 期 3：問不出來的那一題在畫布上看得出來
+# --------------------------------------------------------------------------- #
+def test_a_question_nobody_can_answer_is_marked_on_the_canvas(qapp):
+    """那一題用到一個沒有人產出的數字 → 每一顆都答「否」，而它以前在畫布上
+    長得跟一題正常的問題一模一樣。「誰產出什麼」只問 `feature_owners` 那一份。"""
+    view = _canvas()
+    decide = DecideSpec(tree=TreeStep(
+        when="a > 5",
+        yes=TreeStep(when="CLASSNUMBER == 3",
+                     yes=TreeLeaf(bin=2), no=TreeLeaf(bin=1)),
+        no=TreeLeaf(bin=0)))
+    info = tree_mod.decision_info(decide, [], None)
+    info["feat_owner"] = {"a": "load"}
+    view.set_decision(info)
+    diamonds = {it.when: it for it in view.decision_items()
+                if isinstance(it, tree_mod._DiamondItem)}
+    assert diamonds["a > 5"].missing == []
+    assert diamonds["CLASSNUMBER == 3"].missing == ["CLASSNUMBER"]
+    assert "answered 'no'" in diamonds["CLASSNUMBER == 3"].toolTip()
+    assert "Carry these columns" in diamonds["CLASSNUMBER == 3"].toolTip()
+
+
+def test_without_knowing_who_makes_what_nothing_is_marked(qapp):
+    """**反向**：不知道（沒有 `feat_owner`）就不講 —— 講錯比不講糟。"""
+    view = _canvas()
+    view.set_decision(tree_mod.decision_info(_decide_tree(), [], None))
+    assert all(it.missing == [] for it in view.decision_items()
+               if isinstance(it, tree_mod._DiamondItem))

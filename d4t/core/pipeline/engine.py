@@ -16,7 +16,7 @@ from d4t.core.log import swallowed
 import json
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 from . import decide_tree
@@ -25,6 +25,7 @@ from .expression import ExpressionError, parse_expression
 from .recipe import (
     Recipe, RecipeError, execution_order, resolve_route, route_miss_message,
 )
+from .recipe_schema import legacy_decision
 from .step import REGISTRY, SCALE_LOT, Step, StepError
 
 __all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
@@ -644,7 +645,7 @@ def _eval_decision(recipe: Recipe,
     ctx.features.pop("score", None)
     ctx.features.pop("decide_unanswered", None)
     expr = str(recipe.decide.score or "").strip()
-    score = parse_expression(expr).eval(ctx.features) if expr else None
+    score = _score_of(expr, ctx) if expr else None
     if score is not None:
         ctx.features["score"] = score
 
@@ -717,49 +718,53 @@ def _eval_decision(recipe: Recipe,
     return score, chosen_bin
 
 
-def _eval_score(recipe: Recipe,
-                ctx: Context) -> Tuple[Optional[float], Optional[int]]:
-    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
+def _score_of(expr: str, ctx: Context) -> float:
+    """分數表達式 → 一個數。**缺數字就失敗，而且講人話**。
 
-    **沒有判定＝沒有 bin**（F122）：沒有 ``decide``、``score.expr`` 也是空的
-    → ``(None, None)``，這一顆量完了、沒有被分類（`verdict_rows` 叫它
-    「no verdict」、KLARF 寫 ``-1``）。以前這條路會讓每一顆失敗（「the
-    expression is empty」），而 Studio 為了不讓它失敗，給還沒加判定的新 recipe
-    塞了一個佔位值 ``"0"`` —— 於是畫面說「every one comes out unclassified」，
-    CSV 與 KLARF 卻是每一顆 bin 1、分數 0。
-
-    ``recipe.decide`` 有東西的時候走多類別那一支（F21-D）—— **沒有的時候
-    這一支一個位元都沒動**。寫的當下的理由是黃金值壞了（見
-    `docs/history/plans/F21-algo-and-roi.md` §6，2026-08-23 已重凍）；
-    現在的理由是那條老路仍然有 recipe 在走，動它要有人證明數字沒變。
+    分數**沒有**「答否往下走」那條退路（F30 是給樹上的題目的）：一條分數
+    表達式算不出來的時候沒有第二個答案，硬給 0 分是發明一個數字。所以這裡是
+    失敗 —— 但要講出**為什麼**那一格不見了，否則使用者會去找一個不存在的 bug。
+    （這一段以前只在舊的門檻那條路上；F122 期 3 那條路收進判定樹之後，判定樹
+    的分數也講同一句話。）
     """
-    if getattr(recipe, "decide", None) is not None:
-        return _eval_decision(recipe, ctx)
-    if not str(recipe.score.expr or "").strip():
-        ctx.features.pop("score", None)
-        return None, None
-    expr = parse_expression(recipe.score.expr)
-    # 老路**沒有**「答否往下走」那條退路（F30）：一條分數表達式算不出來的時候
-    # 沒有第二個答案，硬給 0 分是發明一個數字。所以這裡仍然是失敗 ——
-    # 但要講出**為什麼**那一格不見了，否則使用者會去找一個不存在的 bug。
-    gaps = sorted(v for v in expr.variables if v not in ctx.features)
+    e = parse_expression(expr)
+    gaps = sorted(v for v in e.variables if v not in ctx.features)
     if gaps:
         raise ExpressionError(
             "%s %s not measured on this defect, so the score cannot be "
             "worked out. A card writes nothing at all when it cannot measure "
             "(that is deliberate - it is not a zero), so some defects will "
-            "always be missing some numbers. Use a decision tree instead: "
-            "there, a question that cannot be asked is answered 'no' and the "
-            "defect still gets classified."
+            "always be missing some numbers. Ask about it in the decision "
+            "tree instead: there, a question that cannot be asked is answered "
+            "'no' and the defect still gets classified."
             % (", ".join(gaps), "was" if len(gaps) == 1 else "were"),
-            recipe.score.expr, 0)
-    score = expr.eval(ctx.features)
-    ctx.features["score"] = score
-    if score < float(recipe.score.threshold):
-        b = int(recipe.score.bins["below"])
-    else:
-        b = int(recipe.score.bins["above"])
-    return score, b
+            expr, 0)
+    return e.eval(ctx.features)
+
+
+def _eval_score(recipe: Recipe,
+                ctx: Context) -> Tuple[Optional[float], Optional[int]]:
+    """ADC 判定：score → bin。失敗會 raise（呼叫端攔截）。
+
+    **判定只有一種算法：判定樹**（F122 期 3，使用者：「舊門檻整條退役」）。
+    舊檔案的 ``score`` 區塊（一條分數公式＋門檻＋兩個 bin）照舊讀得進來，但在
+    這裡換成**一模一樣的一題樹**（`recipe_schema.legacy_decision`：``score >=
+    門檻``）再走 `_eval_decision` —— 以前這裡有一段自己的門檻比法，而 CLI 的
+    rescore 又有一份。結果逐項相同，多的只有判定樹本來就寫的
+    ``decide_unanswered``（黃金值那一欄因此重凍過一次，見 SESSION_LOG）。
+
+    **沒有判定＝沒有 bin**（F122 期 1）：沒有 ``decide``、``score.expr`` 也是空的
+    → ``(None, None)``，這一顆量完了、沒有被分類（`verdict_rows` 叫它
+    「no verdict」、KLARF 寫 ``-1``）。
+    """
+    decide = getattr(recipe, "decide", None)
+    if decide is None:
+        decide = legacy_decision(recipe.score)
+        if decide is None:
+            ctx.features.pop("score", None)
+            return None, None
+        recipe = replace(recipe, decide=decide)
+    return _eval_decision(recipe, ctx)
 
 
 def run_defect(recipe: Recipe, item: Any, kind: str, *,
