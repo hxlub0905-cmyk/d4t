@@ -122,7 +122,9 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     其中一條 —— 而引擎照線送資料，於是畫面上的線比實際接的多。
     """
     load, sub = window.pipeline.card("load"), window.pipeline.card("sub")
-    assert load.out_names() == ["test", "ref"]
+    # Input 卡另外有一顆 numbers 出埠（F123 期 2）；這一條問的是影像埠。
+    assert [s["name"] for s in load.out_specs()
+            if s["kind"] == "image"] == ["test", "ref"]
     assert sub.in_names() == ["test", "ref"]
 
     # 載入的 fixture 被第 7 版遷移補了一條 glv → Decision 的數字線（F123 期 2）
