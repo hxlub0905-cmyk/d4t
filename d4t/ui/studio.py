@@ -2636,6 +2636,7 @@ class StudioWindow(QMainWindow):
         m.decide = legacy_decision(ScoreSpec(m.expr, m.threshold, m.bins))
         m.expr = ""              # 並存是 error（`ambiguous-decision`）
         m.add_step(DecisionStep.key)   # 判定是一張卡（F123；有了就不再加）
+        m._changed()             # 畫布與面板跟上（卡已經在時上一行不會通知）
         m.dirty = False          # 使用者什麼都還沒做，關窗不要問他要不要存
         m.clear_history()        # 「復原」不該把他退回一個看不到編輯器的狀態
         return True
