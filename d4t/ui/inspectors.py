@@ -1022,15 +1022,27 @@ class WriteBackInspector(Inspector):
         return str(self.params.get("mode", "annotate") or "annotate").strip()
 
     def path(self) -> str:
-        return str(self.params.get("path", "") or "").strip()
+        """真的會寫到哪 —— 「Write to」空著時是預設的那一個（F122）。"""
+        typed = str(self.params.get("path", "") or "").strip()
+        if typed:
+            return typed
+        from d4t.core.export.klarf_out import default_output_path
+
+        doc = self.meta.get("_klarf_doc")
+        return default_output_path(self.mode(),
+                                   str(getattr(doc, "source_path", "") or ""))
+
+    def skipped(self) -> bool:
+        """這份資料沒有 KLARF → 寫的時候這張卡被跳過（F122）。"""
+        return bool(self.meta.get("_no_klarf"))
 
     def has_data(self) -> bool:
-        return bool(self.batch)
+        return bool(self.batch) and not self.skipped()
 
     def empty_reason(self) -> str:
-        if not self.path():
-            return ("Put the full path of the KLARF file into “Write to”, "
-                    "then run the batch to see what would change.")
+        if self.skipped():
+            return ("This data has no KLARF, so this card is skipped when you "
+                    "write - the other outputs are still written.")
         return ("Run the batch to see how many rows this would change "
                 "before anything is written.")
 
@@ -1040,7 +1052,7 @@ class WriteBackInspector(Inspector):
         算不出來就回空的 —— 這是一句提示，不准擋路（同 `paintEvent` 的鐵則）。
         """
         rows = [dict(r) for r in (self.batch or [])]
-        if not rows:
+        if not rows or self.skipped():
             return {}
         doc = self.meta.get("_klarf_doc")
         if doc is None:
@@ -1059,6 +1071,8 @@ class WriteBackInspector(Inspector):
             return {"changed": ok, "out": len(rows), "note": "estimated"}
 
     def summary(self) -> str:
+        if self.skipped():
+            return "skipped — this data has no KLARF to write into"
         info = self.plan()
         if not info:
             return ""
@@ -1082,7 +1096,7 @@ class WriteBackInspector(Inspector):
                       "%d of %d%s" % (info.get("changed", 0),
                                       info.get("out", 0),
                                       " (estimated)" if info.get("note") else "")))
-        lines.append(("Write to", self.path() or "(not set yet)"))
+        lines.append(("Write to", self.path() or "(next to the original)"))
 
         row_h = max(16.0, rect.height() / max(1, len(lines) + 1))
         y = rect.top()

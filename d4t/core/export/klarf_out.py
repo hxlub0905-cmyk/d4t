@@ -323,6 +323,21 @@ def _column_entries_18(doc: KlarfDoc) -> List[str]:
     return [" ".join(c.split()) for c in cm.group(1).split(",") if c.strip()]
 
 
+def default_output_path(mode: str, klarf_path: str) -> str:
+    """Write KLARF 的「Write to」空著時寫到哪（F122，使用者：「預設寫到資料旁邊」）。
+
+    **in place 改的就是原檔**（那正是 in place 的意思；寫之前 Studio 會問）。
+    另外兩種寫一個新檔在原檔旁邊，檔名多一段（``_adc`` / ``_top``）——
+    絕不蓋掉原檔。答不出原檔在哪就回空字串（呼叫端講「填 Write to」）。
+    """
+    if not klarf_path:
+        return ""
+    if mode == "inplace":
+        return klarf_path
+    stem, ext = os.path.splitext(klarf_path)
+    return "%s_%s%s" % (stem, "top" if mode == "topn" else "adc", ext or ".001")
+
+
 # ---------------------------------------------------------------------------
 # annotate：欄位 + 值一起插進去
 # ---------------------------------------------------------------------------

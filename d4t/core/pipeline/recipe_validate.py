@@ -6,6 +6,7 @@ import**：`recipe.py` 在最後才轉出口這一支，模組層互相 import �
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple, Type,
@@ -375,6 +376,59 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
         for i, rule in enumerate(decide.rules):
             check("rule %d (\"%s\")" % (i + 1, rule.when), rule.when,
                   question=True)
+    return out
+
+
+def _output_collisions(recipe: "Recipe", route: str,
+                       clean_params: Dict[str, Dict[str, Any]],
+                       registry: Dict[str, Type[Step]]) -> List["Issue"]:
+    """兩張 Output 卡寫**同一個檔** → error（F122）。
+
+    Write report 與 Write comparison 寫同名的 ``report.html`` / ``defects.csv``；
+    兩張卡指到同一個資料夾（或都空著 —— 那以前是 error，F122 之後空著有預設），
+    後寫的那一張**安靜地蓋掉**前一張。出貨的均勻度 recipe 刻意讓兩張卡共用
+    一個資料夾，而它們寫的檔名不重疊 —— 所以比的是**檔名**，不是資料夾。
+
+    路徑用使用者寫的那個字串比（相對路徑接在同一份資料旁邊，所以同字串＝同
+    位置）；「Write to」空著用那張卡的預設。
+    """
+    out: List[Issue] = []
+    seen: Dict[Tuple[str, str], str] = {}
+    for nid in recipe.routes.get(route, []):
+        node = recipe.nodes.get(nid)
+        cls = registry.get(node.step) if node is not None else None
+        if node is None or cls is None or not node.enabled \
+                or getattr(cls, "scale", "") != SCALE_LOT:
+            continue
+        p = clean_params.get(nid, dict(node.params))
+        path_key = str(getattr(cls, "PATH", "") or "")
+        where = str(p.get(path_key, "") or "").strip()
+        planned = getattr(cls, "planned_files", None)
+        if planned is not None:
+            where = where or str(getattr(cls, "DEFAULT", "") or "")
+            names = [str(f.get("name", "")) for f in planned(p)]
+        else:
+            # 寫一個檔案的卡（Write KLARF）：那個檔就是它；空著＝跟著模式的預設。
+            where = where or "<default %s>" % str(p.get("mode", ""))
+            names = [""]
+        folder = os.path.normpath(where) if where else ""
+        for name in names:
+            key = (folder, name)
+            first = seen.get(key)
+            if first is None:
+                seen[key] = nid
+                continue
+            shown = os.path.join(where, name) if name else where
+            advice = ("Give one of them its own folder in “Write to” - "
+                      "the one that runs second overwrites the first.")
+            out.append(Issue(
+                code="output-collision", level="error", node_id=nid,
+                title="Two output cards write the same file",
+                detail="“%s” and “%s” both write %s. %s"
+                       % (card_name(recipe.nodes, first),
+                          card_name(recipe.nodes, nid), shown, advice),
+                route=str(route), advice=advice))
+            break
     return out
 
 
@@ -1735,6 +1789,24 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     names=tuple(stale), suggest=closest(stale[0], known),
                     route=str(k), advice=advice))
 
+            # 同一件事、影像流那一半（F122）：沒有埠的卡用**名字**指一條流
+            # （`Step.optional_streams_in`），打錯了照樣跑、那一格圖是空的。
+            gone = [x for x in step_cls.optional_streams_in(p)
+                    if x not in avail]
+            if gone:
+                advice = ("No card before it in this route writes an image "
+                          "stream by that name, so that picture will be "
+                          "empty. Check the spelling.")
+                issues.append(Issue(
+                    code="stale-stream-ref", level="warning", node_id=nid,
+                    title=("“%s” points at a picture nobody produces"
+                           % card_name(recipe.nodes, nid)),
+                    detail="route '%s': it asks for %s. %s Available: %s."
+                           % (k, ", ".join(gone), advice,
+                              ", ".join(sorted(avail)) or "none"),
+                    names=tuple(gone), suggest=closest(gone[0], avail),
+                    route=str(k), advice=advice))
+
             missing_feat = [x for x in step_cls.resolve_features_in(p)
                             if x not in known]
             if missing_feat:
@@ -1805,6 +1877,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             avail |= set(step_cls.resolve_writes(p))
             feats |= set(step_cls.resolve_features(p))
             regions |= set(step_cls.resolve_regions_out(p))
+
+        issues.extend(_output_collisions(recipe, k, clean_params, registry))
 
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
         # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於

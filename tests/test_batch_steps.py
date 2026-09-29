@@ -267,8 +267,11 @@ def test_every_batch_card_declares_itself_properly():
 
 def test_nothing_configured_yet_points_at_the_field(tmp_path):
     card = get_step("output_report")
-    says = card.configuration_issues({"folder": ""})
-    assert says and "Write to" in says[0]
+    # **空著不是錯**（F122）：空＝寫到資料旁邊的預設資料夾。以前這是一條
+    # error，而 error 擋住試跑 —— 試跑根本不寫。
+    assert not card.configuration_issues({"folder": ""})
+    assert "d4t_report" in next(s.help for s in card.params
+                                if s.name == "folder")
     # 指到一個**檔案**（那張卡要寫好幾樣東西）也要在跑之前講
     a_file = tmp_path / "x.csv"
     a_file.write_text("", encoding="utf-8")
@@ -313,9 +316,11 @@ def test_the_whole_output_section_is_end_points():
         assert cls.resolve_writes(params) == [] , cls.key
         assert cls.resolve_features(params) == [], cls.key
         assert cls.resolve_reads(params) == [], cls.key
-        # 每一張都要在沒填路徑時講得出要填哪一格
-        says = cls.configuration_issues(params)
-        assert says and "Write to" in says[0], (cls.key, says)
+        # **沒填路徑不是錯**（F122：空＝寫到資料旁邊的預設位置），但每一張
+        # 都要在「Write to」的說明裡講出空著會寫到哪。
+        assert not cls.configuration_issues(params), cls.key
+        spec = next(s for s in cls.params if s.name == cls.PATH)
+        assert "Empty =" in spec.help, cls.key
 
 
 def test_write_images_is_a_batch_card_even_though_it_is_per_defect(dataset,
@@ -371,8 +376,9 @@ def test_write_html_shows_the_defects_that_did_not_run(tmp_path, dataset):
 
 
 def test_write_klarf_says_so_when_there_is_no_klarf(tmp_path):
-    """folder / tiff_stack 沒有 KLARF —— 那件事在載入的當下就講過了，
-    這裡不要假裝是別的問題。"""
+    """folder 沒有 KLARF —— 那件事在載入的當下就講過了（開資料時也掛在這張卡上，
+    `data_issues`）。**跳過並講，不是失敗**（F122，使用者定的）：以前這裡是一個
+    error，CLI 回 1、Studio 跳「Some outputs were not written」，而其他卡都寫好了。"""
     class _NoKlarf:
         """一份沒有 KLARF 的資料集（folder / tiff_stack 就是這樣）。"""
         kind = KIND          # route 用 fixture 那一條，這條測的不是 route
@@ -382,8 +388,9 @@ def test_write_klarf_says_so_when_there_is_no_klarf(tmp_path):
     recipe = _out_recipe("kl", "output_klarf",
                          {"path": str(tmp_path / "x.001")})
     bctx = run_batch_steps(recipe, _NoKlarf(), [], kind=KIND)
-    assert "kl" in bctx.errors
-    assert "no KLARF" in bctx.errors["kl"]
+    assert "kl" not in bctx.errors
+    assert any("skipped" in w and "no KLARF" in w for w in bctx.warnings)
+    assert not (tmp_path / "x.001").exists()
 
 
 @pytest.mark.parametrize("mode, extra", [

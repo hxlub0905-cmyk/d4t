@@ -299,10 +299,55 @@ class RunController(QObject):
                          "results — nothing was written. Run again to the end "
                          "before writing.", "error")
             return False
+        stale = self._stale_reason(last)
+        if stale:
+            self.w._status(stale, "error")
+            return False
         if not self._confirm_irreversible_writes():
             return False
         self._write_outputs_sync = bool(sync)
         return self._write_outputs(results)
+
+    def snapshot(self, results: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+        """**這一批的底稿**（2026-09-09；F122 從 `studio._apply_trial_results` 搬來）。
+
+        Re-run 從 ``rows`` 重判；Write outputs 看它是不是被停掉的部分結果，以及
+        結果還是不是**畫面上這份 recipe** 會給的：``sig`` 是量測那一段的簽章
+        （量測卡改了就不能拿這批數字重判、也不能寫），``decided`` 是判定段的
+        （改了判定沒按 Re-run 就不能寫）。``limit`` 讓「整批重跑」跑一樣多顆。
+        """
+        from d4t.core.pipeline.batch import (
+            decision_signature, measurement_signature,
+        )
+
+        recipe = self.w.model.to_recipe()
+        return {"rows": copy.deepcopy(list(results)),
+                "sig": measurement_signature(recipe),
+                "decided": decision_signature(recipe),
+                "partial": bool(self.w.trial_worker.is_aborted()),
+                "limit": len(results)}
+
+    def _stale_reason(self, last: Dict[str, Any]) -> str:
+        """這批結果**不是**畫面上這份 recipe 會給的 → 一句拒寫的話（F122）。
+
+        以前只擋「被停掉的」。改了量測卡或判定、沒重跑就按寫：CSV 與 KLARF 是
+        上一份 recipe 的數字與 bin，報表的圖卻是**現在這份**重跑出來的 ——
+        一份自己跟自己對不上的報表。簽章不在（舊的底稿）就不擋。
+        """
+        from d4t.core.pipeline.batch import (
+            decision_signature, measurement_signature,
+        )
+
+        recipe = self.w.model.to_recipe()
+        if last.get("sig") and measurement_signature(recipe) != last["sig"]:
+            return ("A card changed since this run, so these results are not "
+                    "what the pipeline on screen measures — nothing was "
+                    "written. Run again before writing.")
+        if last.get("decided") and decision_signature(recipe) != last["decided"]:
+            return ("The decision changed since this run, so these bins are "
+                    "not what it gives now — nothing was written. Press "
+                    "“Re-run” first (it takes seconds), then write.")
+        return ""
 
     def rerun(self, sync: bool = False) -> bool:
         """照**現在的 ADC 設定**把判定再跑一次（2026-09-09，使用者：「可以根據
@@ -362,17 +407,27 @@ class RunController(QObject):
         """
         recipe = self.w.model.to_recipe()
         self.w._status("Writing outputs…")
+        # 試跑的那幾顆也寫得出去（使用者可能就是要看那幾顆）—— 但**要講**
+        # （F122）：以前只有 Write report 在報表裡標「N of M」。
+        n_all = len(getattr(self.w.dataset, "items", None) or [])
+        self._subset_note = (
+            "These are %d of the %d defects (a trial run), not the whole lot."
+            % (len(results), n_all) if 0 < len(results) < n_all else "")
+        # **快取也傳給這一層**（F122；CLI 從 F29 C4 起就傳）：出圖的卡要重跑
+        # pipeline 才拿得到像素，而那一趟的影像段跟剛才那一批是同一份。
         if getattr(self, "_write_outputs_sync", False):
             # 同步那條路沒有 event loop，訊號投遞不到 —— 直接跑並自己收尾，
             # 走的是**同一支** `run_batch_steps`（不是第二套邏輯）。
             try:
-                bctx = OutputWorker.run_sync(recipe, self.w.dataset, list(results))
+                bctx = OutputWorker.run_sync(recipe, self.w.dataset,
+                                             list(results), DEFAULT_CACHE_DIR)
             except Exception as e:  # UI 邊界
                 self._on_outputs_failed(wording.failure("run.write_outputs", e))
                 return False
             self._on_outputs_done(bctx)
             return True
-        if not self.w.output_worker.start(recipe, self.w.dataset, list(results)):
+        if not self.w.output_worker.start(recipe, self.w.dataset, list(results),
+                                          DEFAULT_CACHE_DIR):
             self.w._status("Still writing the last run's outputs — please wait.")
             return False
         return True
@@ -398,6 +453,8 @@ class RunController(QObject):
         # 那條路一直在，只是沒有接上這裡。**留在 bits 裡的路徑不動**：
         # 這顆鈕是補充，開不起來的時候路徑照樣讀得到。
         where = str(outputs[0]) if outputs else ""
+        if outputs and getattr(self, "_subset_note", ""):
+            bits.append(self._subset_note)
         for w in warnings:
             bits.append(str(w))
         if errors:
@@ -458,6 +515,11 @@ class RunController(QObject):
 
         ⚠ **只看啟用的節點**：停用的那張卡不會跑，跳確認就是騙人。
         """
+        from d4t.core.export.klarf_out import default_output_path
+
+        doc = getattr(self.w.dataset, "klarf", None)
+        if doc is None:
+            return True      # 沒有 KLARF 的資料上那張卡會被跳過（F122），不會動到任何檔
         targets = []
         for nid in self.w.model.node_order:
             node = self.w.model.nodes.get(nid)
@@ -467,7 +529,12 @@ class RunController(QObject):
                 continue
             if str(node.params.get("mode", "annotate")).strip() != "inplace":
                 continue
-            targets.append(str(node.params.get("path", "") or "(no path yet)"))
+            # 「Write to」空著＝原檔本人（F122，`klarf_out.default_output_path`）
+            # —— 對話框要寫出**真的會被改的那一個檔**，不是「(no path yet)」。
+            targets.append(str(node.params.get("path", "") or "").strip()
+                           or default_output_path(
+                               "inplace", str(getattr(doc, "source_path", "")
+                                              or "")))
         if not targets:
             return True
 

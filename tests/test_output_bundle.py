@@ -358,10 +358,10 @@ def test_pointing_at_a_file_says_so(dataset, tmp_path):
     assert "is a file, not a folder" in " ".join(bctx.errors.values())
 
 
-def test_an_empty_path_is_a_configuration_issue_not_a_crash():
+def test_an_empty_path_is_not_a_configuration_issue():
+    """F122：空＝寫到資料旁邊的預設資料夾（以前是一條會擋住試跑的 error）。"""
     from d4t.core.pipeline.step import REGISTRY
-    says = REGISTRY["output_report"].configuration_issues({"folder": ""})
-    assert says and "Write to" in says[0]
+    assert REGISTRY["output_report"].configuration_issues({"folder": ""}) == []
     assert REGISTRY["output_report"].configuration_issues(
         {"folder": "/tmp/x"}) == []
 

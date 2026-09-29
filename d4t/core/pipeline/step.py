@@ -58,7 +58,7 @@ SCALE_DEFECT = "defect"
 SCALE_LOT = "lot"
 _SCALES = (SCALE_DEFECT, SCALE_LOT)
 
-#: 整批那一層（F17-③）：跑完全部 defect 之後才跑一次的卡（Output 段那五張）。
+#: 整批那一層（F17-③）：跑完全部 defect 之後才跑一次的卡（Output 段那幾張）。
 #: 它們以前借用 ``CATEGORY_ADC`` —— 不是因為它們在做 ADC，而是因為那個值剛好
 #: 讓它們落在快取 checkpoint 之後。現在那件事由宣告推導，這個值可以講實話了。
 CATEGORY_BATCH = "batch"
@@ -1505,6 +1505,17 @@ class Step(ABC):
                               if "region_index" in p else -1),
                 own=str(p.get("own", "") or "")))
         return out
+
+    @classmethod
+    def optional_streams_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡用**名字**讀的影像流（沒有埠、少了只會那一格空著）（F122）。
+
+        :meth:`optional_features_in` 的影像流版。誰需要它：沒有埠的 Output 卡
+        （`Write comparison` 的左右兩張圖）—— 它們在整批跑完之後重跑每一顆、
+        照名字拿圖，打錯一個字照樣跑，只是那一格是空的。lint 對它報 warning
+        （`stale-stream-ref`）。
+        """
+        return []
 
     @classmethod
     def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:

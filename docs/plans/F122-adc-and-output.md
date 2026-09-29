@@ -1,6 +1,6 @@
 # F122 — ADC 與 Output：先修安靜做錯的，再收成一種說法
 
-狀態：**進行中（2026-09-29）—— 期 1（ADC 安靜做錯的）做完；期 2（Output）進行中；期 3／4 照建議做；期 5（畫布上 Output 的位置）等使用者點頭。**
+狀態：**進行中（2026-09-29）—— 期 1（ADC）、期 2（Output）安靜做錯的都修完；期 3／4 照建議做；期 5（畫布上 Output 的位置）等使用者點頭。**
 方向使用者同意（「先修會安靜做錯的，接著按照你的建議修」）。
 
 F121（入口簡單化）的續集：使用者說 Input、ADC、Output「這三張比較特別」，F121 做了
@@ -58,18 +58,21 @@ Input，這一份做另外兩張。
 
 ---
 
-## 4. 期 2 — Output 安靜做錯／擋錯的
+## 4. 期 2 — Output 安靜做錯／擋錯的 ✅ 2026-09-29
 
-1. 新加一張 Output 卡、「Write to」空著 → 連試跑都擋（試跑根本不寫）。
-2. Write KLARF 配沒有 KLARF 的資料：開跑前不講、儀表顯示「N 顆會改」的估計、按寫才
-   失敗（錯誤訊息提到已經刪掉的 TIFF stack）。
-3. 寫之前不檢查「這批結果是不是現在這份 recipe 跑的」：改了量測卡或判定沒重跑就寫，
-   CSV／KLARF 是舊的 bin，報表的圖是新 recipe 重跑的。
-4. Studio 寫的時候沒帶快取（CLI 有）—— 每張圖整顆重跑。
-5. 試跑 N 顆也寫得出去；只有 Write report 標「N of M」。
-6. 兩張卡指到同一個資料夾、寫同名的檔案 → 安靜互蓋。
-7. CLI 跑 0 顆 → 相對路徑落在 cwd（原因：沒有顆就沒有錨點；建資料夾的是 Write report）。
-8. `main_stream` / `pair_stream` 是自由文字，打錯沒人講。
+| # | 做錯的樣子 | 修法 | 守門 |
+|---|---|---|---|
+| 1 | 新加一張 Output 卡、「Write to」空著 → 一條 error，**連試跑都擋**（試跑根本不寫）| 空著＝資料旁邊的預設：`d4t_report` / `d4t_comparison` / `d4t_charts`（每張卡一個名字）；Write KLARF 是原檔旁邊的 `_adc`（top N `_top`），in place 是原檔本人 | `test_output_defaults_and_collisions.py` |
+| 2 | Write KLARF 配沒有 KLARF 的資料：開跑前不講、儀表給「N 顆會改」的估計、按寫才失敗（CLI 回 1、Studio 跳「Some outputs were not written」；訊息還提到已刪的 TIFF stack）| 開資料時卡上一條 warning（`klarf-out-no-klarf`，`Step.data_issues`）；寫的時候**跳過並講**，其他輸出照寫；儀表講「skipped」；in place 的確認對話框不跳 | 同上 ＋ `test_batch_steps.py` |
+| 3 | 改了量測卡或判定、沒重跑就按寫：CSV / KLARF 是上一份 recipe 的數字與 bin，報表的圖卻是現在這份重跑的 | `batch.decision_signature` ＋ 量測簽章，Write outputs 對不上就拒寫並講（判定改了：「先按 Re-run」）；底稿搬進 `RunController.snapshot` | `test_ui_write_only_on_run_all.py` |
+| 4 | Studio 寫的時候沒帶快取（CLI 有）—— 每張圖整顆重跑 | `OutputWorker` 帶 `DEFAULT_CACHE_DIR` | — |
+| 5 | 試跑 N 顆也寫得出去，只有 Write report 標「N of M」 | 寫完的那句話講「These are N of the M defects (a trial run)」 | `test_ui_write_only_on_run_all.py` |
+| 6 | 兩張卡指到同一個地方、寫同名的檔 → 安靜互蓋 | lint `output-collision`（error）—— 比**檔名**，出貨的均勻度 recipe 兩張卡共用資料夾但不撞 | `test_output_defaults_and_collisions.py` |
+| 7 | CLI 跑 0 顆 → 照樣寫，相對路徑落在 cwd（建資料夾的是 Write report，不是 Write charts）| 0 顆就停（回 2），上面已經講了為什麼是 0 顆 | 同上 |
+| 8 | `Write comparison` 的左右兩張圖是自由文字，打錯了那一格安靜地空著 | `Step.optional_streams_in` ＋ lint `stale-stream-ref`（warning）—— 通用的鉤子，不按卡片名字分支 | 同上 |
+
+順手：`batch.run_batch_steps`、`output.py` 模組說明、`step.py` 三處過期的字（「Export
+精靈」、「三張卡」、「五張」）；`recipes/README.md` 那一格「相對於你啟動程式的位置」。
 
 ## 5. 期 3／4／5 — 方向
 

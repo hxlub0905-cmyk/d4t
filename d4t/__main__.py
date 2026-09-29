@@ -166,6 +166,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"資料集：kind={ds.kind}，{len(ds.items)} 顆 defect")
     for w in ds.warnings:
         print(f"  △ {w}")
+    if not ds.items:
+        # **一顆都沒有就停**（F122）。以前照樣往下跑：量測一顆都沒跑，Output
+        # 卡卻照樣寫 —— 而沒有任何一顆影像可以當錨點，相對的「Write to」就落在
+        # 「現在站在哪」（在 repo 根目錄跑一次就多一個 `uniformity_charts/`）。
+        # 上面那幾行已經講了為什麼是 0 顆（例：影像都在子資料夾裡）。
+        print("[錯誤] 這份資料裡一顆 defect 都沒有 —— 沒有東西可以跑，也沒有東西"
+              "可以寫。", file=sys.stderr)
+        return 2
     # Load 卡上 `carry` 點名的 KLARF 欄位（F16）。**只帶點名的那幾欄** ——
     # 一份 raw data 幾十萬顆 ×24 欄字串是幾百 MB，而且要 pickle 進每個 worker。
     # 一格都沒勾就一欄都不帶，所以既有的 recipe 一個位元組都沒多帶。

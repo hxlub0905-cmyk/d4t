@@ -79,7 +79,6 @@ import json
 import math
 import os
 import sys
-import copy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -3826,17 +3825,9 @@ class StudioWindow(QMainWindow):
         results = list(results or [])
         self._progress_done()
         self.trial_results = results
-        # **這一批的底稿**（2026-09-09）：Re-run 從這裡重判、Write outputs 看
-        # 它是不是被停掉的部分結果。`sig` 是量測那一段的簽章 —— 量測卡改了
-        # 就不能拿這批數字重判。`limit` 讓「整批重跑」跑一樣多顆。
-        from d4t.core.pipeline.batch import measurement_signature
-
-        self._last_run = {
-            "rows": copy.deepcopy(results),
-            "sig": measurement_signature(self.model.to_recipe()),
-            "partial": bool(self.trial_worker.is_aborted()),
-            "limit": len(results),
-        }
+        # **這一批的底稿**：Re-run 從這裡重判、Write outputs 拿它對「結果還是不是
+        # 畫面上這份 recipe 的」（`RunController.snapshot`，F122 搬過去）。
+        self._last_run = self.run_ctl.snapshot(results)
         self._refresh_results_button()
         # 每張卡在這一批跑得怎樣，標在卡片上（F99 P1-5）。
         self.pipeline.set_run_status(run_status_from(results))

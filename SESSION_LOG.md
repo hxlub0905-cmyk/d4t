@@ -28,6 +28,29 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F122 期 2：Output 安靜做錯／擋錯的八件（2026-09-29）
+
+使用者：「繼續」。表在計畫書 §4，這裡記決定與沒想到的。
+
+* **「Write to」空著＝資料旁邊的預設**（每張卡一個名字：`d4t_report` /
+  `d4t_comparison` / `d4t_charts`；Write KLARF 是原檔旁的 `_adc` / `_top`，in place
+  是原檔）。以前那是一條 error，**擋住試跑** —— 而試跑根本不寫。
+* **Write KLARF 在沒有 KLARF 的資料上**：開資料時卡上一條 warning、寫的時候跳過並講、
+  其他輸出照寫（使用者定的）。預設路徑的規則住 `klarf_out.default_output_path`：
+  第一版寫成 `get_step("output_klarf").default_path(...)`，規模尺抓到「UI 按卡片名字
+  分支」多了兩處 —— 改成問 export 那一層就一處都不多。
+* **Write outputs 對簽章**：量測改了（「Run again」）或判定改了（「先按 Re-run」）
+  就拒寫。底稿搬進 `RunController.snapshot`，`studio.py` 因此 −9。
+* Studio 寫的時候帶快取；試跑子集寫完講「N of M」。
+* lint：`output-collision`（error，比檔名不比資料夾）、`stale-stream-ref`
+  （warning，通用鉤子 `Step.optional_streams_in`）。
+* CLI 0 顆就停（`uniformity_charts/` 落在 cwd 那一個 —— 建資料夾的其實是 Write report）。
+* 規模尺：`inspectors.py` 1,733 → 1,745（簽了，Write KLARF 儀表的兩件內容）；
+  `studio.py` 4,302 → 4,293（兩格一起降）。
+* 黃金值三份逐項相同；typecheck 128；ruff 乾淨。
+
+---
+
 ## F122 期 1：ADC 安靜做錯的八件（2026-09-29）
 
 使用者：「接下來做 ADC 跟 output 兩張卡（先不要動），先列出想法」→「先修會安靜做錯

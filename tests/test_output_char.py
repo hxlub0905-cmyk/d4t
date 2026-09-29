@@ -291,7 +291,7 @@ def test_it_is_an_end_point_like_every_other_output_card():
     assert card.resolve_reads({}) == []
     assert card.resolve_writes({}) == []
     assert card.resolve_features({}) == []
-    assert "Write to" in " ".join(card.configuration_issues({}))
+    assert not card.configuration_issues({})     # F122：空＝資料旁邊的預設資料夾
 
 
 def test_pointing_it_at_a_file_says_so(dataset, tmp_path):

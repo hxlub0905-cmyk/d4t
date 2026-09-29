@@ -204,7 +204,7 @@ die **全部併成一組**（整整一行 die），而它：
 
 | 格子 | 填什麼 |
 |---|---|
-| **Write to** | 輸出資料夾（會產 `report.html` / `defects.csv` / `recipe.json` / `images/`）|
+| **Write to** | 輸出資料夾（會產 `report.html` / `defects.csv` / `recipe.json` / `images/`）。空著＝資料旁邊的 `d4t_comparison`。⚠ 跟 `Write report` 指到同一個資料夾的話檔名會撞（健檢會擋：`output-collision`）|
 | **At most this many rows with pictures** | 預設 200。超過會**講出來**並建議改用 `Write report`，但版面不會自動換 |
 | **Left picture** | 留空 = 自動挑（rsem 那條路就是 `single`）。要看整片 FOV 就留空或填 `single`；要「兩張圖同一塊區域」填 `aligned` |
 | **Right picture** | `paired`（EBI 帶過來那一張）|

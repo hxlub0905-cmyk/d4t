@@ -639,7 +639,8 @@ class OutputWorker(_ThreadedWorker):
     failed = Signal(str)
 
     def start(self, recipe: Recipe, dataset: Any,
-              rows: List[Dict[str, Any]]) -> bool:
+              rows: List[Dict[str, Any]],
+              cache_dir: Optional[str] = None) -> bool:
         """開背景執行緒把 Output 段的卡跑一次；已有工作在跑時回傳 False。"""
         if self.is_running():
             return False
@@ -647,7 +648,8 @@ class OutputWorker(_ThreadedWorker):
 
         def job() -> None:
             try:
-                bctx = run_batch_steps(recipe, dataset, payload)
+                bctx = run_batch_steps(recipe, dataset, payload,
+                                       cache_dir=cache_dir)
             except Exception as e:  # 整個機制爆掉才會走到這
                 # 單張卡失敗是 `bctx.errors`（鐵則 7 的跨顆版），不會走到這裡。
                 self.failed.emit(wording.failure("workers.OutputWorker", e))
@@ -659,6 +661,8 @@ class OutputWorker(_ThreadedWorker):
 
     @staticmethod
     def run_sync(recipe: Recipe, dataset: Any,
-                 rows: List[Dict[str, Any]]) -> Any:
+                 rows: List[Dict[str, Any]],
+                 cache_dir: Optional[str] = None) -> Any:
         """同步版（不開執行緒），給 headless 測試用。"""
-        return run_batch_steps(recipe, dataset, list(rows or []))
+        return run_batch_steps(recipe, dataset, list(rows or []),
+                               cache_dir=cache_dir)

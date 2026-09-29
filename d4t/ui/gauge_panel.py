@@ -341,6 +341,10 @@ class GaugePanel(QObject):
         # 沒有 KLARF 的兩種輸入這一格就是 None，面板會退回估算並標明。
         meta = dict(meta or {})
         meta["_klarf_doc"] = getattr(self.w.dataset, "klarf", None)
+        # 「拿不到 KlarfDoc」與「這份資料**根本沒有** KLARF」是兩件事（F122）：
+        # 後者那張卡寫的時候會被跳過，儀表不該給一個「N 顆會改」的估計。
+        meta["_no_klarf"] = (self.w.dataset is not None
+                             and meta["_klarf_doc"] is None)
         # 跨顆那張圖的座標（`die_x` / `x_um`）在**結果那幾列裡沒有** ——
         # 它們住在 `Dataset.items`。同 `_klarf_doc` 的理由由這裡遞過去，
         # 不然選單裡少掉 die 那兩欄，而 die 圖正是那張圖最有用的一種。

@@ -630,6 +630,22 @@ def measurement_signature(recipe: Recipe) -> str:
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
+def decision_signature(recipe: Recipe) -> str:
+    """判定段（``decide`` ＋ 舊的 ``score``）的簽章（F122）。
+
+    `measurement_signature` 的另一半：「這批結果的 **bin** 還是不是現在這份
+    recipe 會給的」。Studio 的「Write outputs」拿兩個一起比 —— 以前它只看這批
+    是不是被停掉的，於是改了判定沒按 Re-run 就寫，KLARF 與 CSV 裡是**上一份**
+    判定的 bin，而畫面上是新的那一份。
+    """
+    import json
+
+    d = recipe.to_json_dict()
+    blob = json.dumps({k: d.get(k) for k in ("decide", "score", "route_by")},
+                      sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
 def apply_lot_scaling(recipe: Recipe, rows) -> int:
     """把 ``decide.let`` 裡標了「跟整批比」的行換算成整批尺度，並重算判定。
 
@@ -708,8 +724,9 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
     遲早會有人忘記關；做成**另一支要自己叫的函式**，試跑那條路就是根本沒叫它。
 
     所以規則是一句話：**要寫出東西的那條路自己叫這一支，試跑不叫。**
-    目前叫它的只有 CLI（`python -m d4t run`）—— Studio 只有試跑那條路，
-    它的輸出目前仍然走 Export 精靈（見 docs/ROADMAP.md）。
+    叫它的有兩個：CLI（`python -m d4t run`）與 Studio 的「Write outputs」
+    （`run_controller.write_outputs`，鐵則 11：跑不寫，寫是另一個動作）。
+    （這裡以前寫「Studio 的輸出走 Export 精靈」—— 那個精靈 F16 Stage 5c 就刪了。）
 
     一張卡出錯**不影響其他卡**（鐵則 7 的跨顆版）：訊息記進 ``bctx.errors``，
     其餘照跑，而整批的結果本來就已經在 ``rows`` 裡了。
