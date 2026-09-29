@@ -54,6 +54,10 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 * 三份出貨 recipe 存成第 6 版；`tools/doctor.py` 的 `RECIPE_VERSION` 字面值 5 → 6
   （那一份是刻意抄的，`test_offline_tools` 比對）。
 * 規模尺：`recipe.py` 650 → 653、遷移道數 23 → 24（簽）；`studio.py` 4,236 → 4,186、方法 192 → 191、`canvas.py` 3,163 → 3,154（跟著降）。
+* 全套抓到的三個真洞（不只是斷言要改）：開舊門檻檔時畫布摘要停在「no decision
+  yet」（卡已經被遷移補上，`add_step` 回舊卡就不通知）；加判定時直接改
+  `selected_node`，儀表板那句「showing X — the card picked last」因此說錯是誰的；
+  `describe_migration` 對沒有 `.step` 的節點會炸（它只是一句提示，不准擋載入）。
 * 還沒做：Decision 卡上寫著「(not connected)」—— 它現在真的沒有線；期 2 給它
   「numbers」入埠與「results」出埠之後那一行就是線上的字。
 
