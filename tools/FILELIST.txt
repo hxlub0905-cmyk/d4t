@@ -110,7 +110,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 8185c63eff68ad70b171109e2e48674c5c19240d d4t/ui/baseline.py
 fc655de13fde7e2d4319beb32e0c9f6c76f4784a d4t/ui/branding.py
 5e77c4d8ecdaf8996d63096f385907c1768cbeee d4t/ui/buttons.py
-31f77a476f6b4d34c61fa54fb984f91a74de818f d4t/ui/canvas.py
+635bffef2fea7fa6a86a75304bef429b432e9889 d4t/ui/canvas.py
 38bda63c31d954e58bf857db433ee4c26787740b d4t/ui/canvas_edges.py
 7e8f55d5f9b9725d73343124cda6d60b6cf4fc06 d4t/ui/card_menu.py
 e78f82f7bc4f40733f8f34d3a690fd7b975320c0 d4t/ui/cell_canvas.py
@@ -175,7 +175,7 @@ f91e6d51ce9ce2c19bd43839bd3c096b08d81a5f d4t/ui/studio.py
 1657d2a467406dff1f80677b888ae916e079e74c d4t/ui/template_dialog.py
 3602605dc1bb4e8542054d518220f389dc80be28 d4t/ui/theme.py
 e1372118c68717fe59c9a828760d8c50c0e23b77 d4t/ui/threshold_view.py
-07d8e9b694d0378aeb0834d3c82a0a141330078d d4t/ui/tree_panel.py
+e25f546e2867e2088c89c03894b642aba360ba22 d4t/ui/tree_panel.py
 87c00deff83111c649de16ae669ad1312adb931e d4t/ui/tree_scene.py
 3ef77f5c339cffd31d12127954e819113e0c0885 d4t/ui/truth_marks.py
 363b7e077297333d0e6a1556af81841bff9bddb1 d4t/ui/uniformity_window.py
@@ -372,7 +372,7 @@ bfca03c9af98af641b7618993299825d80b71092 tests/test_sampling.py
 f65d80a4d8bba723f659dad67a3dd1459c1377d1 tests/test_scale.py
 caa17f0f25d3e657ae4fd3580fcfa837e0cff525 tests/test_shipped_recipes.py
 cfc99c167d84014f55bd0516ca45eb8704237d48 tests/test_show_template.py
-68c0e75ad715624cb68cd2d8b7adef2afee9b179 tests/test_size_ceilings.py
+c352b15b980b00943d0d3620efc0d37020c66268 tests/test_size_ceilings.py
 b916e62bdadbb86a8bcec464b3c5dc3669db66be tests/test_snr.py
 9e158bcacf4035bc9d2f643da273be5826d29d03 tests/test_source_hygiene.py
 d63f7cdb2ccf8dbeb92be2aab2d585f93fc16fba tests/test_steps.py

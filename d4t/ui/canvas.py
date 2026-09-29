@@ -883,6 +883,12 @@ class _NodeItem(QGraphicsItem):
         以前這裡的 ``or [""]`` 保證每張卡至少有一顆埠，所以「前後都是空的」
         這件事在畫布上表達不出來。
         """
+        return [str(d["name"]) for d in self.out_specs()
+                if d["kind"] not in DATA_PORTS]
+
+    def port_names(self) -> List[str]:
+        """**每一顆**輸出埠的名字，含資料埠（F123 期 2）—— 埠的位置、線從哪一顆
+        出去、拖出來的是哪一條都照這一份數。:meth:`out_names` 只講流與區域。"""
         return [str(d["name"]) for d in self.out_specs()]
 
     def out_specs(self) -> List[Dict[str, str]]:
@@ -922,7 +928,7 @@ class _NodeItem(QGraphicsItem):
         沒有輸出流就**一顆埠都沒有**（F10）—— 拉不出線，因為真的沒有東西
         可以拉。
         """
-        n = len(self.out_names())
+        n = len(self.port_names())
         if n == 0:
             return []
         h = self.body_height()
@@ -1557,7 +1563,7 @@ class _EdgeItem(QGraphicsItem):
 
     def out_name(self) -> str:
         """這條線從來源的哪一顆輸出埠出發（埠索引換算成流名）。"""
-        outs = self.src.out_names()
+        outs = self.src.port_names()
         return str(outs[self.port]) if 0 <= self.port < len(outs) else ""
 
     #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。
@@ -2019,7 +2025,7 @@ class PipelineCanvas(QGraphicsView):
             if a not in self._items or b not in self._items:
                 continue
             src, dst = self._items[a], self._items[b]
-            outs = src.out_names()
+            outs = src.port_names()
             in_names = [str(d.get("name", "")) for d in dst.in_specs()]
             named = [(o, i) for (x, y, o, i) in self._lines
                      if (x, y) == (a, b) and o]
@@ -2346,7 +2352,7 @@ class PipelineCanvas(QGraphicsView):
 
         兩端沒有共用的流（或下游沒宣告 reads）→ 退回單一條線。
         """
-        outs = src.out_names()
+        outs = src.port_names()
         wanted = set(dst.in_names())
         ports = [i for i, name in enumerate(outs) if name in wanted]
         return ports or [0]
@@ -2793,7 +2799,7 @@ class PipelineCanvas(QGraphicsView):
     @staticmethod
     def stream_of(src: "_NodeItem", port: int) -> str:
         """``src`` 的第 ``port`` 個輸出埠吐的影像流名（沒有名字回空字串）。"""
-        names = src.out_names()
+        names = src.port_names()
         if 0 <= port < len(names):
             return str(names[port] or "")
         return ""
