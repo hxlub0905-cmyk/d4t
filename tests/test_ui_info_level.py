@@ -50,6 +50,10 @@ def test_node_problems_rank_error_over_warning_over_info(qapp=None):
     class _Model:
         dirty = False        # 關窗提示會問（PROMPT_ON_CLOSE 之外的那條路）
 
+        # 判定的 lint 掛到 Decision 卡上（F123 期 1）—— 這份假 model 沒有那張卡。
+        def decision_node(self):
+            return ""
+
         # 簽名跟 `RecipeModel.validate` 一樣（F121 期 1：Studio 會傳開著的
         # 資料的型別進來）。
         def validate(self, data_kind=None):
