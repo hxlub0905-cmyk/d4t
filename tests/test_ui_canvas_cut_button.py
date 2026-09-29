@@ -180,15 +180,16 @@ def test_a_card_parked_on_top_of_the_line_does_not_hide_the_cut_button(window):
     線平常畫在卡片底下（卡片才是主角），於是被蓋住的那顆 × 既看不見也按不到。
     滑鼠移上來的那一條**抬到卡片之上** —— 使用者正在瞄的就是它。
     """
-    src, nid, edge = _wired_pair(window)
+    src, nid, _ = _wired_pair(window)
+    # 停上去的是**另一張**卡（一張沒接線的）。以前這裡拖的是線的終點那張 ——
+    # 拖了終點線就變了，得反覆追中點；F123 期 4 起往左拖的線改成繞行，那個
+    # 追法就追不到了。另一張卡才是使用者拖一下會發生的事，而且線不會跟著動。
+    other = window.add_card_after(nid, "tone")
+    edge = next(e for e in window.pipeline._edges if e.pair() == (src, nid))
     centre = edge.cut_center()
     resting = edge.zValue()
 
-    # 把另一張卡直接停在中點上（使用者拖一下就會發生的事）
-    parked = window.pipeline.node_item(nid)
-    parked.setPos(centre.x() - canvas_mod.NODE_W / 2.0,
-                  centre.y() - canvas_mod.NODE_H / 2.0)
-    centre = edge.cut_center()          # 路徑跟著端點動了，重取一次
+    parked = window.pipeline.node_item(other)
     parked.setPos(centre.x() - canvas_mod.NODE_W / 2.0,
                   centre.y() - canvas_mod.NODE_H / 2.0)
     centre = edge.cut_center()
