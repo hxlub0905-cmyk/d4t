@@ -1526,8 +1526,13 @@ def _migrate_rescued_feature_names(nodes: Dict[str, "RecipeNode"],
 
     # ⚠ 這裡以前還有一條「改寫 `feature_math` 節點的算式」。那張卡 2026-08-27
     # 刪掉了（Phase 3），而帶著它的舊 recipe 開起來是一條 `unknown-step` ——
-    # **跑不起來的 recipe 沒有必要幫它改名**。判定段的算式（`let` / 樹）走
-    # `_migrate_decide_renames`，那一條還在。
+    # **跑不起來的 recipe 沒有必要幫它改名**。
+    #
+    # 判定段（`decide` 的 `let` / 樹）**這一道不改**，而那是對的：這個前綴規則
+    # （F17-②，2026-08-21）比判定段（F21-D，2026-08-23）早出生，存得出判定段的
+    # 檔案一開始就是新前綴。這裡以前寫「走 `_migrate_decide_renames`，那一條還在」
+    # —— 那支函式從來不存在（F122 查到的）；判定段唯一的改名遷移是
+    # `_rename_in_decide`（相對量改叫 `cmp_*` 那一張表）。
     expr = str(getattr(score, "expr", "") or "")
     new_expr = swap(expr)
     return score if new_expr == expr else replace(score, expr=new_expr)

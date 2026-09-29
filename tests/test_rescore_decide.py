@@ -219,3 +219,24 @@ def test_percentile_scaling_is_idempotent_too():
 
     assert [rw["features"]["x"] for rw in rows] == once
     assert [rw["features"]["x_raw"] for rw in rows] == [0., 1., 2., 3., 4.]
+
+
+# --------------------------------------------------------------------------- #
+# F122：有卡片出錯的那一顆不重判
+# --------------------------------------------------------------------------- #
+def test_a_defect_whose_card_failed_stays_failed(store):
+    """以前 rescore 把每一列當成 ``ok=True`` 倒回去，一顆量到一半就出錯的
+    defect 拿殘缺的 features 走樹、得到一個看起來正常的 bin。判定本身失敗的
+    （``[score] …``）才救回來 —— 它們的量測是完整的。"""
+    rows = _rows(4)
+    rows[1].update(ok=False, error="[glv] boom", bin=None, score=None,
+                   features={"a": 9.0})          # 殘缺：9 > 2 會被判成 big
+    rows[2].update(ok=False, error="[score] no such number", bin=None,
+                   score=None)
+    recipe = _tree_recipe()
+    run_id = store.save_run(recipe.to_json_dict(), rows)
+    rescore(store, run_id, save_as="again")
+    got = {r["defect_id"]: r for r in store.iter_results("again")}
+    assert got["1"]["ok"] is False and got["1"]["bin"] is None
+    assert got["1"]["error"] == "[glv] boom"
+    assert got["2"]["ok"] is True and got["2"]["bin"] == 3      # a = 2 → small

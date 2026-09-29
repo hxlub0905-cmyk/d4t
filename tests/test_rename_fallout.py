@@ -248,3 +248,22 @@ def test_let_names_written_is_the_one_home():
     assert let_names_written(d, upto=1) == ["a", "a_missing"]
     assert let_names_written(d, upto=0) == []
     assert let_names_written(None) == []
+
+
+# --------------------------------------------------------------------------- #
+# F122：刪一張卡也要講（以前只有改參數會講）
+# --------------------------------------------------------------------------- #
+def test_removing_a_card_says_who_still_refers_to_its_numbers():
+    """刪掉量測卡 → 判定樹上問它的題目從此永遠答「否」，而刪的那一刻畫面上
+    什麼都沒說。`removal_fallout` 在刪之前算，`canvas_edges.remove_card` 講。"""
+    pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    from d4t.core.pipeline.recipe import DecideSpec, TreeLeaf, TreeStep
+
+    m, glv, _out = _wired_model()
+    m.decide = DecideSpec(tree=TreeStep(when="glv_median > 3",
+                                        yes=TreeLeaf(bin=1), no=TreeLeaf(bin=0)))
+    said = " ".join(m.removal_fallout(glv))
+    assert "glv_median" in said and "decision" in said, said
+    # **反向**：沒有人在用的卡，刪掉一句都不講。
+    roi = [nid for nid in m.node_order if m.nodes[nid].step == "roi_reference"]
+    assert m.removal_fallout(roi[0]) == []

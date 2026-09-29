@@ -170,7 +170,10 @@ class RecipeModel:
         #: 畫布上的線。F9-5b 起存的是 core 的 :class:`~d4t.core.pipeline.Edge`
         #: （帶埠），不再是一對節點 —— 埠決定**資料從哪來**，而不只是先後順序。
         self.edges: List[Edge] = []
-        self.expr = "0"
+        #: 二元門檻那條老路的分數表達式。**空＝還沒有判定**（F122）：引擎給
+        #: 每一顆「量完、沒分類」。以前全新 recipe 塞的是佔位值 ``"0"``，
+        #: 而那個佔位值在引擎裡是一條真的判定（``0 >= 0`` → 每一顆 bin 1）。
+        self.expr = ""
         self.threshold = 0.0
         #: 多類別判定（F22-UI）。``None`` = 這份 recipe 走 ``expr + threshold``
         #: 那條二元的老路。兩者**不能並存**（`validate` 的 `ambiguous-decision`），
@@ -644,11 +647,46 @@ class RecipeModel:
                     if n not in set(step_cls.resolve_features(after))]
         except Exception:  # 顯示用，壞了就不講
             return []
+        return self._still_referred(gone, str(node_id))
+
+    def removal_fallout(self, node_id: str) -> List[str]:
+        """刪掉這張卡之後，誰還指著它產出的名字（F122）。
+
+        改參數（:meth:`rename_fallout`）一直會講這一句；**刪卡不會** —— 判定樹
+        上問那個數字的題目從此永遠答「否」，而刪的那一刻畫面上什麼都沒說，只有
+        判定卡上一個要等重畫才出現的徽章。別張卡也產出同一個名字的話不算
+        （名字還在）。**刪之前叫**：刪完之後查不到它產出什麼。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None:
+            return []
+        try:
+            mine = self._features_of(node)
+            others: set = set()
+            for nid in self.node_order:
+                other = self.nodes.get(nid)
+                if nid != str(node_id) and other is not None and other.enabled:
+                    others |= set(self._features_of(other))
+        except Exception:  # 顯示用，壞了就不講
+            return []
+        return self._still_referred([n for n in mine if n not in others],
+                                    str(node_id))
+
+    @staticmethod
+    def _features_of(node: RecipeNode) -> List[str]:
+        step_cls = get_step(node.step)
+        try:
+            params = step_cls.validate_params(dict(node.params))
+        except Exception:  # 參數壞了就用原樣問（顯示用）
+            params = dict(node.params)
+        return list(step_cls.resolve_features(params))
+
+    def _still_referred(self, gone: List[str], skip: str) -> List[str]:
         out: List[str] = []
         for name in gone:
             where = feature_referrers(
                 name, self.nodes, score_expr=str(self.expr or ""),
-                decide=self.decide, skip=str(node_id))
+                decide=self.decide, skip=skip)
             if where:
                 out.append("“%s” is no longer produced — %s still refer%s to it."
                            % (name, " and ".join(where),
@@ -717,9 +755,7 @@ class RecipeModel:
                 score=expr if real else "")
             self.expr = ""          # 並存是 error，所以這一格要清掉
         else:
-            self.decide = None
-            if not str(self.expr or "").strip():
-                self.expr = "0"
+            self.decide = None          # expr 留空＝沒有判定（F122）
         self._changed()
 
     def _edit_decide(self, **kw) -> None:
@@ -775,7 +811,8 @@ class RecipeModel:
         if self.decide is None:
             return
         used = {r.bin for r in self.decide.rules} | {self.decide.otherwise_bin}
-        nxt = next(b for b in range(1, 1000) if b not in used)
+        # 用光了回 MAX_BIN，不拋 StopIteration（同 `_fresh_bin`，F122 補上這一支）。
+        nxt = next((b for b in range(1, 1000) if b not in used), MAX_BIN)
         self._edit_decide(rules=list(self.decide.rules) + [Rule("", nxt, "")])
 
     def remove_rule(self, i: int) -> None:
@@ -1750,9 +1787,15 @@ class RecipeModel:
         m.nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in recipe.nodes.items() if nid in set(m.node_order)}
-        m.expr = recipe.score.expr
-        m.threshold = float(recipe.score.threshold)
         m.decide = getattr(recipe, "decide", None)
+        # **常數的分數不是判定**（F122，UI 層的遷移 —— 同 `_adopt_threshold_as_a_tree`）：
+        # 以前 Studio 存出來的「還沒加判定」的 recipe 帶著佔位值 ``"0"``，畫面說
+        # 「沒有判定」、引擎卻把每一顆分進 bin 1。打開就照畫面改成空的，存檔
+        # 寫的就是畫面上那一份（CLAUDE.md §1：存出跟畫面不一樣的東西才是說謊）。
+        m.expr = ("" if m.decide is None
+                  and is_a_constant_expression(recipe.score.expr)
+                  else recipe.score.expr)
+        m.threshold = float(recipe.score.threshold)
         # 分流與**沒在編的那幾條 route**（F23 期2）：原樣抱著，`to_recipe`
         # 合併回去。共用的節點在 `m.nodes`（上面那行收了），這裡只留其他
         # route 專屬的。

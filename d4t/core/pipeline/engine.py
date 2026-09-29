@@ -576,9 +576,14 @@ def _eval_decision(recipe: Recipe,
        都要變成一個畫得出分布的數字）。後面一行看得到前面一行。
     2. ``rules`` **由上往下，第一個成立的贏**。所以「改順序＝改優先權」，
        而那句話使用者讀得懂。
-    3. ``score`` 最後算（它可以用 ``let`` 出來的中間值），寫進
-       ``ctx.features["score"]`` —— 跟老路一字不差，所以 KLARF 的 DSIZE、
-       Top-N 排序、CSV 的 score 欄都不必知道這一段換過。
+    3. ``score`` 在 ``let`` 之後、**判定之前**算（它可以用 ``let`` 出來的中間
+       值），寫進 ``ctx.features["score"]`` —— 所以 KLARF 的 ADCSCORE、Top-N
+       排序、CSV 的 score 欄都不必知道這一段換過，**而且樹上可以問它**。
+
+       ⚠ 2026-09-29（F122）以前它排在判定**之後**，而 lint 讓樹問 ``score``：
+       整批跑的時候那一題永遠問不出來（答「否」），Re-run 的時候
+       （`batch.redecide`）上一次的分數還躺在 features 裡，於是答得出來 ——
+       同一份 recipe、同一批數字，兩條路分到不同的 bin。
 
     規則的值怎麼判真假：**非 0 就是成立**。表達式的比較運算子本來就回 1.0／0.0
     （`expression.py` 的左結合折疊），所以 ``"a > 5"`` 與 ``"(a > 5) * (b < 2)"``
@@ -616,6 +621,32 @@ def _eval_decision(recipe: Recipe,
                 ctx.features[name + "_missing"] = 0.0
             continue
         ctx.features[name] = expr_obj.eval(ctx.features)
+
+    # **沒有分數表達式 ⇒ 沒有分數**（F30）。以前這裡是 `else 0.0`，而判定樹
+    # 是一個**分類器** —— 多數樹根本沒有 score 表達式，於是每一顆的分數都是
+    # 一個假的 0。三個後果，一個比一個嚴重：
+    #
+    # 1. CSV 多一欄全是 0 的 `score`；
+    # 2. 每一張疊圖左上角寫著 `score=0.000`（讀起來像「這顆得 0 分」）；
+    # 3. **「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」** —— 全部同分時
+    #    `sorted` 是穩定的，於是它原封不動地回傳輸入順序。而
+    #    `pick_overlay_results` 自己的說明寫著「檔案順序上的前 N 顆幾乎一定不是
+    #    使用者想看的那幾顆」。排序正是使用者要那份報表的理由。
+    #
+    # 算不出來的那一格**不寫**（同量測卡的規矩 3）：`DefectResult.score` 本來
+    # 就是 `Optional[float]`（`upto_node` 那條路一直在回 None），所以下游都
+    # 擋得住 —— 但「排不出來」要**講出來**，不可以安靜地退回檔案順序。
+    #
+    # ⚠ **判定寫的名字先拿掉**（F122）：Re-run 與整批換算（`batch.redecide`）
+    # 把上一次存下來的 features 整包倒回來，裡面有上一次的 ``score`` 與
+    # ``decide_unanswered``。不拿掉的話，一份拿掉了分數表達式的 recipe 在樹上
+    # 問 ``score`` 會拿到**上一次**的分數 —— 而整批跑的時候那一題問不出來。
+    ctx.features.pop("score", None)
+    ctx.features.pop("decide_unanswered", None)
+    expr = str(recipe.decide.score or "").strip()
+    score = parse_expression(expr).eval(ctx.features) if expr else None
+    if score is not None:
+        ctx.features["score"] = score
 
     path: List[str] = []
     unanswered: List[str] = []
@@ -675,24 +706,6 @@ def _eval_decision(recipe: Recipe,
                  % (len(unanswered), ", ".join(names),
                     "was" if len(names) == 1 else "were", chosen_bin))
 
-    # **沒有分數表達式 ⇒ 沒有分數**（F30）。以前這裡是 `else 0.0`，而判定樹
-    # 是一個**分類器** —— 多數樹根本沒有 score 表達式，於是每一顆的分數都是
-    # 一個假的 0。三個後果，一個比一個嚴重：
-    #
-    # 1. CSV 多一欄全是 0 的 `score`；
-    # 2. 每一張疊圖左上角寫著 `score=0.000`（讀起來像「這顆得 0 分」）；
-    # 3. **「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」** —— 全部同分時
-    #    `sorted` 是穩定的，於是它原封不動地回傳輸入順序。而
-    #    `pick_overlay_results` 自己的說明寫著「檔案順序上的前 N 顆幾乎一定不是
-    #    使用者想看的那幾顆」。排序正是使用者要那份報表的理由。
-    #
-    # 算不出來的那一格**不寫**（同量測卡的規矩 3）：`DefectResult.score` 本來
-    # 就是 `Optional[float]`（`upto_node` 那條路一直在回 None），所以下游都
-    # 擋得住 —— 但「排不出來」要**講出來**，不可以安靜地退回檔案順序。
-    expr = str(recipe.decide.score or "").strip()
-    score = parse_expression(expr).eval(ctx.features) if expr else None
-    if score is not None:
-        ctx.features["score"] = score
     # 哪一條規則對上了 —— 給面板與報表。**不進 `DefectResult`**：那會動到
     # SQLite schema 與 CSV 的欄。（寫這一段時黃金值是壞的（見 F21 §6）；
     # 尺 2026-08-23 重凍回來了，但「要不要進結果 schema」是另一個決定，
@@ -705,8 +718,15 @@ def _eval_decision(recipe: Recipe,
 
 
 def _eval_score(recipe: Recipe,
-                ctx: Context) -> Tuple[Optional[float], int]:
+                ctx: Context) -> Tuple[Optional[float], Optional[int]]:
     """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
+
+    **沒有判定＝沒有 bin**（F122）：沒有 ``decide``、``score.expr`` 也是空的
+    → ``(None, None)``，這一顆量完了、沒有被分類（`verdict_rows` 叫它
+    「no verdict」、KLARF 寫 ``-1``）。以前這條路會讓每一顆失敗（「the
+    expression is empty」），而 Studio 為了不讓它失敗，給還沒加判定的新 recipe
+    塞了一個佔位值 ``"0"`` —— 於是畫面說「every one comes out unclassified」，
+    CSV 與 KLARF 卻是每一顆 bin 1、分數 0。
 
     ``recipe.decide`` 有東西的時候走多類別那一支（F21-D）—— **沒有的時候
     這一支一個位元都沒動**。寫的當下的理由是黃金值壞了（見
@@ -715,6 +735,9 @@ def _eval_score(recipe: Recipe,
     """
     if getattr(recipe, "decide", None) is not None:
         return _eval_decision(recipe, ctx)
+    if not str(recipe.score.expr or "").strip():
+        ctx.features.pop("score", None)
+        return None, None
     expr = parse_expression(recipe.score.expr)
     # 老路**沒有**「答否往下走」那條退路（F30）：一條分數表達式算不出來的時候
     # 沒有第二個答案，硬給 0 分是發明一個數字。所以這裡仍然是失敗 ——

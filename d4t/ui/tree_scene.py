@@ -439,11 +439,15 @@ class _TrayItem(QGraphicsItem):
 
     def __init__(self, cell: Dict[str, Any], count: Optional[int],
                  stats: Optional[Tuple[int, int]], canvas: Any = None,
-                 selected: bool = False):
+                 selected: bool = False,
+                 sent_away: Tuple[int, Any] = (0, None)):
         super().__init__()
         self.cell = dict(cell)
         self.count = count
         self.stats = stats
+        #: ``(幾顆, bin)``：走到這裡、但被「問不出來的送去 bin N」拿走的
+        #: （F122）。托盤的顆數仍是「走到這裡的」—— 分支流量要守恆。
+        self.sent_away = (int(sent_away[0]), sent_away[1])
         self._canvas = canvas
         self._selected = bool(selected)
         tip = "bin %d" % int(cell.get("bin", 0))
@@ -451,6 +455,10 @@ class _TrayItem(QGraphicsItem):
             tip = "%s — %s" % (cell["label"], tip)
         if cell.get("otherwise"):
             tip += "\nEverything no rule matched lands here."
+        if self.sent_away[0] and self.sent_away[1] is not None:
+            tip += ("\n%d of the defects that reached here had a question "
+                    "that could not be asked, so they went to bin %d instead."
+                    % (self.sent_away[0], int(self.sent_away[1])))
         self.setToolTip(tip + "\nClick to edit this class.")
 
     def mousePressEvent(self, e) -> None:  # Qt hook
@@ -506,6 +514,9 @@ class _TrayItem(QGraphicsItem):
         if self.count is None:
             return
         bits = ["%d" % int(self.count)]
+        n_away, away_bin = self.sent_away
+        if n_away and away_bin is not None:
+            bits.append("%d → bin %d" % (n_away, int(away_bin)))
         if self.stats is not None:
             real, n = self.stats
             bits.append("%d/%d real" % (int(real), int(n)))
@@ -619,6 +630,8 @@ def build_zone(scene: Any, canvas: Any,
     cells = [] if collapsed else list(info.get("cells") or [])
     counts = info.get("counts")           # None = 還沒試跑 → 不畫任何數字
     stats = dict(info.get("leaf_stats") or {})
+    away = dict(info.get("diverted") or {})
+    ub = info.get("unanswered_bin")
 
     entry = _EntryItem(canvas, list(info.get("lets") or []),
                        None if counts is None else int(counts.get("", 0)),
@@ -640,7 +653,8 @@ def build_zone(scene: Any, canvas: Any,
         else:
             c = None if counts is None else int(counts.get(cell["path"], 0))
             it = _TrayItem(cell, c, stats.get(cell["path"]), canvas,
-                           selected=sel)
+                           selected=sel,
+                           sent_away=(int(away.get(cell["path"], 0)), ub))
         it.setPos(pos)
         scene.addItem(it)
         items.append(it)

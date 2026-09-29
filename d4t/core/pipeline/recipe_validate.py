@@ -273,7 +273,7 @@ def _outcome_issues(decide: "DecideSpec") -> List["Issue"]:
 
 
 def _decide_unknown(decide: "DecideSpec", feats: Set[str],
-                    kind: str) -> List["Issue"]:
+                    kind: str, data: Any = None) -> List["Issue"]:
     """判定段的表達式指到**沒有人算得出來的數字**時講一句（F21-D 漏掉的那一半）。
 
     為什麼這一段一定要有
@@ -293,21 +293,30 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
     ------------------------------------------
     跟 `engine._eval_decision` 逐項對齊：
 
-    * 卡片算出來的特徵（``feats``）；
-    * ``score`` —— 判定段自己寫進 ``ctx.features`` 的那一個；
+    * 卡片算出來的特徵（``feats``；呼叫端已經加上 ``route_taken``，有分流時）；
     * ``let`` 的名字，而且**是累加的**：第 n 行看得到前 n−1 行，看不到自己
       後面的（引擎就是照順序算的）；
     * 有 ``fill`` 的 let 會多寫一個 ``<名字>_missing``（F24 ⑤），
       有 ``scale`` 的會多留一個 ``<名字>_raw``（F23 期3）——
-      判定樹的第一步常常問的就是 ``_missing``。
+      判定樹的第一步常常問的就是 ``_missing``；
+    * ``score`` —— **只有樹／規則看得到，而且只在真的有分數表達式時**
+      （引擎在 let 之後、判定之前算它，F122）。以前這裡無條件放行，於是一份
+      沒有分數的 recipe 在樹上問 ``score`` 是綠燈，跑起來那一題永遠答「否」。
+
+    用字分兩種（F122）：**let 與分數**缺一個數字＝那一顆失敗（有 ``fill`` 的
+    let 除外）；**樹上的題目**缺一個數字＝那一題答「否」（或進「問不出來」的
+    那一格），**不是**失敗 —— 以前兩種都講「every defect will fail」，而後者
+    真正的後果（安靜地全部走「否」）反而沒講。
 
     ⚠ **級別是 warning 不是 error**，跟舊的那一條一致：一份 recipe 可以在
     「還沒接上那張量測卡」的中間狀態被打開，那時候擋住編輯比講一句更煩。
     """
     out: List[Issue] = []
-    seen = set(feats) | {"score"}
+    seen = set(feats)
+    ub = getattr(decide, "unanswered_bin", None)
 
-    def check(where: str, text: str, fill: str = "", name: str = "") -> None:
+    def check(where: str, text: str, fill: str = "", name: str = "",
+              question: bool = False) -> None:
         try:
             e = parse_expression(str(text))
         except ExpressionError:
@@ -325,9 +334,16 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
                     "use %s”, so a defect without that number gets %s and "
                     "“%s_missing = 1”. Add the card that measures it if you "
                     "did mean to measure it." % (fill, fill, name or "it"))
+        elif question:
+            tail = ("Check the spelling, or add the card that measures it - "
+                    "until then this question cannot be asked, so every "
+                    "defect is answered 'no' here%s."
+                    % (" and goes to bin %d (the recipe's 'could not be "
+                       "decided' bin)" % int(ub) if ub is not None else ""))
         else:
             tail = ("Check the spelling, or add the card that measures it - "
                     "every defect will fail on this line at run time.")
+        tail = _where_it_would_come_from(unknown, data, tail)
         out.append(Issue(
             code="unknown-feature", level="warning", node_id=None,
             title="The decision uses a number nobody produces",
@@ -347,16 +363,47 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
         # 第 i 行看得到前 i 行寫的（`let_names_written` 是唯一的家）。
         seen |= set(let_names_written(decide, upto=i + 1))
 
-    if decide.tree is not None:
-        for when in _tree_whens(decide.tree):
-            check("the question \"%s\"" % when, when)
-    else:
-        for i, rule in enumerate(decide.rules):
-            check("rule %d (\"%s\")" % (i + 1, rule.when), rule.when)
-
+    # 分數在 let 之後、判定之前（`engine._eval_decision` 的順序）。
     if str(decide.score or "").strip():
         check("the score", decide.score)
+        seen.add("score")
+
+    if decide.tree is not None:
+        for when in _tree_whens(decide.tree):
+            check("the question \"%s\"" % when, when, question=True)
+    else:
+        for i, rule in enumerate(decide.rules):
+            check("rule %d (\"%s\")" % (i + 1, rule.when), rule.when,
+                  question=True)
     return out
+
+
+def _where_it_would_come_from(unknown: Sequence[str], data: Any,
+                              tail: str) -> str:
+    """缺的名字**是 KLARF 的欄**的時候，多講一句它從哪裡來（F122）。
+
+    KLARF 的欄只從 Input 卡的「Carry these columns」進判定（`load.py`），所以
+    「拼錯了嗎、加一張量測卡」對它是錯的建議。只在**知道資料**的時候講：
+    資料有 KLARF、而那一欄在裡面 → 叫他去勾；資料沒有 KLARF 而名字長得像欄名
+    （全大寫）→ 講「這份資料沒有 KLARF」。
+    """
+    if data is None:
+        return tail
+    columns = set(getattr(data, "columns", ()) or ())
+    carried = [n for n in unknown if n in columns]
+    if carried:
+        return ("%s %s a column of this data's KLARF - add it to “Carry these "
+                "columns” on the Input card and the decision can use it."
+                % (", ".join(carried),
+                   "is" if len(carried) == 1 else "are"))
+    if not getattr(data, "has_klarf", True):
+        caps = [n for n in unknown if n.isupper()]
+        if caps:
+            return ("%s If %s %s a KLARF column: this data has no KLARF, so "
+                    "it cannot be asked here at all." % (
+                        tail, ", ".join(caps),
+                        "is" if len(caps) == 1 else "are"))
+    return tail
 
 
 def referenced_features(recipe: "Recipe") -> Set[str]:
@@ -1425,8 +1472,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     # 就分了岔），所以它連解析都不該解析：一份走多類別的 recipe 的 score.expr
     # 是空字串，而空字串解析不出來 —— 對它報一條 error 等於「recipe 是對的，
     # 但健檢說它壞了」，而使用者只會相信健檢。
+    #
+    # **空的也不解析**（F122）：沒有 decide、score 也空著＝「還沒有判定」，
+    # 引擎給每一顆「量完、沒分類」（`engine._eval_score`），不是錯。
     expr = None
-    if decide is None:
+    if decide is None and str(recipe.score.expr or "").strip():
         try:
             expr = parse_expression(recipe.score.expr)
         except ExpressionError as e:
@@ -1777,7 +1827,14 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     route=str(k), advice=advice))
         decide = getattr(recipe, "decide", None)
         if decide is not None:
-            issues.extend(_decide_unknown(decide, feats, k))
+            # 分流時引擎寫 `route_taken`（`engine._note_route`）—— 宣告層
+            # （`verdict_features.bound_specs`）一直有它，這裡以前沒有，
+            # 於是問它的那一題在每一條 route 上都被說成「沒有人算」。
+            # ``feats`` 從 ``{"score"}`` 起算（給舊的 score.expr 與出圖卡的
+            # `rank_by`）；判定段自己決定分數什麼時候看得到，所以先拿掉。
+            seen_here = (feats - {"score"}) | (
+                {"route_taken"} if route_by is not None else set())
+            issues.extend(_decide_unknown(decide, seen_here, k, data=data))
 
     # ---- 分流的 route 之間有沒有漂（F23 §5 選項 A 的配套）----
     # 只在 route_by 存在時看：多 route 在此之前的意思是「一種 kind 一條路」

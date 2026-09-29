@@ -245,15 +245,22 @@ def rules_to_tree(spec: "DecideSpec") -> Any:
     """把平面規則清單翻成**等價的鏈狀樹**（F24 §3）。
 
     「由上往下第一個成立的贏」就是一條每步 yes → 葉子、no → 下一步的鏈，
-    所以這個轉換**無損**：同一組特徵值走 rules 與走轉出來的樹，bin 與 label
-    逐項相同（`tests/test_decide_tree.py` 用值網格驗）。空清單＝直接是
+    所以這個轉換**無損**：同一組特徵值走 rules 與走轉出來的樹，bin、label 與
+    outcome 逐項相同（`tests/test_decide_tree.py` 用值網格驗）。空清單＝直接是
     otherwise 那片葉子。
     """
     node: Any = TreeLeaf(bin=int(spec.otherwise_bin),
-                         label=str(spec.otherwise_label))
+                         label=str(spec.otherwise_label),
+                         outcome=str(getattr(spec, "otherwise_outcome", "")
+                                     or ""))
+    # ⚠ **好消息／壞消息要跟著過去**（F122）。以前這裡只帶 bin 與 label，
+    # 而 Studio 第一次點一份手寫的規則 recipe 就把它轉成樹（`ensure_tree`）——
+    # 每一條規則的 outcome 在那一刻安靜地消失，存檔就寫回磁碟。
     for rule in reversed(list(spec.rules)):
         node = TreeStep(when=rule.when,
-                        yes=TreeLeaf(bin=int(rule.bin), label=rule.label),
+                        yes=TreeLeaf(bin=int(rule.bin), label=rule.label,
+                                     outcome=str(getattr(rule, "outcome", "")
+                                                 or "")),
                         no=node)
     return node
 
@@ -402,7 +409,8 @@ class DecideSpec:
     otherwise_label: str = ""
     #: 一條都沒對上的那一類是好消息還是壞消息（F119）。見 :data:`OUTCOMES`。
     otherwise_outcome: str = ""
-    #: 這一顆的分數（KLARF 的 DSIZE／Top-N 排序要一個數字）。空字串 = 0.0。
+    #: 這一顆的分數（Top-N 排序、「Worst first」、KLARF 的 ADCSCORE 要一個數字）。
+    #: 空字串 = **沒有分數**（``None``，不是 0.0 —— 見 `engine._eval_decision`）。
     score: str = ""
     #: 判定樹（F24）。有它就走樹、忽略 ``rules``/``otherwise`` —— 但**兩個都
     #: 寫**是 `ambiguous-decision` 的 error（同 `score` vs `decide`：同一件事

@@ -28,6 +28,32 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F122 期 1：ADC 安靜做錯的八件（2026-09-29）
+
+使用者：「接下來做 ADC 跟 output 兩張卡（先不要動），先列出想法」→「先修會安靜做錯
+的，接著按照你的建議修」。計畫書 `docs/plans/F122-adc-and-output.md`（五個問題的答案
+與期 5 的畫布提案都在那裡）。
+
+* **沒有判定＝沒有 bin**：`decide` 與 `score.expr` 都空 → `(None, None)`。Studio 新
+  recipe 不再塞佔位值 `"0"`（那是一條真的判定：每一顆 bin 1、分數 0，而畫面說
+  「unclassified」）；打開帶常數分數的舊檔案照畫面改成空的（UI 層遷移）。
+* **樹上問 `score`**：分數改在 let 之後、判定之前算；重判前拿掉上一次的 `score` /
+  `decide_unanswered`。以前整批跑答「否」、Re-run 答得出來 —— 同一份 recipe 兩種 bin。
+* **「問不出來 → bin N」**：`verdict_rows` 多一列（判定帶、HTML 報表、box plot 以前把
+  它們算在「否」那片葉子）；畫布托盤旁寫「3 → bin 99」。
+* `rules_to_tree` 帶 outcome（Studio 點一下規則 recipe 就把好／壞消息丟掉）。
+* 分數的說明改對（ADCSCORE 不是 DSIZE、空＝沒有分數）；**沒有分數就沒有 ADCSCORE
+  欄**（以前全填 0.0）。
+* 刪卡也講「誰還指著它的數字」（`RecipeModel.removal_fallout`）。
+* 判定 lint：題目缺數字講「答『否』」而不是「會失敗」；知道資料時講「去 Input 卡勾
+  Carry these columns」或「這份資料沒有 KLARF」；`route_taken` 不再被說成沒人算。
+* CLI `rescore`：卡片出錯的那一顆不再拿殘缺的 features 重判。
+* 順手：`add_rule` 的 `StopIteration`、三處過期的註解、歡迎頁的「by a threshold」。
+* 查過不是問題的：舊的 feature 改名遷移不改 `decide` —— 那兩張表比判定段早出生。
+* 黃金值三份逐項相同；typecheck 128（上限 128）；ruff 乾淨。
+
+---
+
 ## F121 期 4：一顆 Open（2026-09-29）
 
 使用者：「繼續做期4」。入口簡單化的最後一期 —— **F121 五期都做完了**，計畫書留在

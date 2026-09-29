@@ -11,8 +11,9 @@
   表達式的 SAFE 語意（/0→0、log/sqrt 界外→0、**只在頂層** nan→0，見
   `expression.py`）因此不可能跟引擎不一致 —— 自己逐節點重算的那份會。
 * **有 `scale` 的 let 不重放。** 整批換算是兩趟的（`batch.apply_lot_scaling`
-  → `redecide`，而 redecide 重評前把有 scale 的 let **拿掉**，
-  batch.py:414-418 —— 這裡鏡射那條規則，不 import batch：它會拖進
+  → `redecide`，而 redecide 重評前把有 scale 的 let **拿掉**（見
+  `batch.redecide` 開頭那一段；行號會漂，所以不寫）—— 這裡鏡射那條規則，
+  不 import batch：它會拖進
   multiprocessing 與 ingest）。features 裡的值就是樹真的比過的那一份
   （換算後），原始值在 ``<name>_raw``。
 * **缺值明白標「沒人產出」**，不是留白 —— `answer` 缺值答「否」照走

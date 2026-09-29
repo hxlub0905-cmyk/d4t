@@ -550,11 +550,14 @@ def redecide(recipe: Recipe, rows, revive: bool = False) -> int:
             r["error"] = "[score] %s" % e
             r["score"], r["bin"] = None, None
             continue
-        feats = dict(r.get("features") or {})
+        # 判定自己寫的兩個名字**以這一次為準**（F122）：這一次沒有分數表達式
+        # 的話，上一次的 ``score`` 不准留在 features 裡冒充這一次的。
+        feats = {k: v for k, v in (r.get("features") or {}).items()
+                 if k not in ("score", "decide_unanswered")}
         feats.update({k: _safe_num(v) for k, v in ctx.features.items()})
         r["features"] = feats
         r["score"] = _safe_num(score)
-        r["bin"] = int(b)
+        r["bin"] = None if b is None else int(b)
         r["ok"], r["error"] = True, None      # revive：救回來的顆從此是好的
         redone += 1
     return redone

@@ -178,7 +178,7 @@ def _intro_text() -> str:
     return (
         "d4t reads the tool's patch / Review SEM images — with or without a "
         "KLARF — and lets you build a pipeline out of step cards: it scores "
-        "every defect, splits them into bins by a threshold, and writes the "
+        "every defect, sorts them into bins with a decision tree, and writes the "
         "result back to KLARF."
         "\nNo programming needed — you decide what a real defect looks like, "
         "and the pipeline works it out.")

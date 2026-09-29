@@ -227,6 +227,8 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
         # 拿掉之後水合就把下游那幾格空出來。以前它是從參數推導的，
         # 所以「把那一格空掉」非得在這裡自己做一次不可。
         name = wording.card(win.model, node_id)   # 先取名，移除之後查不到
+        # 誰還指著它產出的數字（F122）—— 同樣要在刪之前問。
+        fallout = win.model.removal_fallout(node_id)
         # **補線的提議要在刪之前算**（F117 J4）—— 刪完之後那幾條線已經
         # 不在 model 裡了，算不出「本來接到哪」。
         plan = win.model.bridge_plan(node_id)
@@ -234,14 +236,17 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
     if win.selected_node == node_id:
         win.selected_node = None
         win.param_form.set_step(None, {}, [])
+    tail = (" " + " ".join(fallout)) if fallout else ""
     if plan:
         # ⚠ **提議，不是自動接**（鐵則 10：畫布上每一條線都是使用者拉
         # 的）。按下去才成真，而按下去的是使用者。
         win._status_next_step(
-            "Removed “%s” — %d line%s went with it." % (
-                name, len(plan), "" if len(plan) == 1 else "s"),
+            "Removed “%s” — %d line%s went with it.%s" % (
+                name, len(plan), "" if len(plan) == 1 else "s", tail),
             "Reconnect", lambda: bridge(win, plan),
             tip="Wire what fed “%s” straight into what it fed." % name)
+    elif fallout:
+        win._status("Removed “%s”.%s" % (name, tail))
     else:
         win._status("Removed “%s”" % name)
 

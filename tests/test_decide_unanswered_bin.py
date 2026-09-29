@@ -117,3 +117,54 @@ def test_undo_keeps_the_outcomes_too():
                    unanswered_bin=9, unanswered_label="nm")
     back = _decide_restore(_decide_snapshot(d))
     assert back == d
+
+
+# --------------------------------------------------------------------------- #
+# F122：「每一類幾顆」要跟引擎放的 bin 一樣
+# --------------------------------------------------------------------------- #
+def _rows_from_the_engine(decide, feats_list):
+    rows = []
+    for i, feats in enumerate(feats_list):
+        ctx = _ctx(**feats)
+        score, b = _eval_score(_recipe(decide), ctx)
+        rows.append({"defect_id": "d%d" % i, "ok": True, "score": score,
+                     "bin": b, "features": dict(ctx.features)})
+    return rows
+
+
+def test_the_verdict_rows_count_them_where_the_engine_put_them():
+    """判定帶、HTML 報表、box plot 都吃 `verdict_rows`，而它是**重走樹**算的 ——
+    以前重走的人不知道有這一格：引擎放進 bin 99 的那顆，這裡被算在「small」。"""
+    from d4t.core.pipeline.decide_tree import (
+        UNANSWERED_KEY, decision_info, verdict_rows,
+    )
+
+    d = DecideSpec(tree=TREE, unanswered_bin=99, unanswered_label="not measured")
+    rows = _rows_from_the_engine(d, [{"cd_area_px": 60.0},
+                                     {"glv_max": 1.0}])      # 第二顆問不出來
+    assert [r["bin"] for r in rows] == [2, 99]
+    got = {v["key"]: v for v in verdict_rows(d, rows)}
+    assert got[UNANSWERED_KEY]["bin"] == 99
+    assert got[UNANSWERED_KEY]["ids"] == ["d1"]
+    assert got[UNANSWERED_KEY]["name"] == "not measured"
+    by_bin = {}
+    for v in got.values():
+        by_bin[v["bin"]] = by_bin.get(v["bin"], 0) + v["count"]
+    engine_bins = {}
+    for r in rows:
+        engine_bins[r["bin"]] = engine_bins.get(r["bin"], 0) + 1
+    assert {b: n for b, n in by_bin.items() if n} == engine_bins
+    # 畫布：托盤仍是「走到這裡的」（流量守恆），旁邊講幾顆去了 bin 99。
+    info = decision_info(d, rows)
+    assert info["counts"]["n"] == 1 and info["diverted"] == {"n": 1}
+
+
+def test_without_the_setting_nothing_is_diverted():
+    """**反向**：沒設 → 問不出來的照 F30 答「否」，算在「否」那片葉子上。"""
+    from d4t.core.pipeline.decide_tree import UNANSWERED_KEY, verdict_rows
+
+    d = DecideSpec(tree=TREE)
+    rows = _rows_from_the_engine(d, [{"glv_max": 1.0}])
+    keys = [v["key"] for v in verdict_rows(d, rows)]
+    assert UNANSWERED_KEY not in keys
+    assert rows[0]["bin"] == 1

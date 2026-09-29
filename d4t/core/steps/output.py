@@ -1167,8 +1167,9 @@ class OutputKlarfStep(_OutputStep):
             icons=["klarf_inplace", "klarf_annotate", "klarf_topn"],
             choice_labels={"inplace": "In place", "topn": "Top N"},
             label="How to write it",
-            help=("annotate = a new file with ADCSCORE and ADCCLASS added "
-                  "(the original is untouched - start here). inplace = edit "
+            help=("annotate = a new file with ADCCLASS (the bin) added, and "
+                  "ADCSCORE when the decision has a score (the original is "
+                  "untouched - start here). inplace = edit "
                   "the original file, changing only the bytes that have to "
                   "change. topn = a new file with only the highest scoring "
                   "defects in it."),

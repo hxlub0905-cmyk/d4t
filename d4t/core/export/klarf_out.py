@@ -347,7 +347,16 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
             "The defect column definitions of this KLARF cannot be read, so no "
             "columns can be appended. Run the KLARF health check first.")
 
-    new_names = [str(score_col), str(class_col)]
+    # **沒有分數就沒有分數欄**（F122）。一棵沒寫分數表達式的判定樹給每一顆
+    # ``score = None``（F30：分類器沒有分數，不是 0 分）—— 以前這一欄照樣插、
+    # 每一列填 ``missing_score``（0.0），讀起來就是「每一顆都得 0 分」，正是
+    # 引擎那邊花一整段註解擋掉的那個假數字。
+    has_score = any(r.get("score") is not None for r in results)
+    if not has_score:
+        notes.append("No defect has a score (the decision has no score "
+                     "formula), so no {} column was added - only {}."
+                     .format(score_col, class_col))
+    new_names = ([str(score_col)] if has_score else []) + [str(class_col)]
     feat_cols: List[Tuple[str, str]] = []       # (欄位名, 特徵名)
     for f in extra_features or ():
         name = _feature_col_name(f)
@@ -375,8 +384,9 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
 
     # ---- 每列的值（先算好，才不會邊改邊查）----
     n_rows = len(doc.defects)
+    head = [_fmt_float(missing_score, decimals)] if has_score else []
     vals: List[List[str]] = [
-        [_fmt_float(missing_score, decimals), str(int(missing_class))]
+        head + [str(int(missing_class))]
         + [_fmt_float(missing_score, decimals) for _ in feat_cols]
         for _ in range(n_rows)
     ]
@@ -388,8 +398,8 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
         feats = r.get("features") or {}
         score = r.get("score")
         b = r.get("bin")
-        cell = [
-            _fmt_float(missing_score if score is None else score, decimals),
+        cell = ([_fmt_float(missing_score if score is None else score,
+                            decimals)] if has_score else []) + [
             str(int(missing_class) if b is None else int(b)),
         ]
         for _name, fkey in feat_cols:
@@ -402,12 +412,17 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
         filled[idx] = True
 
     n_unfilled = sum(1 for f in filled if not f)
-    if n_unfilled:
+    if n_unfilled and has_score:
         notes.append(
             "{} defect rows have no matching ADC result; column {} is filled "
             "with {} and column {} with {} (meaning \"not judged\").".format(
                 n_unfilled, score_col, _fmt_float(missing_score, decimals),
                 class_col, int(missing_class)))
+    elif n_unfilled:
+        notes.append(
+            "{} defect rows have no matching ADC result; column {} is filled "
+            "with {} (meaning \"not judged\").".format(
+                n_unfilled, class_col, int(missing_class)))
     if n_missing_feat:
         notes.append("{} feature values were absent from the results and were "
                      "filled with {}.".format(

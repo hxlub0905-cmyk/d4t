@@ -45,7 +45,7 @@ __all__ = [
     "answer", "walk", "features_used",
     "LEAF_PALETTE", "leaf_color", "verdict_rows", "NUISANCE_HEX",
     "cuts_on",
-    "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY",
+    "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY", "UNANSWERED_KEY",
 ]
 
 
@@ -375,6 +375,20 @@ def _path_of(tree: Any, feats: Dict[str, Any]) -> str:
     return walk(tree, feats)[1]
 
 
+def diverted(decide: Any, tree: Any, feats: Dict[str, Any]) -> bool:
+    """這一顆是不是被「問不出來的送去 bin N」拿走了（F122）。
+
+    判準跟引擎一字不差（`engine._eval_decision` 的 ``routed``）：recipe 設了
+    ``unanswered_bin``，**而且**這一顆走樹的路上有一題問不出來。重走的是同一支
+    :func:`walk` —— 引擎的 path 不進結果 JSON（見檔頭），所以每一個「每一類
+    幾顆」都是重走出來的，而重走的人以前不知道有這一格：引擎把它放進 bin N，
+    判定帶、報表、box plot 卻把它算在它走到的那片葉子上。
+    """
+    if getattr(decide, "unanswered_bin", None) is None or tree is None:
+        return False
+    return bool(walk(tree, feats)[2])
+
+
 def flow_counts(tree: Any, rows: Any) -> Dict[str, int]:
     """每個節點「流過幾顆」：``路徑前綴 → 顆數``（``""`` = 根 = 全部）。
 
@@ -446,7 +460,31 @@ def decision_info(decide: Any, rows: Any = None,
         "cells": layout_cells(tree, decide),
         "counts": flow_counts(tree, rows) if ran else None,
         "leaf_stats": leaf_stats(tree, rows, ground_truth) if ran else {},
+        # 走到那片葉子、但被「問不出來的送去 bin N」拿走的顆數（F122）——
+        # 托盤上的數字仍是「走到這裡的」（分支流量要守恆），旁邊講有幾顆
+        # 其實去了 bin N。
+        "diverted": _diverted_by_leaf(decide, tree, rows) if ran else {},
+        "unanswered_bin": getattr(decide, "unanswered_bin", None),
     }
+
+
+def _diverted_by_leaf(decide: Any, tree: Any, rows: Any) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    if getattr(decide, "unanswered_bin", None) is None or tree is None:
+        return out
+    for r in rows or []:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        feats = dict(r.get("features") or {})
+        try:
+            if not diverted(decide, tree, feats):
+                continue
+            p = _path_of(tree, feats)
+        except Exception:  # 顯示用，走不動就不計（同 flow_counts）
+            swallowed("decide_tree._diverted_by_leaf")
+            continue
+        out[p] = out.get(p, 0) + 1
+    return out
 
 
 def path_text(tree: Any, path: str) -> str:
@@ -482,6 +520,8 @@ DANGER_HEX = "#d05a4c"
 #: 「算不出來」那兩列的 key（不可能跟樹的路徑撞名 —— 路徑只有 y/n）。
 FAILED_KEY = "!failed"
 UNBINNED_KEY = "!unbinned"
+#: 「問不出來的送去 bin N」那一格（`DecideSpec.unanswered_bin`）的列鍵。
+UNANSWERED_KEY = "!unanswered"
 
 
 def features_used(decide: Any) -> List[str]:
@@ -578,13 +618,19 @@ def verdict_rows(decide: Any, results: Any,
     tree = display_tree(decide)
 
     if tree is not None:
-        # path → 走到那裡的 defect_id（順序照結果的順序）。
+        # path → 走到那裡的 defect_id（順序照結果的順序）。被「問不出來的
+        # 送去 bin N」拿走的顆**不算在葉子上**（F122）—— 引擎給它們的是 bin N。
         by_path: Dict[str, List[str]] = {}
+        sent_away: List[str] = []
         for r in rows_in:
             if not r.get("ok") or r.get("bin") is None:
                 continue
+            feats = dict(r.get("features") or {})
             try:
-                p = _path_of(tree, dict(r.get("features") or {}))
+                if diverted(decide, tree, feats):
+                    sent_away.append(str(r.get("defect_id")))
+                    continue
+                p = _path_of(tree, feats)
             except Exception:  # 顯示用，走不動就不計
                 swallowed("decide_tree.verdict_rows")
                 continue
@@ -612,6 +658,22 @@ def verdict_rows(decide: Any, results: Any,
                 "labelled": labelled,
                 "colour": leaf_color(int(cell.get("bin")), nuisance),
                 "kind": "class",
+            })
+        ub = getattr(decide, "unanswered_bin", None)
+        if ub is not None and sent_away:
+            real = labelled = 0
+            for did in sent_away:
+                gt = truth.get(did)
+                if isinstance(gt, dict) and "is_real" in gt:
+                    labelled += 1
+                    real += 1 if gt.get("is_real") else 0
+            out.append({
+                "key": UNANSWERED_KEY,
+                "name": str(getattr(decide, "unanswered_label", "") or
+                            "could not be decided"),
+                "bin": int(ub), "count": len(sent_away), "ids": sent_away,
+                "real": real, "labelled": labelled,
+                "colour": leaf_color(int(ub), nuisance), "kind": "class",
             })
     else:
         # 沒有判定樹（二元 score 的老路）—— 一列一個 bin。

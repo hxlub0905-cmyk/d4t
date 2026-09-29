@@ -321,6 +321,18 @@ def _rescore_with_decide(store: "RunStore", run: Dict[str, Any], run_id: str,
     rows: List[Dict[str, Any]] = []
     for r in store.iter_results(run_id):
         feats = {k: v for k, v in r["features"].items() if k != "score"}
+        # ⚠ **有卡片出錯的那一顆不重判**（F122）。這裡以前把每一列都當成
+        # ``ok=True`` 倒回去，於是一顆量到一半就出錯的 defect 拿它**殘缺的**
+        # features 走判定樹，得到一個看起來正常的 bin —— 跑得完、有數字、
+        # 而且是錯的。只有**判定本身**失敗的那幾顆（引擎寫 ``[score] …``）
+        # 救得回來：它們的量測是完整的，換一份判定就該重新有 bin
+        # （同 Studio 的 Re-run，`batch.rerun_decision` 的 ``revive``）。
+        err = str(r.get("error") or "")
+        if not r.get("ok") and not err.startswith("[score]"):
+            rows.append({"defect_id": r["defect_id"], "ok": False,
+                         "error": r.get("error"), "features": feats,
+                         "score": None, "bin": None})
+            continue
         rows.append({"defect_id": r["defect_id"], "ok": True, "error": None,
                      "features": feats, "score": r.get("score"),
                      "bin": r.get("bin") if r.get("bin") is not None else 0})

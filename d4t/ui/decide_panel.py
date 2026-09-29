@@ -417,11 +417,16 @@ class DecidePanel(QWidget):
         # ── 分數 ──
         self.body_lay.addWidget(self._section(
             "Score",
-            "Written into the KLARF DSIZE, and what Top-N sorts by"))
+            "One number per defect - what “Worst first” and Top-N sort by, "
+            "and the ADCSCORE column Write KLARF adds. It is worked out "
+            "before the questions, so a question can ask about it."))
         sc = QLineEdit(str(d.score or ""))
-        sc.setPlaceholderText("empty = the score is 0")
+        # 空白＝**沒有分數**，不是 0（F30：`engine._eval_decision`）。這一格
+        # 以前寫「empty = the score is 0」、上面那句寫「進 DSIZE」—— 兩句都是
+        # 假的（DSIZE 是 Write KLARF 的 size_feature，F122 對過）。
+        sc.setPlaceholderText("empty = no score (nothing to sort by)")
         sc.textEdited.connect(lambda t: m.set_decide_score(str(t)))
-        # score 在每一行 let 之後才算，所以 working numbers 全部列得進來。
+        # score 在每一行 let 之後、判定之前算，所以 working numbers 全部列得進來。
         self.body_lay.addWidget(self._labelled(
             "", sc, _feature_combo(self._numbers(),
                                    lambda tok: m.set_decide_score(

@@ -235,3 +235,22 @@ def test_the_names_and_the_outcomes_are_read_in_the_same_order():
     assert d.entries() == [(1, "first", "bad"), (1, "second", "good"),
                            (0, "", "")]
     assert d.bin_labels()[1] == "first" and d.bin_outcomes()[1] == "bad"
+
+
+# --------------------------------------------------------------------------- #
+# F122：規則轉成樹時，好消息／壞消息跟著過去
+# --------------------------------------------------------------------------- #
+def test_turning_rules_into_a_tree_keeps_every_outcome():
+    """Studio 第一次點一份手寫的規則 recipe 就把它轉成樹（`ensure_tree`）；
+    以前那一刻每一條規則的 outcome 安靜地消失，存檔就寫回磁碟。"""
+    from d4t.core.pipeline.recipe import rules_to_tree
+
+    spec = DecideSpec(rules=[Rule(when="x > 5", bin=2, label="big",
+                                  outcome="bad"),
+                             Rule(when="x > 1", bin=1, label="small",
+                                  outcome="neutral")],
+                      otherwise_bin=0, otherwise_label="clean",
+                      otherwise_outcome="good")
+    before = spec.bin_outcomes()
+    after = DecideSpec(tree=rules_to_tree(spec)).bin_outcomes()
+    assert before == after == {2: "bad", 1: "neutral", 0: "good"}
