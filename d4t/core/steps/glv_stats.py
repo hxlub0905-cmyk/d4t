@@ -1855,6 +1855,9 @@ class GlvStatsStep(MultiSourceStep):
         arr = np.asarray(patch, dtype=np.float64).ravel()
         counts, _edges = algo_glv.pixel_hist(arr, bins=self.HIST_BINS)
         ctx.meta.setdefault("glv_hist", []).append({
+            # 哪一張卡量的（F123 期 3）：Write charts 只畫**它上游**那幾張 GLV
+            # 的框 —— 一份 recipe 有兩張 GLV 時，「畫哪一張的」由線決定。
+            "node": str(getattr(ctx, "current_node", "") or ""),
             "stream": str(p.get(self.CURRENT_STREAM, "") or ""),
             "region": str(p.get(self.REGION, "") or ""),
             "prefix": str(p.get(self.CURRENT_PREFIX, "") or ""),

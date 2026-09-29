@@ -29,6 +29,7 @@ from .recipe_schema import legacy_decision
 from .step import REGISTRY, SCALE_LOT, Step, StepError
 
 __all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
+           "image_through_line",
            "run_dataset", "image_segment_signature", "result_to_json_dict"]
 
 
@@ -426,6 +427,47 @@ def _bindings(recipe: Recipe, order: List[str],
     for key in explicit:
         merged[key] = _follow_disabled(recipe, merged, merged[key])
     return merged
+
+
+def image_through_line(recipe: Recipe, ctx: Any, item: Any, node_id: str,
+                       param: str, kind: str = "",
+                       registry: Optional[Dict[str, Type[Step]]] = None) -> Any:
+    """整批一次的卡**照它的入線**拿一張圖（F123 期 3；``None`` = 這條線上沒有）。
+
+    Write comparison 的左右兩張圖以前用流名去整份結果裡撈（``ctx.images``：
+    「名字 → 最後一個寫它的人」）—— 畫布上那條線接的是 Input 的 ``test``，
+    拿到的卻是後面某張 Enhance 卡改過的 ``test``。這裡走跟逐顆那一層同一套
+    （:func:`_bindings` ＋ ``ctx._produced``）：線說是哪一張卡的哪一顆埠，就拿
+    那一張卡當時吐的那一份。
+
+    沒有明講的線（舊檔案、快取續跑沒留下產地）退回名字 —— 同 `_run_nodes`。
+    """
+    reg = REGISTRY if registry is None else registry
+    node = recipe.nodes.get(node_id)
+    step_cls = reg.get(node.step) if node is not None else None
+    if node is None or step_cls is None:
+        return None
+    name = str(step_cls.validate_params(node.params).get(param, "") or "")
+    if not name:
+        return None
+    images = dict(getattr(ctx, "images", None) or {})
+    k = kind or str(getattr(ctx, "meta", {}).get("_dataset_kind") or "")
+    try:
+        route = resolve_route(recipe, item, k)[0]   # 同 run_defect 那一條
+        if route is None:
+            return images.get(name)
+        order = execution_order(recipe, route)
+    except Exception:  # route 有問題由 lint 講；照名字拿
+        swallowed("engine.image_through_line")
+        return images.get(name)
+    bind = _bindings(recipe, order, reg, k)
+    src = bind.get((node_id, name), False)
+    if src is None:
+        return None                  # 線指到一張停用的卡，往上也沒有（F9-8）
+    produced = dict(getattr(ctx, "_produced", None) or {})
+    if src is not False and src in produced:
+        return produced[src]
+    return images.get(name)
 
 
 def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,

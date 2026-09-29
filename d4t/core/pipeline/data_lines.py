@@ -208,10 +208,13 @@ def data_line_issues(recipe: Any, kind: str, order: Sequence[str],
                        % (kind, advice),
                 route=str(kind), advice=advice))
             continue
+        up = upstream_of(nid, recipe.edges)
+        decided = any(u in nodes and nodes[u].step == DECISION_KEY
+                      and nodes[u].enabled for u in up)
+        issues.extend(_numbers_not_upstream(recipe, nid, c, kind, up, decided,
+                                            reg))
         if getattr(c, "needs_decision", False):
-            up = upstream_of(nid, recipe.edges)
-            if not any(u in nodes and nodes[u].step == DECISION_KEY
-                       and nodes[u].enabled for u in up):
+            if not decided:
                 advice = ("It writes each defect's class, so wire the "
                           "Decision card into it.")
                 issues.append(Issue(
@@ -222,6 +225,52 @@ def data_line_issues(recipe: Any, kind: str, order: Sequence[str],
                            "%s" % (kind, advice),
                     route=str(kind), advice=advice))
     return issues
+
+
+
+def _numbers_not_upstream(recipe: Any, nid: str, c: Type[Step], kind: str,
+                          up: Set[str], decided: bool,
+                          reg: Dict[str, Type[Step]]) -> List[Any]:
+    """Output 卡用**名字**吃的數字（排序、欄位、要畫的數字），產出它的卡不在
+    這張卡上游（F123 期 3）。
+
+    Output 寫的是線上游的東西（`rows_for_output`）—— 所以一格指著上游以外的
+    數字，跑得完、資料夾出得來，只是**那一欄整排空白**，而空白的一欄跟「這一批
+    真的量不到」長得一模一樣。warning：卡片照樣寫得出東西。
+    """
+    from .recipe_validate import Issue, card_name
+
+    try:
+        names = [str(n) for n in c.feature_names_in(
+            c.validate_params(recipe.nodes[nid].params))]
+    except Exception:  # 參數壞了由 bad-param 講
+        return []
+    owners = _owners(recipe, [kind], reg)
+    away: List[str] = []
+    who: List[str] = []
+    for name in names:
+        found = owners.get(name, set())
+        cards = {o for o in found if o}
+        if cards and not (cards & up):
+            away.append(name)
+            who.extend(card_name(recipe.nodes, o) for o in sorted(cards)
+                       if card_name(recipe.nodes, o) not in who)
+        elif "" in found and not cards and not decided \
+                and name not in _NOT_THE_DECISIONS:
+            away.append(name)
+            if "Decision" not in who:
+                who.append("Decision")
+    if not away:
+        return []
+    advice = ("Wire %s into this card (its numbers port into the results "
+              "port) - it only writes what is upstream of its lines, so that "
+              "column would be empty." % " and ".join(Q % w for w in who))
+    return [Issue(
+        code="output-number-not-upstream", level="warning", node_id=nid,
+        title="%s uses numbers from a card that is not wired into it"
+              % (Q % card_name(recipe.nodes, nid)),
+        detail="route '%s': it uses %s. %s" % (kind, ", ".join(away), advice),
+        names=tuple(away), route=str(kind), advice=advice)]
 
 
 Q = "“%s”"

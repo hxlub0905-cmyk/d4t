@@ -1159,8 +1159,13 @@ class RecipeModel:
         """
         out: List[str] = []
         known = self.nm_per_px_is_known()
+        # Output 卡只列**它上游**的數字（F123 期 3）：它寫的是線上游的東西，
+        # 列一個上游以外的數字＝一欄整排空白（lint `output-number-not-upstream`）。
+        up = self._upstream_if_output(upto_node)
         for nid, step_cls, s in self._declared_specs(upto_node, include_upto):
             if not known and s.variant in ("nm", "nm2"):
+                continue
+            if up is not None and nid not in up:
                 continue
             label = str(getattr(step_cls, "label", "") or
                         self.nodes[nid].step)
@@ -1168,6 +1173,18 @@ class RecipeModel:
                        for x in out):
                 out.append(s.name + self.FEATURE_LABEL_SEP + label)
         return out
+
+    def _upstream_if_output(self, node_id: Optional[str]) -> Optional[set]:
+        """``node_id`` 是一張收資料線的卡（Output）→ 它上游的卡；否則 ``None``。"""
+        node = self.nodes.get(str(node_id or ""))
+        try:
+            takes = node is not None and get_step(node.step).data_inputs
+        except KeyError:
+            takes = False
+        if not takes or node.step == DecisionStep.key:
+            return None
+        from d4t.core.pipeline.recipe_schema import upstream_of
+        return upstream_of(str(node_id), self.edges)
 
     def decision_numbers(self) -> List[str]:
         """判定的「插入數字 ▾」：`labelled_features` 裡**接進 Decision** 的那幾張

@@ -812,4 +812,4 @@ def _view_for(bctx: Any, nid: str, step_cls: Any, route_keys: Sequence[str],
     if not getattr(step_cls, "data_inputs", ()):
         return bctx
     rows, decided = rows_for_output(bctx.recipe, nid, bctx.rows, route_keys, reg)
-    return dataclasses.replace(bctx, rows=rows, decided=decided)
+    return dataclasses.replace(bctx, rows=rows, decided=decided, node_id=nid)

@@ -25,6 +25,7 @@ from .recipe_schema import (
     is_region_edge,
     let_names_written,
     route_for,
+    upstream_of,
     version_skew,
 )
 from .step import (
@@ -990,8 +991,11 @@ def _chart_metric_issues(recipe: "Recipe", step_cls, p: Dict[str, Any],
     # `route()` —— 於是那個迴圈一次都沒跑，正常的 recipe 也被報一句話。
     have: List[str] = []
     each_box = False
+    # **只算它上游的 GLV**（F123 期 3）：這張卡畫的是線上游那幾張量的框
+    # （`output._upstream_notes`），不是整條 route 上的每一張。
+    up = upstream_of(nid, recipe.edges)
     for other in list(recipe.routes.get(k, []) or []):
-        if other == nid:
+        if other == nid or other not in up:
             continue
         node = recipe.nodes.get(other)
         if node is None or not getattr(node, "enabled", True):

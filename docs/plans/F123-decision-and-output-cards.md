@@ -1,6 +1,6 @@
 # F123 — Decision 與 Output 變成真的卡（做法 B）
 
-狀態：**進行中（2026-09-29）—— 期 1、期 2 做完；期 3～4 未開始。**
+狀態：**進行中（2026-09-29）—— 期 1～3 做完；期 4（線的顏色）未開始。**
 使用者定調：「我想直接做 B」；三個問題的答案見 §1。
 
 F122 期 5 的續集。那一期原本要把 Output 排在固定的一欄、判定旁邊加一行「results →」
@@ -101,4 +101,22 @@ Decision 來的結果線（沒有 Decision 就從每一張寫數字的卡）；�
   再加資料埠 —— `studio.py` 那一格只准往下）、`card_menu` 的資料線、`decision_numbers`。
 * 沒做的：Tidy up 換行後的結果線走向（期 4）；Output 卡「用名字吃數字」的那幾格
   （`rank_by` 等）的清單還是全部，沒有只列上游的（期 3 看 Output 自己的輸入時一起）。
+
+## 8. 期 3 的紀錄
+
+* **Write comparison**：`main_stream` / `pair_stream` 從自由文字改成兩顆影像埠
+  （`image_key`，右邊那顆必要）。拿圖走 `engine.image_through_line`：照線的
+  `(卡, 埠)` 去 `ctx._produced` 拿那一張卡當時吐的那一份 —— 以前照名字撿的是
+  「最後一個寫這個名字的人」，接 Input 的 `test` 會拿到後面 Enhance 卡改過的那張。
+  `BatchContext.node_id` 讓整批那一層知道自己是哪一張卡。
+* **Write charts 不另開一種「boxes」線**（計畫書 §3 原本寫的）：第 2 期的規則
+  「Output 寫的是線上游的東西」就是答案 —— GLV 的框記下是哪一張卡量的
+  （`glv_hist` 的 ``node``），Write charts 只畫上游那幾張的（`_upstream_notes`），
+  `charts-need-each-box` / `unknown-chart-metric` 也只看上游的 GLV。接法跟其他
+  Output 一樣：GLV 的 numbers，或接了 GLV 的 Decision 的 results。
+* **用名字吃的數字**（排序、欄位、要畫的數字）指到不在上游的卡：
+  `output-number-not-upstream`（warning），設定欄的「插入數字 ▾」也只列上游的
+  （`RecipeModel.labelled_features` 對 Output 卡）。
+* 沒有新的遷移：舊的 Write comparison 靠預設 `paired` 那個名字照舊找得到圖
+  （跟沒有線的舊檔案一樣走名字）。
 

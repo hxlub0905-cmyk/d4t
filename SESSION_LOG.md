@@ -28,6 +28,23 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F123 期 3：Output 自己的輸入（2026-09-29）
+
+使用者：「繼續」。紀錄在計畫書 §8。
+
+* **Write comparison 的左右兩張圖是真的影像埠**，照線拿那一張卡當時吐的那一份
+  （`engine.image_through_line`）。以前照名字撿「最後一個寫這個名字的人」——
+  畫布上接 Input 的 `test`，拿到的是後面 Tone 改過的那張（測試釘住了）。
+* **Write charts 不另開「boxes」線**：它只畫上游 GLV 量的框（`glv_hist` 記下
+  是哪一張卡），跟第 2 期「Output 寫線上游的東西」同一條規則；兩條 charts lint
+  也只看上游。
+* Output 卡用名字吃的數字不在上游 → `output-number-not-upstream`（warning，
+  那一欄會整排空白）；設定欄的清單只列上游的。
+* 文件：USING-CHARACTERIZATION（兩顆埠、結果線要接）、USING-UNIFORMITY（拉一條
+  線進 Write charts）。
+
+---
+
 ## F123 期 2：數字線與結果線（2026-09-29）
 
 使用者：「繼續做第二期」；中途「附上畫布截圖」。三個答案見計畫書 §1，設計在 §6。

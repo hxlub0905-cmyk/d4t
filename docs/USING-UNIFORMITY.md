@@ -41,7 +41,10 @@
    **`Odd box out`** —— 那顆鈕會幫你把 `Boxes in the region` 設成 `each box`。
    （三顆鈕在還沒拉區域虛線之前是灰的，所以順序是**先拉線、再按鈕**。）
    然後 `How even are the boxes` 勾你要的數字。
-4. **`Write charts`**：`Write to` 填**完整路徑**的資料夾。
+4. **`Write charts`**：`Write to` 填**完整路徑**的資料夾，然後**拉一條線進它
+   左邊那顆方埠** —— 從 Gray level 的 `numbers`，或從接了 Gray level 的
+   Decision 的 `results`。它只畫**上游**那幾張 Gray level 量的框（F123）：
+   一份 recipe 有兩張 Gray level 時，畫哪一張的由線決定。
 5. **`Write report`**：`Write to` 填**同一個**資料夾，`What to put in the
    folder` 勾 `table` —— 數字才有 CSV 可以進 Excel。
 

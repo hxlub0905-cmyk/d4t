@@ -154,3 +154,26 @@ def test_a_new_output_card_says_it_has_nothing_to_write(window):
     nid = window.model.add_step("output_report")
     window._refresh_pipeline()
     assert "results port" in window.pipeline.card(nid).problem()
+
+
+# --------------------------------------------------------------------------- #
+# F123 期 3：Output 自己的輸入
+# --------------------------------------------------------------------------- #
+def test_write_comparison_grows_two_picture_ports(window):
+    nid = window.model.add_step("output_char")
+    window._refresh_pipeline()
+    specs = window.pipeline.card(nid).in_specs()
+    assert [(s["label"], s["kind"]) for s in specs] == [
+        ("Left picture", "image"), ("Right picture", "image"),
+        ("results", "results")]
+
+
+def test_an_output_cards_number_list_is_what_is_upstream_of_it(window):
+    names = [x.split("\t")[0] for x in window.model.labelled_features(
+        upto_node="report", include_upto=False)]
+    assert "glv_max" in names                   # GLV → Decision → 報表
+    canvas_edges.on_edge_removed(window, "glv", "decision", "numbers",
+                                 "numbers")
+    names = [x.split("\t")[0] for x in window.model.labelled_features(
+        upto_node="report", include_upto=False)]
+    assert "glv_max" not in names, "GLV 不在報表上游了，清單不該再列它"

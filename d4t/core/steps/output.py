@@ -100,6 +100,7 @@ from ..export import html as export_html
 from ..export import klarf_out, overlay
 from ..export import report as export_report
 from ..pipeline import decide_tree
+from ..pipeline.engine import image_through_line
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_BATCH, GROUP_OUTPUT, RESULTS, SCALE_LOT, ParamSpec, Step,
@@ -271,6 +272,21 @@ def _anchor(path: str, bctx: Any) -> str:
         return path
     base = os.path.dirname(src) if os.path.isfile(src) else src
     return os.path.join(base, path)
+
+
+def _upstream_notes(bctx: Any, notes: Any) -> List[Any]:
+    """GLV 留下的框，只留**這張卡上游**那幾張量的（F123 期 3）。
+
+    Output 寫的是線上游的東西（F123 期 2）；這一張吃的不是結果表而是
+    ``ctx.meta["glv_hist"]``，所以同一條規則在這裡再套一次。沒記是誰量的
+    （快取續跑的舊快照）就留著 —— 認不出來的不丟（同 `rows_for_output`）。
+    """
+    from ..pipeline.recipe_schema import upstream_of
+
+    up = upstream_of(str(bctx.node_id or ""), getattr(bctx.recipe, "edges", []))
+    return [n for n in (notes or [])
+            if not (isinstance(n, dict) and n.get("node"))
+            or not bctx.node_id or n["node"] in up]
 
 
 def _warn_if_unranked(key: str, bctx: Any, rows: Any,
@@ -1459,21 +1475,26 @@ class OutputCharStep(_OutputStep):
                   "listed, without pictures, and the card says so. %s"
                   % LIMIT_ZERO_HELP),
         ),
+        # **兩顆真的影像埠**（F123 期 3）。以前是兩格自由文字 —— 打一個流名，
+        # 卡片去整份結果裡撈「最後一個寫這個名字的人」：畫布上沒有線，而那張圖
+        # 可能是後面某張 Enhance 卡改過的那一份。現在線接哪一張卡的哪一顆埠，
+        # 拿的就是那一張卡當時吐的那一份（`engine.image_through_line`）。
         ParamSpec(
-            name="main_stream", type="str", default="",
+            name="main_stream", type="image_key", direction="in", default="",
             label="Left picture",
-            help=("Which image stream to show on the left - the lot you are "
-                  "running (the ground truth, in a characterization). Leave "
-                  "it empty to use whichever image the run started from."),
+            help=("Drag the image to show on the left into this port - the "
+                  "lot you are running (the ground truth, in a "
+                  "characterization). Leave it unconnected to use whichever "
+                  "image the run started from."),
         ),
         ParamSpec(
-            name="pair_stream", type="str", default="paired",
-            label="Right picture",
-            help=("Which image stream to show on the right - what the Pair "
-                  "card brought over from the second lot (\"paired\"), or the "
-                  "cut-out the H2H card aligned (\"aligned\"). A defect with "
-                  "no match has no such image, and that cell is left empty - "
-                  "which is the point: it is one of the answers."),
+            name="pair_stream", type="image_key", direction="in",
+            default="paired", label="Right picture",
+            help=("Drag the image to show on the right into this port - what "
+                  "the Pair card brought over from the second lot, or the "
+                  "cut-out the H2H card aligned. A defect with no match has "
+                  "no such image, and that cell is left empty - which is the "
+                  "point: it is one of the answers."),
         ),
         ParamSpec(
             name="columns", type="feature_keys",
@@ -1622,7 +1643,11 @@ class OutputCharStep(_OutputStep):
                                .get("stream") or "")
                 pair = {}
                 for side, key in (("main", main_key), ("pair", pair_key)):
-                    arr = (pix.get(key) if key
+                    # 照線拿（F123 期 3）—— 線接的是哪一張卡的哪一顆埠，就是
+                    # 那一張卡當時吐的那一份；左邊沒接＝這一顆跑的起點。
+                    arr = (image_through_line(
+                               bctx.recipe, ctx, item, bctx.node_id,
+                               "%s_stream" % side, bctx.kind) if key
                            else (overlay.pick_base(pix)[1] if pix else None))
                     if arr is None:
                         # 配不到的那一顆沒有第二張圖 —— 那一格留白，
@@ -2043,7 +2068,8 @@ class OutputUniformityStep(_OutputStep):
                 r = bctx.rerun(item, sources={k: getattr(v, "items", v)
                                               for k, v in sources.items()})
                 ctx = getattr(r, "context", None)
-                notes = (getattr(ctx, "meta", None) or {}).get("glv_hist") or []
+                notes = _upstream_notes(
+                    bctx, (getattr(ctx, "meta", None) or {}).get("glv_hist"))
                 series = export_unif.chart_series(
                     notes, metric=str(p["metric"]).strip())
             except Exception:  # 鐵則 7 的跨顆版

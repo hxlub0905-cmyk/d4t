@@ -382,6 +382,9 @@ class BatchContext:
     #: 這張 Output 卡的上游有沒有 Decision（F123 期 2，`data_lines.rows_for_output`）。
     #: 沒有 = 沒有類別：``rows`` 的 score／bin 是空的，:meth:`decision` 回 None。
     decided: bool = True
+    #: 現在在跑的是哪一張卡（F123 期 3）—— 照它的入線拿圖要知道自己是誰
+    #: （`engine.image_through_line`）。整批那一份是空的。
+    node_id: str = ""
 
     def decision(self) -> Any:
         """這張卡看得到的判定（上游沒有 Decision 就是 ``None``）。"""

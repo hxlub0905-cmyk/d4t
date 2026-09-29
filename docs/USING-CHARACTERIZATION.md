@@ -102,17 +102,19 @@ Pair source ──paired────┘
 
 ### 3.1 Output 段**不用接線**（副標寫 `(not connected)` 是正常的）
 
-Output 段每一張卡都沒有輸入埠 —— 它們是終點，不吐流也不吐特徵。畫布上它們
-待在自己的虛線區塊裡（`OUTPUT` / 「once per lot」）。**在 route 上就會跑**，
-整批跑完之後各跑一次。
+Output 段的卡是終點（不吐流、不吐數字），**寫的是接進來那幾條線上游的東西**
+（F123）。整批跑完之後各跑一次（卡片底下那條「once per lot」）。
 
 由此來的三件事：
 
-* **不要拉線進去。** 那條線會落在一個不存在的埠上 —— 畫布會說謊。
-* 它要看哪一條影像流，是**打字**填的（`Left picture` / `Right picture`）。
-  拉線的那種欄位（`image_key`）在設定區是唯讀的，而這張卡不上畫布接線，
-  所以這兩格刻意是自由文字。慣用的名字：`single`（main 的原圖）、
-  `paired`（EBI 帶過來那一張）、`aligned`（H2H 對齊後裁出來的那一塊）。
+* **結果線要接**：Decision 右邊的 `results` 拉進 `Write comparison` 左下那顆
+  方埠 —— 沒接的 Output 卡是紅的，而且不跑（它沒有東西可寫）。
+* **左右兩張圖是兩顆影像埠**（`Left picture` / `Right picture`，F123 期 3）：
+  從**你要的那一張卡的那一顆埠**拉線進來。拿到的是那一張卡當時吐的那一份 ——
+  接 Input 的 `single` 就是原圖，不會變成後面某張 Enhance 卡改過的那一份。
+  慣用的接法：左邊接 Input 的 `single`（或不接＝這一顆跑的起點）、右邊接
+  Pair 卡的 `paired`（EBI 帶過來那一張）或 H2H 卡的 `aligned`（對齊後裁出來
+  的那一塊）。
 * **跑不寫檔**（`Run trial` 與 `Run all` 都不寫；2026-09-09 起寫是 Results
   視窗的 **`Write outputs`**）—— 調參數是一個迴圈，每拖一下滑桿就覆寫一次
   KLARF 是不可逆的災難，而寫之前你會想先看一眼數字。要寫出東西請跑完之後按
@@ -206,8 +208,8 @@ die **全部併成一組**（整整一行 die），而它：
 |---|---|
 | **Write to** | 輸出資料夾（會產 `report.html` / `defects.csv` / `recipe.json` / `images/`）。空著＝資料旁邊的 `d4t_comparison`。⚠ 跟 `Write report` 指到同一個資料夾的話檔名會撞（健檢會擋：`output-collision`）|
 | **At most this many rows with pictures** | 預設 200。超過會**講出來**並建議改用 `Write report`，但版面不會自動換 |
-| **Left picture** | 留空 = 自動挑（rsem 那條路就是 `single`）。要看整片 FOV 就留空或填 `single`；要「兩張圖同一塊區域」填 `aligned` |
-| **Right picture** | `paired`（EBI 帶過來那一張）|
+| **Left picture**（埠）| 不接 = 這一顆跑的起點（rsem 那條路就是 `single`）。要看整片 FOV 就接 Input 的 `single`；要「兩張圖同一塊區域」接 H2H 卡的 `aligned` |
+| **Right picture**（埠）| 接 Pair 卡的 `paired`（EBI 帶過來那一張）|
 | **Numbers to show** | 預設已含兩個擋板 —— **`ncc_score` 與 `align_peak_ratio`**。再加上你 carry 的分數欄與 `pair_die_rank` / `pair_die_total` |
 | **Mark where the defect is** | 開著：左圖上畫 **紅框（對到哪）＋ 綠十字（瞄準哪）** |
 
