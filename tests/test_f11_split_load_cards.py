@@ -155,7 +155,9 @@ def test_a_recipe_whose_only_route_is_single_image_is_migrated_in_place():
                   "bins": {"below": 0, "above": 1}},
     }
     r = Recipe.from_json_dict(d)
-    assert r.routes["rsem"] == ["load"]
+    # 第 6 版那一道會替舊分數補一張 Decision 卡（F123）—— 這一條問的是 Input 卡。
+    assert [n for n in r.routes["rsem"]
+            if r.nodes[n].step != "decision"] == ["load"]
     assert r.nodes["load"].step == "load_patch"
     assert r.nodes["load"].params == {"channel_map": "1:test"}
 

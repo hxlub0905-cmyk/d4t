@@ -164,5 +164,10 @@ def test_feature_owners_is_a_projection_of_bound_specs(lot):
     model = RecipeModel.from_recipe(recipe, kind="ebi_patch")
 
     owners = model.feature_owners()
-    want = {b.spec.name: b.node_id for b in bound_specs(recipe, "ebi_patch")}
+    # 判定寫的那幾個（`score`、`decide_unanswered`、let）在 `bound_specs` 裡沒有
+    # 節點；F123 期 1 起它們屬於畫布上那張 Decision 卡。
+    decision = model.decision_node()
+    assert decision, "前提：舊分數會補一張 Decision 卡（第 6 版遷移）"
+    want = {b.spec.name: (b.node_id or decision)
+            for b in bound_specs(recipe, "ebi_patch")}
     assert owners == want

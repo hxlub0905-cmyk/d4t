@@ -55,7 +55,9 @@ def _doc(route, glv_roi="epi", version=1, edges=None, nodes=None):
             "nodes": {n: base[n] for n in route},
             "edges": list(edges if edges is not None
                           else [["load", "test", "glv", "source"]]),
-            "score": {"expr": "1", "threshold": 0.0,
+            # 空的分數＝沒有判定：第 6 版那一道（補 Decision 卡，F123）因此不動
+            # 它 —— 這一份問的是區域線那一道，「遷移前後」只該差那條線。
+            "score": {"expr": "", "threshold": 0.0,
                       "bins": {"below": 0, "above": 1}}}
 
 
@@ -196,7 +198,7 @@ def _looping_doc(version=1):
         },
         "edges": [["load", "test", "mask", "source"],
                   ["mask", "mask", "prof", "source"]],
-        "score": {"expr": "1", "threshold": 0.0,
+        "score": {"expr": "", "threshold": 0.0,          # 同 `_doc`
                   "bins": {"below": 0, "above": 1}}}
 
 

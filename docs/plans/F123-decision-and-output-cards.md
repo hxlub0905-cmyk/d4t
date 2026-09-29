@@ -1,6 +1,6 @@
 # F123 — Decision 與 Output 變成真的卡（做法 B）
 
-狀態：**進行中（2026-09-29）—— 期 1（Decision 變成一張卡）：core 與 model 做完、畫布那一半在做；期 2～4 未開始。**
+狀態：**進行中（2026-09-29）—— 期 1（Decision 變成一張卡）做完；期 2～4 未開始。**
 使用者定調：「我想直接做 B」；三個問題的答案見 §1。
 
 F122 期 5 的續集。那一期原本要把 Output 排在固定的一欄、判定旁邊加一行「results →」
@@ -57,3 +57,11 @@ Input ━image━▶ … ━image━▶ GLV ═numbers═▶ Decision ═results
 * 規模尺：`recipe.py` 650 → 653、遷移道數 23 → 24（簽了）。
 * 名詞表那一格改成「Decision」（它現在是卡片名；小寫的 `"decision"` 撞到卡片的 key，
   被「UI 按卡片名字分支」那把尺誤算）。
+* 畫布：虛線框（`_ZoneItem`）、入口小卡（`_EntryItem`）、`__score__` 偽卡拿掉。樹掛在
+  Decision 卡底下（`tree_scene.build_tree` 收 ``anchor``；沒有那張卡的手寫 recipe
+  樹站在卡片右邊）；拖卡樹跟著走（`PipelineCanvas.follow_decision`，就地搬）；雙擊
+  收合；單擊右邊是判定面板；刪卡先問（`canvas_edges._drop_the_tree`）。
+* 卡與內容同生同滅只在 model：`add_step` / `remove` / `use_decide`；開檔時沒有判定
+  就不留那張卡（`RecipeModel._drop_decision_cards`）。
+* 判定的 lint 掛到那張卡（`_node_problems`），另抄的那一份拿掉。
+* 出貨 recipe 存成第 6 版；`doctor.RECIPE_VERSION` 5 → 6。

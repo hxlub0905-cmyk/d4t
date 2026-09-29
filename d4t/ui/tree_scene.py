@@ -1,8 +1,10 @@
 # d4t Studio 判定區 — authored 2026-08-24 (F24 ②).
 """判定樹住在畫布上（F24 定稿：「分揀槽也要在畫布上呈現，而且是多步驟判定」）。
 
-這一份管**唯讀渲染**：判定區（淡紫底虛線框）、入口小卡、菱形（一步一問）、
-托盤（葉子）、分支流量。編輯互動是 F24 ③ 的事。
+這一份管**唯讀渲染**：菱形（一步一問）、托盤（葉子）、分支流量。編輯互動是
+F24 ③ 的事。**樹掛在畫布上那張 Decision 卡底下**（F123 期 1）—— 以前它自己有一個
+淡紫底虛線框和一張入口小卡，而那讓判定在畫布上是跟卡片不同的另一種東西
+（使用者：「理論上 input = output」）。
 
 三個不變量（`docs/history/plans/F24-decision-tree.md` §4、§10）：
 
@@ -13,10 +15,10 @@
   引擎的 `meta["decide"]["path"]` 刻意不進結果 JSON（動 schema 動到黃金值），
   而 F24 ① 已證明「拿 features 重走 = 引擎走的那一條」（path replay 測試）。
 * **未試跑：數字誠實地不在**（F18 的老規矩，不顯示 0）——
-  `counts=None` 時整個判定區一個數字都不畫。
+  `counts=None` 時整棵樹一個數字都不畫。
 
 跟 `canvas.py` 的分工：`PipelineCanvas.set_decision` 收一份 **info dict**
-（`decision_info` 組的），把這裡的圖元擺進同一個 scene —— 判定區因此跟著
+（`decision_info` 組的），把這裡的圖元擺進同一個 scene —— 樹因此跟著
 畫布一起平移縮放，它是畫布的一部分，不是側欄。
 """
 from __future__ import annotations
@@ -24,7 +26,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
 from ..core.pipeline.expression import parse_expression
@@ -38,7 +40,7 @@ from .theme import TOKENS
 
 __all__ = [
     "decision_info", "display_tree", "layout_cells", "flow_counts",
-    "leaf_stats", "leaf_hex", "build_zone", "build_ghosts", "path_text",
+    "leaf_stats", "leaf_hex", "build_tree", "build_ghosts", "path_text",
     "parse_simple_condition", "format_condition", "rows_reaching",
     "count_yes", "suggest_condition", "OPS",
 ]
@@ -59,15 +61,11 @@ CELL_W, CELL_H = 196.0, 92.0
 
 
 # --------------------------------------------------------------------------- #
-# 圖元（**裡面的**全部唯讀：不可拖、不可刪 —— 樹是一個結構，不是幾張散卡。
-# 2026-08-25 起**整個判定區**拖得動也拿得掉，把手是外框 `_ZoneItem`：
-# 動的是整區的位置，樹的形狀一個位元都沒變。）
+# 圖元（全部唯讀：不可拖、不可刪 —— 樹是一個結構，不是幾張散卡。要動整棵樹
+# 就拖那張 Decision 卡，樹跟著它走；拿掉整棵樹就是刪那張卡。）
 # --------------------------------------------------------------------------- #
-_ENTRY_W, _ENTRY_H = 204.0, 56.0
 _DIA_W, _DIA_H = 156.0, 64.0
 _TRAY_W, _TRAY_H = 168.0, 48.0
-_PAD = 26.0                       # 判定區框到內容的邊距
-_ENTRY_GAP = 30.0                 # 入口卡到根節點的垂直距離
 
 
 def _adc_color() -> QColor:
@@ -80,283 +78,6 @@ def _elide(p: QPainter, rect: QRectF, text: str, align=Qt.AlignLeft) -> None:
     if fm.horizontalAdvance(s) > rect.width():
         s = fm.elidedText(s, Qt.ElideRight, int(rect.width()))
     p.drawText(rect, Qt.AlignVCenter | align, s)
-
-
-#: ✕ 那顆鈕的大小與它離右上角的距離。
-_CLOSE_R = 8.0
-_CLOSE_INSET = 14.0
-
-
-class _ZoneItem(QGraphicsItem):
-    """判定區的底：淡紫底、虛線框、DECISION 標題、左緣的 ``numbers →`` 提示。
-
-    量測卡到判定區之間**刻意沒有存的線**（引擎裡數字是一張全域的表，
-    畫一條存起來的線就是說謊）—— 只有這一句淡淡的提示。
-
-    **它同時是整個判定區的把手**（2026-08-25，使用者：「ADC 也要能在原畫布上
-    拖曳 移除」）。拖的是**整區**，不是裡面某一個菱形 —— 樹是一個結構，
-    把某一步單獨拖走只會讓畫面說一句樹上沒有的話。所以：
-
-    * 在框上（不是在卡片上）按住拖 → 整區跟著走；
-    * 右上角一顆 ✕ → 請畫布問「要拿掉整個判定嗎」。
-
-    位置**不寫進 recipe**，跟卡片的位置同一個待遇（見 `canvas` 模組說明）——
-    所以拖它不會讓檔案變髒，`Tidy up` 也把它一起排回去。
-    """
-
-    def __init__(self, rect: QRectF, canvas: Any = None):
-        super().__init__()
-        self._rect = QRectF(rect)
-        self._canvas = canvas
-        self._drag_from: Optional[QPointF] = None
-        self._hover_close = False
-        self.setZValue(-3.0)          # 墊在所有東西（含連線 -1）底下
-        if canvas is not None:
-            self.setAcceptHoverEvents(True)
-            self.setCursor(Qt.OpenHandCursor)
-
-    # ---- ✕ 的位置（畫與打到都用這一個，不要算兩次）----------------------
-    def _close_centre(self) -> QPointF:
-        return QPointF(self._rect.right() - _CLOSE_INSET,
-                       self._rect.top() + _CLOSE_INSET)
-
-    def _on_close(self, pos: QPointF) -> bool:
-        d = pos - self._close_centre()
-        return (d.x() * d.x() + d.y() * d.y()) <= (_CLOSE_R + 3.0) ** 2
-
-    def boundingRect(self) -> QRectF:
-        return self._rect.adjusted(-84.0, -24.0, 4.0, 4.0)
-
-    # ---- 互動 -------------------------------------------------------------
-    def hoverMoveEvent(self, e) -> None:  # Qt
-        on = self._on_close(e.pos())
-        if on != self._hover_close:
-            self._hover_close = on
-            self.setCursor(Qt.ArrowCursor if on else Qt.OpenHandCursor)
-            self.update()
-        super().hoverMoveEvent(e)
-
-    def hoverLeaveEvent(self, e) -> None:  # Qt
-        if self._hover_close:
-            self._hover_close = False
-            self.update()
-        super().hoverLeaveEvent(e)
-
-    def mousePressEvent(self, e) -> None:  # Qt
-        if self._canvas is None or e.button() != Qt.LeftButton:
-            super().mousePressEvent(e)
-            return
-        if self._on_close(e.pos()):
-            e.accept()
-            return                              # 真的拿掉在 release（同按鈕慣例）
-        self._drag_from = e.scenePos()
-        self.setCursor(Qt.ClosedHandCursor)
-        e.accept()
-
-    def mouseMoveEvent(self, e) -> None:  # Qt
-        if self._drag_from is None:
-            super().mouseMoveEvent(e)
-            return
-        delta = e.scenePos() - self._drag_from
-        self._drag_from = e.scenePos()
-        # **就地移動整區**（不重建）：重建會把滑鼠從把手上搶走，
-        # 而那正是 F26 在拖門檻時學到的同一條。
-        self._canvas.move_decision_by(delta.x(), delta.y())
-        e.accept()
-
-    def mouseReleaseEvent(self, e) -> None:  # Qt
-        was_dragging = self._drag_from is not None
-        self._drag_from = None
-        self.setCursor(Qt.OpenHandCursor)
-        if (self._canvas is not None and e.button() == Qt.LeftButton
-                and not was_dragging and self._on_close(e.pos())):
-            self._canvas.decision_remove_requested.emit()
-            e.accept()
-            return
-        super().mouseReleaseEvent(e)
-
-    def paint(self, p: QPainter, _opt, _widget=None) -> None:
-        p.setRenderHint(QPainter.Antialiasing, True)
-        col = _adc_color()
-        pen = QPen(col, 1.2, Qt.DashLine)
-        pen.setDashPattern([5.0, 4.0])
-        p.setPen(pen)
-        p.setBrush(QColor(TOKENS["seg_adc_bg"]))
-        p.drawRoundedRect(self._rect, 10, 10)
-        f = p.font()
-        f.setBold(True)
-        f.setPixelSize(theme.font_px("font_small"))
-        f.setLetterSpacing(f.SpacingType.AbsoluteSpacing, 1.2)
-        p.setFont(f)
-        p.setPen(col)
-        p.drawText(QRectF(self._rect.left() + 12, self._rect.top() + 4,
-                          self._rect.width() - 24, 16),
-                   Qt.AlignLeft | Qt.AlignVCenter, "DECISION")
-        # 左緣的提示：數字從量測卡「流」過來，但那不是一條存的線。
-        f2 = p.font()
-        f2.setBold(False)
-        f2.setLetterSpacing(f2.SpacingType.AbsoluteSpacing, 0.0)
-        p.setFont(f2)
-        faded = QColor(TOKENS["text_secondary"])
-        faded.setAlpha(140)
-        p.setPen(faded)
-        p.drawText(QRectF(self._rect.left() - 80, self._rect.top() + 20,
-                          72, 16), Qt.AlignRight | Qt.AlignVCenter,
-                   "numbers →")
-
-        # 右上角那顆 ✕：拿掉整個判定（2026-08-25）。
-        # **只有畫布接得住的時候才畫** —— 畫一顆按不動的鈕比沒有那顆鈕更糟。
-        if self._canvas is not None:
-            c = self._close_centre()
-            if self._hover_close:
-                p.setPen(Qt.NoPen)
-                p.setBrush(QColor(TOKENS["danger_bg"]))
-                p.drawEllipse(c, _CLOSE_R, _CLOSE_R)
-            pen = QPen(QColor(TOKENS["danger_text"] if self._hover_close
-                              else TOKENS["text_secondary"]), 1.4)
-            pen.setCapStyle(Qt.RoundCap)
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            r = _CLOSE_R * 0.45
-            p.drawLine(QPointF(c.x() - r, c.y() - r), QPointF(c.x() + r, c.y() + r))
-            p.drawLine(QPointF(c.x() - r, c.y() + r), QPointF(c.x() + r, c.y() - r))
-
-
-class _EntryItem(QGraphicsItem):
-    """入口小卡：funnel icon ＋ Decision ＋ ƒ working numbers ＋「N in」。
-
-    **永遠恰好一個、不能刪** —— 所以它不可選取也不可拖（要動的是樹，
-    不是這張卡的位置）。點它 = 跳到判定的編輯（canvas 發 `decision_clicked`）。
-    """
-
-    def __init__(self, canvas: Any, lets: List[str], n_in: Optional[int],
-                 collapsed: bool = False, problem: str = "",
-                 problem_level: str = "error"):
-        super().__init__()
-        self._canvas = canvas
-        self._lets = list(lets)
-        self._n_in = n_in
-        self._collapsed = bool(collapsed)
-        self._problem = str(problem or "")
-        self._problem_level = str(problem_level or "error")
-        tip = ("The decision tree sorts every defect into a class."
-               "\nDouble-click to %s the tree."
-               % ("show" if collapsed else "collapse"))
-        if lets:
-            tip += "\n\nWorking numbers:\n" + "\n".join(self._lets)
-        if self._problem:
-            # 標記說「有問題」，滑鼠停上去說「是什麼問題」—— 同卡片
-            # （`_NodeItem.__init__`）：一個紅點而不知道為什麼比沒有更焦慮。
-            tip += "\n\n⚠ %s" % self._problem
-        self.setToolTip(tip)
-
-    def boundingRect(self) -> QRectF:
-        return QRectF(-2, -2, _ENTRY_W + 4, _ENTRY_H + 4)
-
-    def problem(self) -> str:
-        """判定段的 lint 訊息（測試與外部檢查用）；沒有就是空字串。"""
-        return self._problem
-
-    def _paint_badge(self, p: QPainter, body: QRectF) -> None:
-        """右上角一個小圓標 —— **跟卡片上那顆逐像素一樣**。
-
-        `_NodeItem._paint_badge` 是同一個東西的另一份，而兩份會漂。抄過來
-        而不是共用一支，是因為兩邊的 body 幾何與 import 方向不同
-        （`tree_scene` 不 import `canvas` 的私有方法）—— 所以這裡留一張
-        便利貼：**動一邊就要動另一邊**，`test_ui_decision_badge` 逐項比。
-        """
-        from .canvas import badge_paints          # 延後：canvas import 這裡
-
-        if not self._problem or not badge_paints(self._problem_level):
-            return
-        col = QColor(TOKENS["danger_text"] if self._problem_level == "error"
-                     else TOKENS["warning"])
-        r = 7.0
-        centre = QPointF(body.right() - r - 3.0, body.top() + r + 3.0)
-        p.setPen(QPen(QColor(TOKENS["bg_surface"]), 1.5))
-        p.setBrush(QBrush(col))
-        p.drawEllipse(centre, r, r)
-        p.setPen(QPen(QColor(TOKENS["focus_ring_inverse"]), 1.0))
-        f = p.font()
-        f.setBold(True)
-        f.setPixelSize(theme.font_px("font_tiny"))
-        p.setFont(f)
-        p.drawText(QRectF(centre.x() - r, centre.y() - r, 2 * r, 2 * r),
-                   Qt.AlignCenter, "!")
-
-    def paint(self, p: QPainter, _opt, _widget=None) -> None:
-        p.setRenderHint(QPainter.Antialiasing, True)
-        col = _adc_color()
-        body = QRectF(0, 0, _ENTRY_W, _ENTRY_H)
-        p.setPen(QPen(col, 1.4))
-        p.setBrush(QColor(TOKENS["bg_surface"]))
-        # 判定的入口卡跟畫布上的節點卡是同一種東西 —— 圓角讀同一個 token（F80）
-        r = theme.radius("radius_md")
-        p.drawRoundedRect(body, r, r)
-        # funnel（分揀槽）—— 手畫的小漏斗，跟 mockup 同一個記號。
-        tile = QRectF(8, (_ENTRY_H - 32) / 2.0, 32, 32)
-        wash = QColor(col)
-        wash.setAlpha(42)
-        p.setPen(QPen(col, 1.0))
-        p.setBrush(wash)
-        p.drawRoundedRect(tile, r, r)
-        cx, cy = tile.center().x(), tile.center().y()
-        fun = QPainterPath(QPointF(cx - 8, cy - 7))
-        fun.lineTo(QPointF(cx + 8, cy - 7))
-        fun.lineTo(QPointF(cx + 2.5, cy + 1))
-        fun.lineTo(QPointF(cx + 2.5, cy + 8))
-        fun.lineTo(QPointF(cx - 2.5, cy + 6))
-        fun.lineTo(QPointF(cx - 2.5, cy + 1))
-        fun.closeSubpath()
-        p.setBrush(col)
-        p.setPen(Qt.NoPen)
-        p.drawPath(fun)
-
-        self._paint_badge(p, body)
-
-        text_x = tile.right() + 9
-        p.setPen(QColor(TOKENS["text_primary"]))
-        f = p.font()
-        f.setBold(True)
-        p.setFont(f)
-        _elide(p, QRectF(text_x, 9, _ENTRY_W - text_x - 8, 16), "Decision")
-        f.setBold(False)
-        f.setPixelSize(theme.font_px("font_small"))
-        p.setFont(f)
-        p.setPen(QColor(TOKENS["text_secondary"]))
-        if self._collapsed:
-            sub = "tree hidden — double-click to show"
-        elif self._lets:
-            sub = "ƒ %s" % ", ".join(x.split("=", 1)[0].strip()
-                                     for x in self._lets)
-        else:
-            sub = "sorts by the tree below"
-        _elide(p, QRectF(text_x, 30, _ENTRY_W - text_x - 8, 14), sub)
-        # 「N in」只在試跑過之後（F18：不顯示 0）。
-        if self._n_in is not None:
-            chip = "%d in" % int(self._n_in)
-            fm = p.fontMetrics()
-            w = fm.horizontalAdvance(chip) + 12
-            r = QRectF(_ENTRY_W - w - 6, 6, w, 16)
-            p.setPen(Qt.NoPen)
-            badge = QColor(col)
-            badge.setAlpha(36)
-            p.setBrush(badge)
-            p.drawRoundedRect(r, 8, 8)
-            p.setPen(_adc_color())
-            p.drawText(r, Qt.AlignCenter, chip)
-
-    def mousePressEvent(self, e) -> None:  # Qt hook
-        if e.button() == Qt.LeftButton:
-            self._canvas.decision_clicked.emit()
-            e.accept()
-            return
-        super().mousePressEvent(e)
-
-    def mouseDoubleClickEvent(self, e) -> None:  # Qt hook
-        # 雙擊＝收合／展開整棵樹（F24 §4：嫌佔位的出口）。
-        self._canvas.toggle_tree_collapsed()
-        e.accept()
 
 
 class _DiamondItem(QGraphicsItem):
@@ -623,10 +344,9 @@ class _BranchItem(QGraphicsItem):
 # 組裝
 # --------------------------------------------------------------------------- #
 def _cell_pos(cell: Dict[str, Any], origin: QPointF) -> QPointF:
-    """一格的左上角（入口卡佔掉第一列，樹從 origin 下方開始）。"""
-    x = origin.x() + cell["col"] * CELL_W
-    y = origin.y() + _ENTRY_H + _ENTRY_GAP + cell["row"] * CELL_H
-    return QPointF(x, y)
+    """一格的左上角（根在 ``origin``）。"""
+    return QPointF(origin.x() + cell["col"] * CELL_W,
+                   origin.y() + cell["row"] * CELL_H)
 
 
 def _nobody_makes(when: str, owners: Any) -> List[str]:
@@ -645,33 +365,26 @@ def _nobody_makes(when: str, owners: Any) -> List[str]:
     return sorted(n for n in names if n not in owners)
 
 
-def build_zone(scene: Any, canvas: Any,
+def build_tree(scene: Any, canvas: Any,
                info: Dict[str, Any], origin: QPointF,
-               collapsed: bool = False,
+               anchor: Optional[QPointF] = None,
                selected_path: Optional[str] = None,
                highlight_path: Optional[str] = None) -> List[QGraphicsItem]:
-    """把判定區的圖元擺進 scene，回傳擺了哪些（畫布重建時要清）。
+    """把判定樹的圖元擺進 scene，回傳擺了哪些（畫布重建時要清）。
 
-    ``collapsed=True``：整棵樹收成入口小卡一張（F24 §4，雙擊入口卡切換）。
+    根的左上角在 ``origin``；``anchor`` 是 Decision 卡的下緣中點 —— 一條線從
+    那裡接到根（``None`` = 沒有那張卡，樹自己站著）。收合是畫布的事：收著就
+    不叫這一支。
     ``selected_path``：右欄正在編的那一步，畫布上亮起來。
     ``highlight_path``：現在預覽那一顆走過的路（``"yn…"``）—— 沿路的分支
     畫粗（F24 §8）。``None`` = 沒有在看某一顆。
     """
     items: List[QGraphicsItem] = []
-    cells = [] if collapsed else list(info.get("cells") or [])
+    cells = list(info.get("cells") or [])
     counts = info.get("counts")           # None = 還沒試跑 → 不畫任何數字
     stats = dict(info.get("leaf_stats") or {})
     away = dict(info.get("diverted") or {})
     ub = info.get("unanswered_bin")
-
-    entry = _EntryItem(canvas, list(info.get("lets") or []),
-                       None if counts is None else int(counts.get("", 0)),
-                       collapsed=collapsed,
-                       problem=str(info.get("problem") or ""),
-                       problem_level=str(info.get("problem_level") or "error"))
-    entry.setPos(origin)
-    scene.addItem(entry)
-    items.append(entry)
 
     by_path: Dict[str, Dict[str, Any]] = {}
     made: Dict[str, QGraphicsItem] = {}
@@ -700,15 +413,12 @@ def build_zone(scene: Any, canvas: Any,
         h = _DIA_H if cell["kind"] == "step" else _TRAY_H
         return it.pos() + QPointF(w / 2.0, h / 2.0)
 
-    # 入口卡 → 根。根是菱形或（空樹＝只有 otherwise）一個托盤。
-    if "" in made:
+    # Decision 卡 → 根。根是菱形或（空樹＝只有 otherwise）一個托盤。
+    if "" in made and anchor is not None:
         root_cell = by_path[""]
         w = _DIA_W if root_cell["kind"] == "step" else _TRAY_W
-        a = origin + QPointF(_ENTRY_W / 2.0, _ENTRY_H)
         b = made[""].pos() + QPointF(w / 2.0, 0.0)
-        # 位置故意讓兩點同一條垂直線（入口在 col0 上方）——
-        # 寬度不同時稍斜一點也讀得懂。
-        items.append(_BranchItem(a, b, "",
+        items.append(_BranchItem(QPointF(anchor), b, "",
                                  None if counts is None
                                  else counts.get("", 0),
                                  hot=highlight_path is not None))
@@ -738,14 +448,6 @@ def build_zone(scene: Any, canvas: Any,
             branch = _BranchItem(a, b, word, n, hot=hot)
             scene.addItem(branch)
             items.append(branch)
-
-    # 底框（最後算，才知道內容多大）。
-    rect = QRectF()
-    for it in items:
-        rect = rect.united(it.sceneBoundingRect())
-    zone = _ZoneItem(rect.adjusted(-_PAD, -_PAD, _PAD, _PAD), canvas)
-    scene.addItem(zone)
-    items.append(zone)
     return items
 
 
@@ -802,8 +504,8 @@ def build_ghosts(scene: Any, canvas: Any, diamond: "_DiamondItem",
     """這個菱形的問題用到哪些數字 → 各畫一條幽靈線回它的來源卡。
 
     來源從**宣告**推（`RecipeModel.feature_owners`）—— 所以它不說謊：
-    卡片宣告會寫出那個數字，線才畫得出來。`let` 的中間值（owner 是空字串）
-    指回入口卡。回 ``(幽靈線圖元, 被點亮的卡片)`` —— 清場的人要各清各的。
+    卡片宣告會寫出那個數字，線才畫得出來。`let` 的中間值屬於 Decision 卡。
+    回 ``(幽靈線圖元, 被點亮的卡片)`` —— 清場的人要各清各的。
     """
     try:
         variables = sorted(parse_expression(str(diamond.when)).variables)
@@ -828,33 +530,22 @@ def ghost_wires(scene: Any, canvas: Any, target: QPointF,
     一份會讓畫布跟引擎說出不同的話」。
 
     來源從**宣告**推（`RecipeModel.feature_owners`）—— 所以它不說謊：
-    卡片宣告會寫出那個數字，線才畫得出來。`let` 的中間值（owner 是空字串）
-    指回判定的入口卡。回 ``(幽靈線圖元, 被點亮的卡片)``。
+    卡片宣告會寫出那個數字，線才畫得出來。`let` 的中間值屬於 Decision 卡
+    （F123 期 1；以前指回判定的入口小卡）。回 ``(幽靈線圖元, 被點亮的卡片)``。
     """
     from .canvas import NODE_W
 
     items: List[QGraphicsItem] = []
     cards: List[Any] = []
-    entry = next((it for it in canvas.decision_items()
-                  if isinstance(it, _EntryItem)), None)
     for var in variables:
-        owner = feat_owner.get(var)
-        if owner is None:
+        src_item = canvas.node_item(feat_owner.get(var) or "")
+        if src_item is None:             # 沒有人產出（或手寫的沒有 Decision 卡）
             continue
-        if owner == "":
-            if entry is None:
-                continue
-            src_item, label = entry, "%s · from Decision" % var
-            a = src_item.pos() + QPointF(_ENTRY_W, _ENTRY_H / 2.0)
-        else:
-            src_item = canvas.node_item(owner)
-            if src_item is None:
-                continue
-            card_label = str(src_item.info.get("label", owner))
-            label = "%s · from %s" % (var, card_label)
-            a = src_item.pos() + QPointF(NODE_W, src_item.height() / 2.0)
-            src_item.set_hovered(True)
-            cards.append(src_item)
+        card_label = str(src_item.info.get("label", src_item.node_id))
+        label = "%s · from %s" % (var, card_label)
+        a = src_item.pos() + QPointF(NODE_W, src_item.height() / 2.0)
+        src_item.set_hovered(True)
+        cards.append(src_item)
         wire = _GhostWireItem(a, target, label)
         scene.addItem(wire)
         items.append(wire)

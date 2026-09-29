@@ -1315,6 +1315,7 @@ class _NodeItem(QGraphicsItem):
             return self._snapped(value)
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.canvas.refresh_edges()
+            self.canvas.follow_decision(self)
         return super().itemChange(change, value)
 
     def _snapped(self, pos: QPointF) -> QPointF:
@@ -1718,12 +1719,6 @@ class PipelineCanvas(QGraphicsView):
     #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
     #: （它會 zoom，不需要常駐大面積），要看全貌就彈出去。
     popout_requested = Signal()
-    #: 點了判定區的入口小卡（F24 ②）——「跳到判定的編輯」。
-    #: 入口卡永遠恰好一個、不能刪，所以這裡沒有 id 要帶。
-    decision_clicked = Signal()
-    #: 使用者按了判定區右上角那顆 ✕（2026-08-25）。畫布只**請**，
-    #: 要不要真的拿掉由 Studio 決定（底下掛著一整棵樹，要問過）。
-    decision_remove_requested = Signal()
     #: 點了畫布上的分流徽章（F25-B）—— 去編 route_by。
     prefilter_clicked = Signal()
     #: 點了判定樹的一個菱形／托盤（F24 ③）—— 帶的是**路徑**（"" = 根、
@@ -1914,6 +1909,7 @@ class PipelineCanvas(QGraphicsView):
         self._items, self._edges = {}, []
         self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._ghost_items, self._ghost_cards = [], []   # 同理：別留著殘骸
+        self._tree_items, self._tree_at = [], None       # 同理（`follow_decision`）
         self._scene.clear()
         self._order = [str(n.get("node_id", "")) for n in nodes]
         # ``edges`` 收兩種形狀：``(來源, 目的)`` 與 ``(來源, 目的, 來源埠)``。
@@ -2048,58 +2044,52 @@ class PipelineCanvas(QGraphicsView):
                 self._scene.removeItem(it)
             except Exception:  # clear() 先銷毀過就算了
                 swallowed("canvas._rebuild_decision")
-        self._tree_items = []
+        self._tree_items, self._tree_at = [], None
         info = getattr(self, "_decision_info", None)
-        if not info:
+        if not info or self.tree_collapsed():
             return
-        # 判定區放在所有卡片的右邊（mockup 定稿：畫布右側一塊淡紫區），
-        # 再加上使用者自己拖出來的位移（2026-08-25）。
-        #
-        # **位移是 session 狀態，不進 recipe** —— 跟卡片的位置一模一樣的待遇
-        # （見模組 docstring）。所以拖它不會讓檔案變髒，也不必進復原堆疊，
-        # 而 `tidy()` 會把它跟卡片一起排回去。
-        right = 0.0
-        top = 0.0
-        for item in self._items.values():
-            right = max(right, item.pos().x() + NODE_W)
-            top = min(top, item.pos().y())
-        off = getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0)
-        origin = QPointF(right + COL_GAP * 1.8 + off.x(), top + off.y())
-        self._tree_items = tree_scene.build_zone(
-            self._scene, self, info, origin,
-            collapsed=bool(getattr(self, "_tree_collapsed", TREE_COLLAPSED_DEFAULT)),
+        # **樹掛在 Decision 卡底下**（F123 期 1）：根對齊那張卡、排在所有卡片
+        # 的下面（往右是 yes、往下是 no，所以不會壓到任何一張卡），一條線從卡
+        # 的下緣接到根。沒有那張卡（手寫的 recipe、只餵 info 的測試）就站在
+        # 所有卡片的右邊，跟以前一樣。位置不進 recipe（見模組說明）。
+        card = self._items.get(str(info.get("node") or ""))
+        anchor = None
+        if card is not None:
+            bottom = max(it.pos().y() + it.height() for it in self._items.values())
+            origin = QPointF(card.pos().x() + (NODE_W - tree_scene._DIA_W) / 2.0,
+                             bottom + ROW_GAP * 2.0)
+            anchor = card.pos() + QPointF(NODE_W / 2.0, card.height())
+            self._tree_at = QPointF(card.pos())
+        else:
+            right = max([it.pos().x() + NODE_W for it in self._items.values()]
+                        or [0.0])
+            top = min([it.pos().y() for it in self._items.values()] or [0.0])
+            origin = QPointF(right + COL_GAP * 1.8, top)
+        self._tree_items = tree_scene.build_tree(
+            self._scene, self, info, origin, anchor=anchor,
             selected_path=getattr(self, "_tree_selected", None),
             highlight_path=getattr(self, "_tree_highlight", None))
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(self._scene.sceneRect().united(rect))
 
     def decision_items(self) -> List[Any]:
-        """判定區現在的圖元（測試與外部檢查用）。"""
+        """判定樹現在的圖元（測試與外部檢查用；收著就是空的）。"""
         return list(getattr(self, "_tree_items", []) or [])
 
-    # ---- 拖整個判定區（2026-08-25）----------------------------------------
-    def move_decision_by(self, dx: float, dy: float) -> None:
-        """把整個判定區平移 ``(dx, dy)``。
+    def follow_decision(self, card: Any) -> None:
+        """Decision 卡動了，樹跟著它走（F123 期 1）。
 
-        **就地搬每一個圖元，不重建**：重建會把滑鼠從把手上搶走（拖到一半突然
-        失去控制比慢一點更難用 —— F26 在拖門檻時學到同一條）。累積的位移記在
-        `_tree_offset`，下一次真的重建時 `_rebuild_decision` 會把它加回去。
+        **就地搬，不重建** —— 拖曳的每一個 frame 都會走到這裡，而每 frame 銷毀
+        重建一批圖元就是 F50 那個殘影（見 :meth:`refresh_edges`）。
         """
-        off = getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0)
-        self._tree_offset = QPointF(off.x() + float(dx), off.y() + float(dy))
+        info = getattr(self, "_decision_info", None) or {}
+        at = getattr(self, "_tree_at", None)
+        if at is None or card.node_id != str(info.get("node") or ""):
+            return
+        d = card.pos() - at
+        self._tree_at = QPointF(card.pos())
         for it in getattr(self, "_tree_items", []) or []:
-            it.moveBy(float(dx), float(dy))
-        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
-        self._scene.setSceneRect(self._scene.sceneRect().united(rect))
-
-    def decision_offset(self) -> QPointF:
-        """使用者把判定區拖了多遠（測試用）。"""
-        return QPointF(getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0))
-
-    def reset_decision_offset(self) -> None:
-        """把判定區排回自動的位置（`tidy()` 會叫它）。"""
-        self._tree_offset = QPointF(0.0, 0.0)
-        self._rebuild_decision()
+            it.moveBy(d.x(), d.y())
 
     # ---- 分流徽章（F25-B）-------------------------------------------------
     def set_prefilter(self, info: Optional[Dict[str, Any]]) -> None:
@@ -2152,11 +2142,14 @@ class PipelineCanvas(QGraphicsView):
         return getattr(self, "_tree_selected", None)
 
     def toggle_tree_collapsed(self) -> None:
-        """雙擊入口卡＝收合／展開整棵樹（F24 §4）。
+        """雙擊 Decision 卡＝收合／展開整棵樹（F24 §4）。
 
         收合是**這一份畫布的檢視狀態**，不進 recipe —— 跟縮放平移同一類。
         """
-        self._tree_collapsed = not self.tree_collapsed()
+        self.set_tree_collapsed(not self.tree_collapsed())
+
+    def set_tree_collapsed(self, on: bool) -> None:
+        self._tree_collapsed = bool(on)
         self._rebuild_decision()
 
     def tree_collapsed(self) -> bool:
@@ -2653,9 +2646,7 @@ class PipelineCanvas(QGraphicsView):
             moves[nid] = (item.pos(),
                           QPointF(col * (NODE_W + COL_GAP), row * pitch))
             item.setPos(moves[nid][1])
-        # 判定區也是「拖得動的東西」，所以 Tidy up 也要把它排回去 ——
-        # 只排一半的整理，下一次還是得自己搬。
-        self._tree_offset = QPointF(0.0, 0.0)
+        # 樹掛在 Decision 卡底下，卡排回去了它也要（F123 期 1）。
         self._rebuild_decision()
         self.refresh_edges()
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)

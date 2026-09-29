@@ -100,6 +100,7 @@ from d4t.core.pipeline.recipe import (
     ScoreSpec, describe_migration, route_for, version_skew,
 )
 from d4t.core.pipeline.recipe_schema import legacy_decision
+from d4t.core.steps.decision import DecisionStep
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from . import autosave
@@ -168,23 +169,6 @@ from .workers import (
 __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
            "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
            "DEMO_DIR", "DEMO_DEFECTS", "DEMO_SEED", "generate_demo_lot"]
-
-#: 卡片庫「ADC」段固定顯示的 Decision 項目（F122 期 3 以前叫「Score / Bin」）。它不是 registry 裡的
-#: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
-#: 使用者要能在庫裡看到「影像 → 算法 → ADC 判定」三段都有東西。點它 = 去編輯分數。
-_SCORE_LIBRARY_KEY = "__score__"
-_SCORE_LIBRARY_ENTRY = {
-    "key": _SCORE_LIBRARY_KEY,
-    "label": "Decision",
-    "category": "adc",
-    "group": "adc",
-    "help": "Sort the defects into bins with a decision tree — questions about the numbers the cards measured. One per recipe; click to put it on the canvas.",
-    "requires_ref": False,
-    "params": [],
-    "reads": [],
-    "writes": [],
-    "features_out": ["score"],
-}
 
 #: 「載入範本」讀的檔案。
 #:
@@ -460,8 +444,7 @@ class StudioWindow(QMainWindow):
 
         # F7-1：卡片庫只列目前輸入型別用得到的卡（見 d4t/ui/scope.py）
         self.library.set_steps(
-            visible_steps([s.describe() for s in list_steps()])
-            + [_SCORE_LIBRARY_ENTRY])
+            visible_steps([s.describe() for s in list_steps()]))
         self._refresh_all()
         self.pipeline.fit_later()
         if self.model.node_order:
@@ -670,11 +653,8 @@ class StudioWindow(QMainWindow):
         view.move_requested.connect(self._on_move_requested)
         view.remove_requested.connect(self._on_remove_requested)
         view.score_clicked.connect(self.show_score_page)
-        # 判定區的入口小卡（F24 ②）：點了＝跳到判定的編輯（同 score 那條路）。
-        view.decision_clicked.connect(self.show_score_page)
         # 分流徽章（F25-B）：點了去編 route_by（它就在判定欄的最上面）。
         view.prefilter_clicked.connect(self.show_score_page)
-        view.decision_remove_requested.connect(self.remove_decision)
         # 判定樹的菱形／托盤（F24 ③）：右欄變成那一步／那一類的編輯面板。
         view.tree_step_clicked.connect(self._on_tree_step_clicked)
         view.tree_leaf_clicked.connect(self._on_tree_step_clicked)
@@ -1125,6 +1105,8 @@ class StudioWindow(QMainWindow):
         那張 Load 卡只說得出「load · test ref」。入口搬到卡片上之後，
         畫布也要跟著說得出來，否則搬家只搬了一半。
         """
+        if node.step == DecisionStep.key:
+            return [self._score_summary_text()]   # 它的設定就是那棵樹
         parts = self._node_summary_parts(
             node, shown=(list(reads) + list(writes) + list(regions_out)
                          + [d["stream"] for d in region_inputs]))
@@ -1254,9 +1236,17 @@ class StudioWindow(QMainWindow):
                 issues = self.model.validate(self.dataset)
             except Exception:  # 顯示用，壞了就沒標記
                 return out
+        from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
+
         rank = {"error": 0, "warning": 1, "info": 2}
+        decision = self.model.decision_node()
         for issue in issues:
             nid = getattr(issue, "node_id", None)
+            # 判定的 lint 沒有節點（它講的是 ``decide``）—— 掛到 Decision 卡上
+            # （F123 期 1；以前掛在入口小卡，F50）。⚠ 判準是那張表，不是「沒有
+            # 節點」：沒有節點的還有講分流、講整張圖的，不准讓這張卡背鍋。
+            if not nid and str(getattr(issue, "code", "")) in DECISION_ISSUE_CODES:
+                nid = decision
             if not nid:
                 continue
             prev = out.get(nid)
@@ -1452,37 +1442,6 @@ class StudioWindow(QMainWindow):
         return "decision · %d rule%s" % (len(d.rules),
                                          "" if len(d.rules) == 1 else "s")
 
-    def _decision_problem(self) -> tuple:
-        """判定段的 lint（最嚴重的那一條）→ ``(訊息, 級別)``；沒有就 ``("","")``。
-
-        **這一支存在的理由是一個真的洞**（F50）：`Issue.node_id` 是「哪一張
-        卡」，而判定不是一張卡 —— 它的 issue 一律 `node_id=None`，而
-        `_node_problems()` 第一件事就是把沒有節點的丟掉。於是同樣是「指到一個
-        沒人算得出來的數字」，卡片那邊一改就看得到徽章，判定那邊只在**跑完
-        之後**的狀態列尾巴出現一次 —— 而跑一次是好幾分鐘。
-
-        ⚠ **判準是那張表，不是「node_id 是 None」**（`DECISION_ISSUE_CODES`）：
-        沒有節點的 lint 裡還有三條講分流、一條講整張圖，掛上來就是讓入口卡
-        替別人的問題背鍋。
-        """
-        from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
-
-        try:
-            issues = self.model.validate(self.dataset)
-        except Exception:  # 顯示用
-            return ("", "")
-        rank = {"error": 0, "warning": 1, "info": 2}
-        best = None
-        for issue in issues:
-            if getattr(issue, "node_id", None):
-                continue
-            if str(getattr(issue, "code", "")) not in DECISION_ISSUE_CODES:
-                continue
-            lvl = str(issue.level)
-            if best is None or rank.get(lvl, 1) < rank.get(best[1], 1):
-                best = (wording.issue_line(issue, self.model), lvl)
-        return best or ("", "")
-
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:
         """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
 
@@ -1526,9 +1485,8 @@ class StudioWindow(QMainWindow):
         if info is not None:
             # 幽靈線（F24 ④）：菱形上的數字 → 產出它的卡。宣告層的答案。
             info["feat_owner"] = self.model.feature_owners()
-            # 判定的 lint 掛到入口卡上（F50）—— 見 `_decision_problem`。
-            why, level = self._decision_problem()
-            info["problem"], info["problem_level"] = why, level
+            # 樹掛在哪一張卡底下（F123 期 1）。
+            info["node"] = self.model.decision_node()
         return info
 
     def _sync_score_widgets(self) -> None:
@@ -1872,10 +1830,9 @@ class StudioWindow(QMainWindow):
     # 卡片庫 / 流程
     # ==================================================================== #
     def _on_add_requested(self, step_key: str) -> None:
-        if str(step_key) == _SCORE_LIBRARY_KEY:
-            # 「Decision」不是可增刪的卡片 —— 每條 pipeline 固定有一棵判定樹，
-            # 點它就是**把它放上畫布並開始編第一步**（F25，使用者定調：
-            # 「加 ADC card 是要直接顯示在畫布上，而不是要勾選才顯示」）。
+        if str(step_key) == DecisionStep.key:
+            # Decision 是一張卡（F123 期 1），但一份 recipe 判一次：加它＝放上
+            # 畫布（已經有就選那一張）並開始編第一題（F25）。
             self.add_decision()
             return
         # 選著一張卡的時候，新的卡排在它後面 —— 但**線不會自己出現**
@@ -2060,7 +2017,13 @@ class StudioWindow(QMainWindow):
         for view in self._canvases():
             view.select_card(node_id)
         self._fill_param_form(node_id)
-        self.stack.setCurrentWidget(self.param_form)
+        # Decision 卡沒有參數，它的設定就是判定（F123 期 1）。
+        deciding = node_id == self.model.decision_node()
+        if deciding:
+            self._refresh_feature_combo()
+            self._sync_score_widgets()
+        self.stack.setCurrentWidget(self.score_pane if deciding
+                                    else self.param_form)
         self.gauge_note.setText("")              # 儀表又是這張卡的了（P1-7）
         self.bottom_stack.setEnabled(True)
         self._sync_params_pane()
@@ -2369,9 +2332,12 @@ class StudioWindow(QMainWindow):
         self.layout_modes.on_selection(self.selected_node is not None)
 
     def _on_node_activated(self, node_id: str) -> None:
-        """雙擊一張卡：選它 + 把設定攤開。"""
+        """雙擊一張卡：選它 + 把設定攤開。Decision 卡另外收合／展開它的樹。"""
         if self.select_node(str(node_id)):
             self.set_params_open(True)
+            if str(node_id) == self.model.decision_node():
+                self.pipeline.toggle_tree_collapsed()
+                self._sync_score_widgets()
 
     def _on_card_dropped(self, step_key: str, x: float, y: float) -> None:
         """從卡片庫拖一張卡丟到畫布上（F7-22）。
@@ -2508,8 +2474,7 @@ class StudioWindow(QMainWindow):
     def _repaint_for_theme(self) -> None:
         """把在建構式裡吃過 token 的元件重建/重畫一次。"""
         self.library.set_steps(
-            visible_steps([s.describe() for s in list_steps()])
-            + [_SCORE_LIBRARY_ENTRY])
+            visible_steps([s.describe() for s in list_steps()]))
         self.library.refresh_colors()
         self._refresh_pipeline()
         self.gallery.refresh_styles()
@@ -2518,34 +2483,12 @@ class StudioWindow(QMainWindow):
             w.update()
 
     def remove_decision(self) -> bool:
-        """把整個判定拿掉（畫布上判定區右上角那顆 ✕，2026-08-25）。
-
-        使用者：「ADC 也要能在原畫布上拖曳 移除」。
-
-        **先問過**：底下掛著使用者自己畫的整棵樹，而一顆 ✕ 的重量看起來跟
-        刪一張卡一樣 —— `_remove_step` 對「yes 邊掛著一整個子樹」講過同一句話。
-        復原回得來（`use_decide` 自己會 `_push_undo`），但「一個 ✕ 把三層樹
-        默默吃掉」不是一顆按鈕該有的重量。
-        """
-        m = self.model
-        if getattr(m, "decide", None) is None:
+        """把整個判定拿掉＝刪掉那張 Decision 卡（F123 期 1；會先問）。"""
+        nid = self.model.decision_node()
+        if not nid:
             return False
-        from .tree_scene import display_tree, layout_cells
-
-        n_class = sum(1 for c in layout_cells(display_tree(m.decide), m.decide)
-                      if c.get("kind") == "leaf")
-        answer = QMessageBox.question(
-            self, "Remove the decision?",
-            "This takes the whole decision off the canvas - %d class%s and "
-            "every question that sorts into them.\n\nUndo brings it back."
-            % (n_class, "" if n_class == 1 else "es"),
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        if answer != QMessageBox.Yes:
-            return False
-        m.use_decide(False)
-        self.show_param_page()
-        self._status("Decision removed. Undo brings it back.")
-        return True
+        canvas_edges.remove_card(self, nid)
+        return nid not in self.model.nodes
 
     def show_score_page(self) -> None:
         """切到分數編輯頁（順便刷新特徵下拉）。"""
@@ -2692,7 +2635,7 @@ class StudioWindow(QMainWindow):
             return False
         m.decide = legacy_decision(ScoreSpec(m.expr, m.threshold, m.bins))
         m.expr = ""              # 並存是 error（`ambiguous-decision`）
-        m._changed()             # 畫布與面板跟上（判定區要畫出來）
+        m.add_step(DecisionStep.key)   # 判定是一張卡（F123；有了就不再加）
         m.dirty = False          # 使用者什麼都還沒做，關窗不要問他要不要存
         m.clear_history()        # 「復原」不該把他退回一個看不到編輯器的狀態
         return True
@@ -2711,6 +2654,7 @@ class StudioWindow(QMainWindow):
         with m.compound("add decision"):
             if getattr(m, "decide", None) is None:
                 m.use_decide(True)      # 現有門檻 → 第一條規則（不丟東西）
+            m.add_step(DecisionStep.key)   # 內容在、卡不在（手寫的）也補上
             m.ensure_tree()             # 規則清單 → 等價的樹
             if isinstance(m.tree_node(""), TreeLeaf):
                 # 整棵樹只有一片葉子（這份 recipe 還沒有任何判定）——
@@ -2723,9 +2667,13 @@ class StudioWindow(QMainWindow):
             # 空的或常數的它才填。
             self.tree_pane.set_rows(self.trial_results or [])
             self.tree_pane.suggest_question("")
+        for view in self._canvases():
+            view.select_card(m.decision_node())
+            view.set_tree_collapsed(False)
+        self.selected_node = m.decision_node()
         self._on_tree_step_clicked("")
-        # **看得到才算在畫布上**：判定區長在所有卡片的右邊，而畫布這時多半
-        # 停在左半邊 —— 不 fit 的話使用者按了 ADC 卡，畫面上什麼都沒發生。
+        # **看得到才算在畫布上**：樹長在所有卡片的下面，而畫布這時多半停在
+        # 別處 —— 不 fit 的話使用者按了 Decision，畫面上什麼都沒發生。
         for view in self._canvases():
             view.fit()
         self._status("Decision: the tree is on the canvas - edit this step "
@@ -3441,6 +3389,8 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(nid) if nid else None
         if node is None:
             return False
+        if nid == self.model.decision_node():
+            return True             # 判定在整條跑完之後才算（F123 期 1）
         try:
             return get_step(node.step).scale == SCALE_LOT
         except KeyError:

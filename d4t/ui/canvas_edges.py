@@ -210,6 +210,8 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
     而它那一格是 `HARD_CAPS`：要往它加東西，先從它手上搬走等量的東西。
     """
     node_id = str(node_id)
+    if node_id == win.model.decision_node() and not _drop_the_tree(win):
+        return
     # 刪掉一張卡 = 把它餵出去的每一條線都剪掉（F10-5）。下游那幾格要跟著
     # 空出來，否則它們指著一條再也沒有人產出的流 —— 跟按 × 剪掉是同一件事，
     # 所以走同一條路（`_unpoint_stream`），不要在這裡另寫一份。
@@ -236,6 +238,8 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
     if win.selected_node == node_id:
         win.selected_node = None
         win.param_form.set_step(None, {}, [])
+    if getattr(win.model, "decide", None) is None:
+        win.show_param_page()     # 右邊不留一個判定已經不在的編輯面板
     tail = (" " + " ".join(fallout)) if fallout else ""
     if plan:
         # ⚠ **提議，不是自動接**（鐵則 10：畫布上每一條線都是使用者拉
@@ -249,6 +253,29 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
         win._status("Removed “%s”.%s" % (name, tail))
     else:
         win._status("Removed “%s”" % name)
+
+
+def _drop_the_tree(win: "StudioWindow") -> bool:
+    """刪 Decision 卡＝拿掉整棵判定樹 —— **先問過**（2026-08-25 起的規矩）。
+
+    底下掛著使用者自己畫的整棵樹，而刪卡的重量看起來跟刪一張 Denoise 一樣。
+    復原回得來（一步），但「一個 Delete 把三層樹默默吃掉」不是那個鍵該有的重量。
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    from .tree_scene import display_tree, layout_cells
+
+    d = getattr(win.model, "decide", None)
+    if d is None:
+        return True
+    n = sum(1 for c in layout_cells(display_tree(d), d) if c.get("kind") == "leaf")
+    answer = QMessageBox.question(
+        win, "Remove the decision?",
+        "This takes the whole decision off the canvas - %d class%s and every "
+        "question that sorts into them.\n\nUndo brings it back."
+        % (n, "" if n == 1 else "es"),
+        QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+    return answer == QMessageBox.Yes
 
 
 def bridge(win: "StudioWindow", plan) -> int:

@@ -457,6 +457,21 @@ class RecipeModel:
                      if nid in self.nodes
                      and self.nodes[nid].step == DecisionStep.key), "")
 
+    def _drop_decision_cards(self) -> None:
+        """每一條 route 上的 Decision 卡都拿掉（不記復原：開檔時的整理）。"""
+        gone = {nid for nid, n in list(self.nodes.items())
+                + list(self._other_nodes.items()) if n.step == DecisionStep.key}
+        self.node_order = [n for n in self.node_order if n not in gone]
+        self.nodes = {k: v for k, v in self.nodes.items() if k not in gone}
+        self._other_nodes = {k: v for k, v in self._other_nodes.items()
+                             if k not in gone}
+        self._other_routes = {rk: [n for n in v if n not in gone]
+                              for rk, v in self._other_routes.items()}
+        self.edges = [e for e in self.edges
+                      if e.src not in gone and e.dst not in gone]
+        self._other_edges = [e for e in self._other_edges
+                             if e.src not in gone and e.dst not in gone]
+
     def add_step(self, step_key: str, at: Optional[int] = None) -> str:
         step_cls = get_step(step_key)          # 未知 key 會 raise KeyError
         deciding = step_key == DecisionStep.key
@@ -466,6 +481,12 @@ class RecipeModel:
             return self.decision_node()
         self._push_undo()
         node_id = self._new_id(step_key)
+        # 別條 route 上已經有那一張（F123：一份 recipe 判一次）→ 同一張卡也排進
+        # 這一條，不是生第二張。
+        shared = next((nid for nid, n in self._other_nodes.items()
+                       if deciding and n.step == DecisionStep.key), "")
+        if shared:
+            node_id = shared
         if deciding:
             # 卡與內容一起來（同一步復原）：沒有判定就給一個空的 —— 還沒有問題的
             # 判定樹，由呼叫端（Studio 的 `add_decision`）接著建議第一題。
@@ -490,7 +511,8 @@ class RecipeModel:
         # 清的是**這一張卡的值**，不是卡片的 ``default`` —— 後者是規格的預設
         # 值，手寫 recipe 省略那一格時仍然要有東西可用。
         params = step_cls.validate_params(step_cls.cleared_inputs())
-        self.nodes[node_id] = RecipeNode(id=node_id, step=step_key, params=params)
+        self.nodes[node_id] = (self._other_nodes.pop(shared) if shared else
+                               RecipeNode(id=node_id, step=step_key, params=params))
         if at is None:
             self.node_order.append(node_id)
         else:
@@ -516,9 +538,12 @@ class RecipeModel:
         if node_id in self.nodes:
             self._push_undo()
             if self.nodes[node_id].step == DecisionStep.key:
-                # 刪掉 Decision 卡＝拿掉判定（同一步復原；見 `decision_node`）。
+                # 刪掉 Decision 卡＝拿掉判定（同一步復原；見 `decision_node`）——
+                # 每一條 route 上的那一張（它們是同一張）。
                 self.decide = None
                 self.expr = ""
+                self._other_routes = {rk: [n for n in v if n != node_id]
+                                      for rk, v in self._other_routes.items()}
             del self.nodes[node_id]
             self.node_order = [n for n in self.node_order if n != node_id]
             gone = [(e.dst, e.dst_in) for e in self.edges
@@ -775,24 +800,41 @@ class RecipeModel:
         """
         if on == (self.decide is not None):
             return
+        if not on:
+            # 拿掉判定＝拿掉那張 Decision 卡（F123 期 1：兩者同生同滅，
+            # 刪卡那一支順手清 ``decide``）。一步復原。
+            cards = [nid for nid in self.node_order if nid in self.nodes
+                     and self.nodes[nid].step == DecisionStep.key]
+            with self.compound("use-decide"):
+                for nid in cards:
+                    self.remove(nid)
+                if self.decide is not None:
+                    self._push_undo()
+                    self.decide = None      # expr 留空＝沒有判定（F122）
+                    self._changed()
+            return
+        with self.compound("use-decide"):
+            self._use_decide_on()
+
+    def _use_decide_on(self) -> None:
         self._push_undo()
-        if on:
-            expr = str(self.expr or "").strip()
-            # **常數不是門檻**（U1，2026-08-24）—— 見 `is_a_constant_expression`。
-            # 這裡以前問的是「``expr`` 是不是空的」，而全新 recipe 的 ``expr``
-            # 是佔位值 ``"0"``，於是每一份新 recipe 都從一條 ``0 >= 0`` 開始。
-            real = expr and not is_a_constant_expression(expr)
-            rules = []
-            if real:
-                rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
-                                  bin=int(self.bins.get("above", 1)), label=""))
-            self.decide = DecideSpec(
-                let=[], rules=rules,
-                otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
-                score=expr if real else "")
-            self.expr = ""          # 並存是 error，所以這一格要清掉
-        else:
-            self.decide = None          # expr 留空＝沒有判定（F122）
+        expr = str(self.expr or "").strip()
+        # **常數不是門檻**（U1，2026-08-24）—— 見 `is_a_constant_expression`。
+        # 這裡以前問的是「``expr`` 是不是空的」，而全新 recipe 的 ``expr``
+        # 是佔位值 ``"0"``，於是每一份新 recipe 都從一條 ``0 >= 0`` 開始。
+        real = expr and not is_a_constant_expression(expr)
+        rules = []
+        if real:
+            rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
+                              bin=int(self.bins.get("above", 1)), label=""))
+        self.decide = DecideSpec(
+            let=[], rules=rules,
+            otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
+            score=expr if real else "")
+        self.expr = ""          # 並存是 error，所以這一格要清掉
+        # 判定是一張卡（F123 期 1）：內容有了，畫布上那張也要在。
+        if not self.decision_node():
+            self.add_step(DecisionStep.key)
         self._changed()
 
     def _edit_decide(self, **kw) -> None:
@@ -1150,7 +1192,10 @@ class RecipeModel:
             recipe = self.to_recipe()
         except Exception:  # 顯示層，壞了就不畫線
             return {}
-        return {b.spec.name: b.node_id
+        # 判定寫的數字（``score``、let、``decide_unanswered``）以前沒有卡可以指
+        # （owner 是 ""，畫布上找入口小卡）；F123 期 1 起它們屬於那張 Decision 卡。
+        decision = self.decision_node()
+        return {b.spec.name: (b.node_id or decision)
                 for b in bound_specs(recipe, self.kind)}
 
     def bound_feature_specs(self) -> List[Any]:
@@ -1846,6 +1891,10 @@ class RecipeModel:
                           if nid not in in_route}
         m._other_edges = [e for e in (recipe.edges or [])
                           if not (e.src in in_route and e.dst in in_route)]
+        if m.decide is None and not str(m.expr).strip():
+            # 沒有判定就沒有那張卡（F123 期 1：兩者同生同滅）—— 第 6 版遷移會替
+            # 一份帶著佔位分數 ``"0"`` 的舊檔案補一張，而那個佔位值上面剛清掉。
+            m._drop_decision_cards()
         m.bins = dict(recipe.score.bins)
         # 區域線推回它落在的那一格（F42 B2）。**只填不清** —— 舊檔案的區域
         # 參數還沒有線，那一格是它唯一的儲存（見 :meth:`_hydrate_regions`）。

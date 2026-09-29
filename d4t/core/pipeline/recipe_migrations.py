@@ -77,7 +77,15 @@ def describe_migration(raw: Any, recipe: Any) -> List[str]:
         if added > 0:
             says.append("added %d wire%s" % (added, "" if added == 1 else "s"))
         if isinstance(raw_nodes, dict):
-            extra = len(getattr(recipe, "nodes", {}) or {}) - len(raw_nodes)
+            new_ids = [nid for nid in (getattr(recipe, "nodes", {}) or {})
+                       if nid not in raw_nodes]
+            # 補上來的 Decision 卡不是「拆出來的」（F123 期 1）：判定一直都在，
+            # 只是以前不是一張卡。那一句要講它是什麼。
+            decided = [nid for nid in new_ids
+                       if recipe.nodes[nid].step == "decision"]
+            if decided:
+                says.append("put the decision on the canvas as a card")
+            extra = len(new_ids) - len(decided)
             if extra > 0:
                 says.append("split %d card%s"
                             % (extra, "" if extra == 1 else "s"))

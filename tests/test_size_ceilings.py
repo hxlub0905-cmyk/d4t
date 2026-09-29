@@ -219,7 +219,10 @@ FILE_CEILINGS = {
     # `RunController.snapshot`（它多記了判定的簽章）。
     # 2026-09-29（F122 期 3）：4,293 → **4,236**（−57）。舊門檻那條路退役：
     # 分數直方圖上的門檻線、它的兩個 handler、重算 bin 數與準確率那兩支。
-    "d4t/ui/studio.py": 4236,
+    # 2026-09-29（F123 期 1）：4,236 → **4,186**（−50）。Decision 變成一張卡：
+    # 卡片庫的 `__score__` 偽卡、`_decision_problem`（判定的 lint 走卡片那條路）
+    # 拿掉，`remove_decision` 的確認搬進 `canvas_edges`。
+    "d4t/ui/studio.py": 4186,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -346,7 +349,9 @@ FILE_CEILINGS = {
     # 2026-09-20（F117 A6）：3,160 → 3,163（+3）。卡片的外框改用畫布自己的
     # `canvas_card_border` —— `border_default` 是配面板底色調的，畫在畫布上
     # 淺色只有 **1.03** 的對比（那條框等於不存在）。多的三行是那句說明。
-    "d4t/ui/canvas.py": 3163,
+    # 2026-09-29（F123 期 1）：3,163 → 3,154（−9）。判定區的外框拿掉了（樹掛在
+    # Decision 卡底下、拖卡就拖樹），整區拖曳那一族（位移、重設）跟著走。
+    "d4t/ui/canvas.py": 3154,
     # `CLAUDE.md` **每個 session 都會被讀進去**。2026-09-09 之前它是 647 行，
     # 一半是「某年某月使用者說了什麼」的故事 —— 規則留下、故事搬進
     # `docs/history/CLAUDE-2026-09-09.md`，瘦到 319 行。這一格擋它長回去：
@@ -492,7 +497,9 @@ COUNT_CEILINGS = {
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        192,
+        191,
+        # 2026-09-29（F123 期 1）：192 → 191。`_decision_problem` 拿掉 —— 判定的
+        # lint 現在掛在 Decision 卡上，走跟每一張卡同一條路（`_node_problems`）。
         # 2026-09-29（F122 期 3）：197 → 192。舊門檻那條路退役：分數直方圖上的
         # 門檻線那一族五支（兩個 handler、`_uses_a_threshold`、
         # `_refresh_bin_summary`、`_accuracy_text`）。
@@ -716,8 +723,10 @@ HARD_CAPS = {
     # `self.*` 266 → 261。舊門檻那條路退役（判定只剩判定樹）：分數直方圖上
     # 那條拖得動的門檻線、`_on_threshold_changed/_committed`、
     # `_uses_a_threshold`、`_refresh_bin_summary`、`_accuracy_text` 整族拿掉。
-    "d4t/ui/studio.py": 4236,
-    "studio_window_methods": 192,
+    # 2026-09-29（F123 期 1）：行 4,236 → 4,186（−50）、方法 192 → 191。
+    # Decision 變成一張卡：`__score__` 偽卡、`_decision_problem` 拿掉。
+    "d4t/ui/studio.py": 4186,
+    "studio_window_methods": 191,
     "studio_window_attributes": 261,
 }
 

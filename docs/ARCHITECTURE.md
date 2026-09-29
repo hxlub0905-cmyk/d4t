@@ -340,6 +340,7 @@ d4t/
 │   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：三種找法 → 具名區域
 │   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
 │   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）
+│   │   ├── decision.py       #   Decision（F123）：判定樹在畫布上的那一張卡；內容住 `recipe.decide`
 │   │   ├── output.py         #   Output 段四張：output_report／output_klarf／output_char／output_uniformity
 │   │   └── _util.py          #   卡片共用小工具（不註冊任何 step）
 │   ├── export/               # 寫出去
@@ -383,7 +384,7 @@ d4t/
     │                         #     留下的是 `model → UI`、signal 接線、狀態列、門面
     ├── canvas.py             #   節點畫布（n8n 式；純 UI，引擎零改動）
     ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
-    ├── tree_scene.py tree_panel.py     #   判定樹住在畫布上／點一步就編輯那一步（F24）
+    ├── tree_scene.py tree_panel.py     #   判定樹掛在 Decision 卡底下／點一步就編輯那一步（F24、F123）
     ├── decide_panel.py route_panel.py route_badge.py  #   判定段編輯器／`route_by` 編輯器與徽章
     ├── number_picker.py      #   「插入數字 ▾」：一張卡一組、每項帶說明，三個地方同一支（2026-09-09）
     ├── verdict_band.py       #   判定段的橫幅（一列一類）

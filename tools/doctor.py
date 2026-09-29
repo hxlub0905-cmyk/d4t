@@ -422,7 +422,7 @@ def check_smoke(rep: Report, skip: bool = False, reason: str = "") -> None:
 #: （`AGENTS.md` §3 —— 它要在「套件還沒裝好」的機器上跑），import 不得。
 #: 兩邊漂掉的代價是這一項給出一個錯的提示，不是算錯數字；
 #: `tests/test_offline_tools.py` 會比對它們相等。
-RECIPE_VERSION = 5
+RECIPE_VERSION = 6
 
 
 def check_recipes(rep: Report, paths: Sequence[str] = ()) -> None:
@@ -467,7 +467,9 @@ def check_recipes(rep: Report, paths: Sequence[str] = ()) -> None:
                 hint="這些檔案照樣跑得動（載入時會自動轉），但磁碟上那一份還是舊的。"
                      "用 Studio 開起來按一次 Ctrl+S 就轉好了。"
                      "手寫 recipe 的話：區域現在跟影像一樣要在 edges 裡寫一條線"
-                     "（[來源, 區域名, 這張卡, 參數名]），寫完把 version 改成 %d。"
+                     "（[來源, 區域名, 這張卡, 參數名]）；有判定（decide）的話 nodes 裡"
+                     "要有一張 \"step\": \"decision\" 的卡、排進 routes。"
+                     "寫完把 version 改成 %d。"
                      % RECIPE_VERSION)
         return
     note = "%d 份都是新格式" % len(files)

@@ -619,7 +619,10 @@ def measurement_signature(recipe: Recipe) -> str:
     lot = set()
     for nid, node in nodes.items():
         cls = REGISTRY.get(str((node or {}).get("step", "")))
-        if cls is not None and getattr(cls, "scale", "") == SCALE_LOT:
+        # Decision 卡（F123 期 1）也不算：它不量任何東西，停用它只改判定 ——
+        # 那一半在 `decision_signature` 裡，Re-run 秒級重判就夠了。
+        if cls is not None and (getattr(cls, "scale", "") == SCALE_LOT
+                                or getattr(cls, "category", "") == "adc"):
             lot.add(nid)
     d["nodes"] = {k: v for k, v in nodes.items() if k not in lot}
     d["routes"] = {k: [x for x in (v or []) if x not in lot]
@@ -641,8 +644,13 @@ def decision_signature(recipe: Recipe) -> str:
     import json
 
     d = recipe.to_json_dict()
-    blob = json.dumps({k: d.get(k) for k in ("decide", "score", "route_by")},
-                      sort_keys=True, ensure_ascii=False, default=str)
+    parts = {k: d.get(k) for k in ("decide", "score", "route_by")}
+    # 停用那張 Decision 卡＝不判（F123 期 1，`engine._eval_score`）—— 它的開關
+    # 是判定的一部分。
+    parts["cards"] = sorted(
+        (nid, bool(n.enabled)) for nid, n in recipe.nodes.items()
+        if n.step == "decision")
+    blob = json.dumps(parts, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 

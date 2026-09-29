@@ -28,6 +28,37 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F123 期 1：Decision 變成一張真的卡（2026-09-29）
+
+使用者：「我會覺得對畫布來說很奇怪，不管是 ADC card 或者是 Output card 的定位
+（理論上 input = output）」→ 看了做法 A 的截圖 →「我想直接做 B」。計畫書
+`docs/plans/F123-decision-and-output-cards.md`；三個問題的答案在它的 §1。
+
+* **core**：註冊 `decision`「Decision」（ADC 段、沒有參數、`run` 是 no-op ——
+  判定照舊在整條 pipeline 跑完之後由引擎算）。內容仍住在 `recipe.decide`（搬進卡的
+  參數要改一百多處引用，而那件事使用者看不到）。第 6 版遷移補卡，版本閘拆成
+  `< 5` / `< 6`（鐵則 9：第 5 版以前那三道**不能**對第 5 版的檔案再跑一次）。
+  停用那張卡＝不判；一份 recipe 最多一張（`duplicate-decision`）。
+* **卡與內容同生同滅，只在 model 一處**：`add_step("decision")` 沒有判定就給一個
+  空的、`remove` 那張卡拿掉判定、`use_decide(True/False)` 補卡／刪卡 —— 都是一步
+  復原。開檔時沒有判定（例：佔位分數 `"0"` 被清掉）就不留那張卡。
+* **畫布**：淡紫虛線框、入口小卡、卡片庫的 `__score__` 偽卡**拿掉**。樹掛在
+  Decision 卡底下（根對齊卡的中線、排在所有卡片下面，一條線從卡接到根）；拖卡樹
+  跟著走（就地搬、不重建 —— F50 的殘影那一條）；雙擊卡收合／展開；單擊卡右邊是
+  判定面板。刪卡先問（`canvas_edges._drop_the_tree`，原本 ✕ 那一句）。判定的 lint
+  走**跟每一張卡同一條路**（`_node_problems` 把 `DECISION_ISSUE_CODES` 掛到那張卡）
+  —— 另抄的 `_decision_problem` 與 `_EntryItem._paint_badge` 跟著拿掉。
+* `feature_owners`：let／`score` 的來源從空字串（找入口小卡）改成那張卡的 id，
+  幽靈線因此指回一張真的卡。`measurement_signature` 不算 ADC 段的卡（停用 Decision
+  只改判定，Re-run 秒級重判就夠）；`decision_signature` 算它的開關。
+* 三份出貨 recipe 存成第 6 版；`tools/doctor.py` 的 `RECIPE_VERSION` 字面值 5 → 6
+  （那一份是刻意抄的，`test_offline_tools` 比對）。
+* 規模尺：`recipe.py` 650 → 653、遷移道數 23 → 24（簽）；`studio.py` 4,236 → 4,186、方法 192 → 191、`canvas.py` 3,163 → 3,154（跟著降）。
+* 還沒做：Decision 卡上寫著「(not connected)」—— 它現在真的沒有線；期 2 給它
+  「numbers」入埠與「results」出埠之後那一行就是線上的字。
+
+---
+
 ## F122 期 4：CLI 的 export 照卡片寫（2026-09-29）
 
 使用者：「繼續期4」。

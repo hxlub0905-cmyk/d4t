@@ -162,15 +162,15 @@ class BoundSpec:
     """一個特徵的**完整**身分：spec ＋ 它掛在哪個節點上（PR-3）。
 
     ``node_id == ""`` 是**引擎/判定段**（score / decide_unanswered /
-    route_taken / let 那些）—— UI 對映到「Decision」那張偽卡（F122 期 3 以前叫「Score / Bin」：一個東西五個名字，只留一個）。
+    route_taken / let 那些）—— UI 對映到「Decision」那張卡（F122 期 3 以前叫「Score / Bin」：一個東西五個名字，只留一個；F123 期 1 起它是一張真的卡）。
     """
     node_id: str
     label: str
     spec: FeatureSpec
 
 
-#: 引擎/判定段那一組在 UI 上的名字 —— 跟 `studio._SCORE_LIBRARY_ENTRY` 的
-#: label 同一個字（那邊是它的別名，這裡是家）。
+#: 引擎/判定段那一組在 UI 上的名字 —— 跟 `steps.decision.DecisionStep` 的
+#: label 同一個字（那邊是卡片名，這裡是「這個數字誰算的」的答案）。
 ENGINE_LABEL = "Decision"
 
 
