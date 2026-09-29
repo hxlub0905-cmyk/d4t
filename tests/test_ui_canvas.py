@@ -125,8 +125,15 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     assert load.out_names() == ["test", "ref"]
     assert sub.in_names() == ["test", "ref"]
 
+    # 載入的 fixture 被第 7 版遷移補了一條 glv → Decision 的數字線（F123 期 2）
+    # —— 這一條問的是影像線，所以只數影像線。
+    def image_edges():
+        return [e for e in window.model.edges
+                if e.src_out not in ("numbers", "results")]
+
     window.pipeline.link_to("load", "sub", port=0, dst_port=0)
-    assert window.model.edge_pairs() == [("load", "sub")], "model 仍然是一條依賴"
+    assert sorted({(e.src, e.dst) for e in image_edges()}) == [("load", "sub")], \
+        "model 仍然是一條依賴"
     assert len([e for e in window.pipeline._edges
                 if e.pair() == ("load", "sub")]) == 1, "拉一條就是一條"
 
@@ -136,14 +143,14 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     window.pipeline.link_to("load", "sub", port=1, dst_port=1)
     assert len([e for e in window.pipeline._edges
                 if e.pair() == ("load", "sub")]) == 2, "兩條並排的線"
-    assert len(window.model.edges) == 2, "model 也要記得兩條（F9-9）"
-    assert {e.src_out for e in window.model.edges} == {"test", "ref"}
+    assert len(image_edges()) == 2, "model 也要記得兩條（F9-9）"
+    assert {e.src_out for e in image_edges()} == {"test", "ref"}
     assert "Connected" in window.status_text()
 
     # 同一顆埠再拖一次：不是錯誤，訊息要講清楚那條線本來就在了
     window.pipeline.link_to("load", "sub", port=0)
-    assert window.model.edge_pairs() == [("load", "sub")]
-    assert len(window.model.edges) == 2
+    assert sorted({(e.src, e.dst) for e in image_edges()}) == [("load", "sub")]
+    assert len(image_edges()) == 2
     assert "already connected" in window.status_text()
     assert "Cannot" not in window.status_text()
 
