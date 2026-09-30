@@ -36,6 +36,7 @@ from typing import Any, List, Dict, Optional
 from ..core.pipeline import get_step, list_steps
 from ..core.pipeline.recipe import is_data_edge, is_region_edge
 from ..core.pipeline.step import DATA_PORTS, NUMBERS, REGION_TYPES, RESULTS
+from . import wording
 from .scope import visible_steps
 
 __all__ = [
@@ -263,8 +264,8 @@ def _plan_data(model: Any, src: str, dst: str, port: str,
         return ConnectPlan(
             kind=REJECT, param=into,
             reject="“%s” takes %s here - that line carries an image or a "
-                   "region. Drag from the numbers port of a measuring card."
-                   % (dst, into))
+                   "region. Drag from the %s port of a measuring card."
+                   % (dst, wording.port_word(into), wording.port_word(NUMBERS)))
     takes = (RESULTS if RESULTS in d_cls.data_inputs
              else NUMBERS if (port == NUMBERS and NUMBERS in d_cls.data_inputs)
              else "")
@@ -273,7 +274,8 @@ def _plan_data(model: Any, src: str, dst: str, port: str,
                if d_cls.data_inputs else
                "numbers go into a Decision or an Output card")
         return ConnectPlan(kind=REJECT, param=into,
-                           reject="“%s” cannot take %s - %s." % (dst, port, why))
+                           reject="“%s” cannot take %s - %s."
+                                  % (dst, wording.port_word(port), why))
     if model.has_line(src, dst, port, takes):
         return ConnectPlan(kind=DATA, param=takes,
                            already="%s → %s is already connected." % (src, dst))

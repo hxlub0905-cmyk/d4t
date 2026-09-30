@@ -28,15 +28,15 @@ from typing import Any, Dict, List, Optional, Sequence
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QToolButton, QVBoxLayout,
-    QWidget,
+    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from . import strings, wording
 from .theme import TOKENS
 
 __all__ = ["ProblemsBar", "counts_of", "summary_of", "issue_rows",
-           "row_text"]
+           "row_text", "connect_text"]
 
 #: 由重到輕。清單照這個順序排 —— **error 一定在最上面**：使用者要的是
 #: 「先修哪一個」，而那個答案不該取決於 lint 內部的產生順序。
@@ -108,12 +108,26 @@ def issue_rows(issues: Sequence[Any],
             "detail": str(getattr(issue, "detail", "") or ""),
             "text": wording.issue_line(issue, model),
             "code": str(getattr(issue, "code", "") or ""),
+            # 「接上這幾張卡就好」（F124，`Issue.connect`）—— 有的話那一列底下
+            # 多一顆鈕。鈕上的字是卡片名，不是 node id（`wording.card`）。
+            "connect": [str(x) for x in (getattr(issue, "connect", ()) or ())],
+            "connect_text": connect_text(
+                getattr(issue, "connect", ()) or (), model),
             "_sort": (rank.get(level, len(rank)), i),
         })
     rows.sort(key=lambda r: r["_sort"])
     for r in rows:
         r.pop("_sort")
     return rows
+
+
+def connect_text(node_ids: Sequence[Any], model: Any = None) -> str:
+    """「Connect “GLV”」—— 那顆鈕上的字（沒有要接的就是空字串）。"""
+    names = [wording.card(model, n) if model is not None else str(n)
+             for n in node_ids if str(n)]
+    if not names:
+        return ""
+    return strings.tr("Connect") + " " + " and ".join("“%s”" % n for n in names)
 
 
 def row_text(row: Dict[str, Any]) -> str:
@@ -152,6 +166,11 @@ class ProblemsBar(QWidget):
     #: 使用者點了清單裡的一項；值是那張卡的 node id（``""`` = 這一條不指向
     #: 任何一張卡，例如「這份 recipe 沒有這個 route」）。
     problem_activated = Signal(str)
+
+    #: 使用者按了某一列底下的「Connect ＿」（F124）：``(接到哪張卡, [從哪幾張卡])``。
+    #: 宿主走跟手拉的線同一條路（`canvas_edges.connect_into`）—— **這個 widget
+    #: 不碰 model**，跟 :attr:`problem_activated` 同一個理由。
+    connect_requested = Signal(str, list)
 
     #: 清單最多長這麼高（超過就自己捲）。一份 30 條的清單把設定區整個推出
     #: 畫面的話，使用者就得先關掉它才能去修 —— 而他要修的就是清單上那一條。
@@ -248,6 +267,8 @@ class ProblemsBar(QWidget):
                 # 了（U13：紅綠對色覺缺陷者不可分辨，而這一列是「還能不能跑」
                 # 唯一的答案）。
                 item.setForeground(QColor(TOKENS["danger_text"]))
+            if row["connect"]:
+                self._add_connect_row(row)
         # 指得到卡片的那幾條才講「點一下會跳過去」—— 一條指不到任何一張卡的
         # lint（「這份 recipe 沒有這個 route」那種）點下去不會跳，而一句做不到
         # 的提示比沒有提示糟。
@@ -269,6 +290,41 @@ class ProblemsBar(QWidget):
         # ⚠ 這也是這個 repo 自己的規矩：**一條常駐的 warning 會被學會忽略，
         # 而真的那一條也跟著被忽略**（`Issue` 的 `info` 那一級寫著同一句）。
         self.setVisible(bool(self._rows))
+
+    def _add_connect_row(self, row: Dict[str, Any]) -> None:
+        """那一列底下的「Connect ＿」鈕（F124）。
+
+        **另開一列放鈕**，不是把鈕塞進文字那一列：文字那一列照舊是一個普通的
+        項目（點了跳到那張卡、測試讀得到它的字），鈕是它下面緊貼的一列。
+        """
+        item = QListWidgetItem("", self.list)
+        item.setFlags(Qt.ItemIsEnabled)
+        item.setData(Qt.UserRole, row["node_id"])
+        holder = QWidget(self.list)
+        hl = QHBoxLayout(holder)
+        hl.setContentsMargins(24, 0, 8, 4)
+        btn = QPushButton(row["connect_text"], holder)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(lambda _=False, r=row: self.connect_requested.emit(
+            r["node_id"], list(r["connect"])))
+        hl.addWidget(btn)
+        hl.addStretch(1)
+        item.setSizeHint(holder.sizeHint())
+        self.list.setItemWidget(item, holder)
+
+    def connect_buttons(self) -> List[QPushButton]:
+        """清單裡**現在**的「Connect ＿」鈕（測試與鍵盤路徑用）。
+
+        ⚠ 不用 ``findChildren``：`clear()` 拿掉的那幾列，它們的 widget 是
+        ``deleteLater`` 的 —— 事件迴圈還沒轉之前照樣找得到，於是每刷新一次
+        清單上就「多一顆」。問每一列自己的 widget 才是現在的樣子。
+        """
+        out: List[QPushButton] = []
+        for i in range(self.list.count()):
+            holder = self.list.itemWidget(self.list.item(i))
+            if holder is not None:
+                out.extend(holder.findChildren(QPushButton))
+        return out
 
     def counts(self) -> Dict[str, int]:
         return {level: sum(1 for r in self._rows if r["level"] == level)

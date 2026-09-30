@@ -71,7 +71,9 @@ def test_the_lines_land_on_their_own_ports(window):
 
 
 def test_the_decision_card_says_what_flows_through_it(window):
-    assert window.pipeline.card("decision").subtitle() == "numbers → results"
+    # 畫面上的字（F124）：量完的進來、分好類的出去；recipe 的鍵照舊是
+    # numbers / results。
+    assert window.pipeline.card("decision").subtitle() == "measured → classified"
 
 
 def test_a_numbers_line_dropped_on_a_card_lands_on_the_data_port(window):
@@ -200,7 +202,7 @@ def test_write_comparison_grows_two_picture_ports(window):
     specs = window.pipeline.card(nid).in_specs()
     assert [(s["label"], s["kind"]) for s in specs] == [
         ("Left picture", "image"), ("Right picture", "image"),
-        ("results", "results")]
+        ("classified", "results")]
 
 
 def test_an_output_cards_number_list_puts_what_flows_in_first(window):

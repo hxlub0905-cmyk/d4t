@@ -219,19 +219,32 @@ def data_ports(info: Dict[str, Any], model: Any, node_id: str,
     """
     if step_cls is None:
         return
+    # **原樣送出、沒有線接出去的輸出埠**（F124）：畫布把它畫小、畫淡。判準用
+    # 畫布的定義（`writes` 減 `produces`、`regions_out` 減 `regions_produced` ——
+    # `docs/PITFALLS.md`「那張卡有哪些輸出埠有兩個答案」），「有沒有線」問 model。
+    used = {e.src_out for e in model.edges if e.src == node_id}
+    made = (set(info["produces"] if "produces" in info
+                else info.get("writes") or ())
+            | set(info["regions_produced"] if "regions_produced" in info
+                  else info.get("regions_out") or ()))
+    info["quiet_out"] = [n for n in list(info.get("writes") or [])
+                         + list(info.get("regions_out") or [])
+                         if n not in made and n not in used]
     for port in step_cls.data_inputs:
         info["inputs"].append({
-            "name": port, "label": port, "stream": "", "role": "",
-            "kind": port,
+            "name": port, "label": wording.port_word(port), "stream": "",
+            "role": "", "kind": port,
             "accepts": [RESULTS, NUMBERS] if port == RESULTS else [port]})
     out = "" if unwired else step_cls.data_output(model.nodes[node_id].params)
     info["data_out"] = out
     if step_cls.data_inputs and any(
             e.dst == node_id and is_data_edge(e, model.nodes)
             for e in model.edges):
-        info["reads"] = list(info.get("reads") or []) + list(step_cls.data_inputs)
+        # 副標講畫面上的字（`measured → classified`，F124），不是 recipe 的鍵。
+        info["reads"] = (list(info.get("reads") or [])
+                         + [wording.port_word(x) for x in step_cls.data_inputs])
         if out:
-            info["produces"] = [out]
+            info["produces"] = [wording.port_word(out)]
 
 
 def remove_card(win: "StudioWindow", node_id: str) -> None:
@@ -329,6 +342,36 @@ def bridge(win: "StudioWindow", plan) -> int:
             connect(win, str(src), str(dst), str(src_out or ""),
                     str(dst_in or ""))
     return len(rows)
+
+
+def connect_into(win: "StudioWindow", dst: str, sources: Sequence[str]) -> int:
+    """「Connect ＿」那顆鈕（F124，`Issue.connect`）：從 ``sources`` 各拉一條
+    送去判定／寫出的線進 ``dst``。
+
+    ⚠ **走 :func:`bridge`**（也就是 :func:`connect`）—— 跟手拉的線同一條路，
+    整批一步復原。鈕是使用者按的，所以這還是「使用者拉的線」（鐵則 10）。
+    哪一顆埠由卡片自己說（`Step.data_output` / `data_inputs`），不是猜。
+    """
+    model = win.model
+    d = model.nodes.get(str(dst))
+    if d is None:
+        return 0
+    try:
+        takes = tuple(get_step(d.step).data_inputs)
+    except KeyError:
+        return 0
+    rows = []
+    for src in sources:
+        s = model.nodes.get(str(src))
+        if s is None or not takes:
+            continue
+        try:
+            sends = get_step(s.step).data_output(s.params)
+        except KeyError:
+            continue
+        if sends:
+            rows.append((str(src), sends, str(dst), takes[0]))
+    return bridge(win, rows)
 
 
 def connect(win: "StudioWindow", src: str, dst: str, stream: str,
@@ -542,7 +585,9 @@ def _apply_edge_removed(win: "StudioWindow", src: str, dst: str, stream: str = "
         # 數字線與結果線（F123 期 2）：一條就是一條，剪掉它不動任何參數。
         if win.model.remove_edge(src, dst, src_out=stream or None,
                                  dst_in=dst_in):
-            win._status("Disconnected %s → %s (%s)" % (src, dst, stream))
+            win._status("Disconnected %s → %s (%s)"
+                        % (wording.card(win.model, src),
+                           wording.card(win.model, dst), wording.port_word(stream)))
         return
     if _is_region_param(win, dst, dst_in):
         node = win.model.nodes.get(dst)

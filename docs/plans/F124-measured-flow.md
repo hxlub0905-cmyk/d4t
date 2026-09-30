@@ -1,6 +1,6 @@
 # F124 — 畫布是一條從頭接到尾的資料流
 
-狀態：**期 1 做完（2026-09-30）；期 2～4 未動。** 使用者看過六張示意圖說「可以」。
+狀態：**期 1、2 做完（2026-09-30）；期 3、4 未動。** 使用者看過六張示意圖說「可以」。
 前一份：[`F123`](../history/plans/F123-decision-and-output-cards.md)（Decision 與 Output
 變成真的卡）。這一份修 F123 期 2 的規則，F123 其餘三期照留。
 
@@ -191,3 +191,22 @@ characterization 那條流因此是 Pair source → H2H → Decision：判定第
   不用另外拉線）；ARCHITECTURE 那一行。
 * 黃金值三份逐項相同；pyright 128（第一版 +2：Write charts 的 `notes` 可能是 None ——
   刪掉的那一支以前順手把它變成 list）。
+
+## 9. 期 2 的紀錄（2026-09-30）
+
+* **畫面上的字**：`wording.port_word`（``numbers`` → ``measured``、``results`` →
+  ``classified``）—— 埠名、Decision／Output 的副標、拉錯線時那句話、剪線的狀態列。
+  recipe 裡的鍵不動（`recipe.edges` 上照舊是 ``numbers`` / ``results``）。
+* **埠名放得下**（使用者選 A）：欄距 116 → 156、埠名寬 52 → 74、所有埠名小一號字。
+  ``NODE_W + COL_GAP`` = 360 仍是格線的倍數。放得下 `Ref image`、`Ref region`、
+  `Left/Right picture`、`Search inside`、`Small image`；`Borrow range from`、
+  `Second stream` 與很長的區域名照舊切中間。`WRAP` 的四欄因此是 1,284px（那條
+  測試的門檻 1,200 → 1,300，寫了理由）。
+* **原樣送出、沒有線接出去的輸出埠**畫小、畫淡：`canvas_edges.data_ports` 算
+  `info["quiet_out"]`（畫布的定義：`writes` 減 `produces`、`regions_out` 減
+  `regions_produced`，再減掉有線接出去的），`canvas._draw_port(quiet=)` 畫。
+* **「Connect ＿」**：放在問題清單（`problems_bar`）那一條底下，不另開第二個地方
+  —— 那是「現在有什麼問題」唯一的家（U2）。按下去走 `canvas_edges.connect_into`
+  → `bridge` → `connect`，跟手拉的線同一條路、一步復原。計畫書原本寫「Decision
+  的在判定面板頂端、Output 的在設定區」，改成這一個地方。
+* 規模尺：`canvas.py` 3,263 → 3,278（+15，簽了）。

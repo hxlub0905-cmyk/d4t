@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
 
 from . import region_words
 from . import strings
+from . import wording
 from . import theme
 from .theme import TOKENS
 from .widgets import CARD_MIME, IconButton, draw_group_icon, small_button
@@ -122,8 +123,10 @@ _MAX_REGION_PORTS = 18
 #: 看起來完全正常。形狀在滑鼠靠近之前就講出這件事。
 _REGION_PORT_R = 5.5
 
-#: 埠標籤佔的寬度（畫在節點右緣之外，boundingRect 必須算進去）。
-_PORT_LABEL_W = 52.0
+#: 埠標籤佔的寬度（畫在節點右緣之外，boundingRect 必須算進去）。F124：52 → 74、
+#: 字小一號 —— `Ref image`、`Right picture`、`Search inside` 以前一律被切成
+#: `Re…ge` 那種讀不出來的字。74 是欄距 156 裡兩邊各一塊不相疊的上限。
+_PORT_LABEL_W = 74.0
 
 #: 節點左側 icon 的邊長，以及裝著它的圓角色塊。
 #: 用**色塊**而不是細色條（F7-8）：n8n 的節點一眼認得出來，靠的就是左邊那顆
@@ -145,8 +148,10 @@ _TILE = 32.0
 #: * **欄距 96 → 116**：埠的標籤畫在卡片**外面**，左右各 ``_PORT_LABEL_W``
 #:   （52）。96 的欄距塞不下兩個 52 —— 上游的輸出名與下游的輸入名會疊在
 #:   同一塊空白上（實測 `layout_label` 與 `single` 疊在一起）。
+#: * **欄距 116 → 156**（F124，使用者選的）：埠名要放得下（`_PORT_LABEL_W`
+#:   74 × 2 ＋ 兩邊各 4px 的縫）。``NODE_W + COL_GAP`` = 360，仍是 ``GRID`` 的倍數。
 NODE_W, NODE_H = 204.0, 64.0
-COL_GAP, ROW_GAP = 116.0, 26.0
+COL_GAP, ROW_GAP = 156.0, 26.0
 _PORT_R = 5.0
 #: 埠的**命中**半徑（比畫出來的圓點大 —— 5px 的點用滑鼠瞄很痛苦）。
 #: ``out_port_at`` 與 ``_NodeItem.shape`` 都讀它：命中範圍只能有一個定義，
@@ -475,7 +480,7 @@ def _port_label_text(spec: Dict[str, Any]) -> str:
 
 
 def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
-               role: str = "", lit: bool = False) -> None:
+               role: str = "", lit: bool = False, quiet: bool = False) -> None:
     """畫一顆埠。影像是圓、區域是菱形；輸入空心、輸出實心。
 
     ``role``（F68）：``"reference"`` 的埠畫**虛線邊**。理由是量出來的 ——
@@ -486,7 +491,16 @@ def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
     虛線是**跟區域線同一個語彙**（那條線也是虛的），不是新發明的記號。
 
     ``lit``（F68）：拖線拖到一半時，接得上的埠會亮起來、放大一點。
+
+    ``quiet``（F124）：原樣送出、沒有線接出去的輸出埠 —— 小一點、淡一點。它照樣
+    拖得出線（命中範圍不變），只是不再跟這張卡真的產出的東西搶眼睛。
     """
+    if quiet and not lit:
+        col = QColor(theme.mix_hex(TOKENS["canvas_edge"], TOKENS["canvas_bg"], 0.45))
+        p.setPen(QPen(col, 1.0))
+        p.setBrush(QBrush(col))
+        p.drawEllipse(anchor, 3.0, 3.0)
+        return
     data = kind in DATA_PORTS               # 數字／結果（F123 期 2）：方埠
     col = (region_color() if kind == "region" else
            QColor(TOKENS["seg_adc"]) if data else QColor(TOKENS["canvas_edge"]))
@@ -1146,6 +1160,11 @@ class _NodeItem(QGraphicsItem):
 
         # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
+        # 埠名一律小一號字（F124）：放得下 `Ref image`、`Right picture`。
+        p.save()
+        f = p.font()
+        f.setPixelSize(theme.font_px("font_tiny"))
+        p.setFont(f)
         ins = self.in_specs()
         in_anchors = self.in_anchors_local()
         lit_names = self._ports_to_light()
@@ -1176,33 +1195,29 @@ class _NodeItem(QGraphicsItem):
                                    anchor.y() - 7, _PORT_LABEL_W, 14),
                          text, align=Qt.AlignRight, mode=Qt.ElideMiddle)
 
+        quiet = set(self.info.get("quiet_out") or ())
         for spec, anchor in zip(self.out_specs(), self.out_anchors_local()):
             name, kind = spec["name"], spec["kind"]
-            _draw_port(p, anchor, kind, filled=True)
+            hush = name in quiet and kind not in DATA_PORTS
+            _draw_port(p, anchor, kind, filled=True, quiet=hush)
             if terse or not name:
                 continue
             # 每個輸出埠都標上它吐的名字（F7-9；F12 起也含具名區域）。以前
             # 只有多埠才標，於是「這張卡到底做在哪一條流上」在畫布上是看不到
             # 的 —— 而 Enhance 卡的 target / also apply 講的正是這些名字。
-            p.setPen(QColor(region_color().name() if kind == "region"
-                            else TOKENS["text_secondary"]))
+            col = QColor(region_color().name() if kind == "region"
+                         else TOKENS["text_secondary"])
+            if hush:
+                col = QColor(theme.mix_hex(col.name(), TOKENS["canvas_bg"], 0.45))
+            p.setPen(col)
             # 同左邊那一側：放不下要看得出來被切了（`layout_label` 以前畫成
-            # `layout_`，讀起來像一條真的叫那個名字的流）。
-            if kind in DATA_PORTS:
-                # 資料埠的字是固定的兩個（`numbers` / `results`，F123 期 2）：
-                # 小一號、寬到 boundingRect 邊上（NODE_W+58）為止 —— 不然
-                # 永遠被切成 `nu…rs`，而那是一個讀不出來的字。
-                p.save()
-                f = p.font()
-                f.setPixelSize(theme.font_px("font_tiny"))
-                p.setFont(f)
-                _draw_elided(p, QRectF(anchor.x() + 4, anchor.y() - 7,
-                                       _PORT_LABEL_W, 14), name)
-                p.restore()
-                continue
+            # `layout_`，讀起來像一條真的叫那個名字的流）。資料埠寫畫面上的字
+            # （`measured` / `classified`，`wording.port_word`），不是 recipe 的鍵。
             _draw_elided(p, QRectF(anchor.x() + 4, anchor.y() - 7,
-                                   _PORT_LABEL_W - 10, 14), name,
+                                   _PORT_LABEL_W, 14),
+                         wording.port_word(name) if kind in DATA_PORTS else name,
                          mode=Qt.ElideMiddle)
+        p.restore()
 
     def _paint_lot_strip(self, p: QPainter, body: QRectF,
                          col: QColor, enabled: bool) -> None:

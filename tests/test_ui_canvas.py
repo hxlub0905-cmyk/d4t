@@ -413,7 +413,10 @@ def test_an_unwired_recipe_wraps_instead_of_running_off_the_screen(qapp):
     # 它多算了 116px 而紅掉，但畫面其實是塞得下的。）
     cols = max(c for c, _r in pos.values()) + 1
     width = cols * canvas_mod.NODE_W + (cols - 1) * canvas_mod.COL_GAP
-    assert width < 1200, "換行之後整張圖要塞得進一般的工作區寬度"
+    # F124（2026-09-30）：1200 → 1300。使用者選了「欄距加寬、埠名放得下」
+    # （116 → 156），四欄因此是 1284px；實際的換行點照舊跟著畫布寬度走
+    # （下面那一段），這一條守的是 `WRAP` 那個上限不要排成一條要橫著掃的長列。
+    assert width < 1300, "換行之後整張圖要塞得進一般的工作區寬度"
 
     # F13-1 之後換行點是**跟著實際寬度走**的，所以這條不變量對每一種寬度都
     # 要成立，不只對寫死的 WRAP。

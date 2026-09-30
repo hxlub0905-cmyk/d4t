@@ -555,6 +555,10 @@ def build_body(win: "StudioWindow") -> None:
     # 那件事。
     win.problems = ProblemsBar(win)
     win.problems.problem_activated.connect(win._on_problem_activated)
+    # 「Connect ＿」（F124）：走跟手拉的線同一條路。
+    from . import canvas_edges
+    win.problems.connect_requested.connect(
+        lambda dst, srcs: canvas_edges.connect_into(win, dst, srcs))
     # **開窗時沒有選任何卡片，所以設定區是收起來的**（F13-1）。
     # 以前它一律攤開，於是畫面最大的一塊（中欄下半，1600×1000 上量到
     # 551px 高）裝的是一行灰字「(Pick a card from the library…)」——

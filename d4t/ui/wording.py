@@ -40,7 +40,22 @@ from d4t.core.pipeline import get_step
 __all__ = ["card", "card_of_step", "field", "name_list",
            "step_error_text", "trace_error_text", "issue_line",
            "exception_text", "failure",
-           "headline", "HEADLINE_MAX"]
+           "headline", "HEADLINE_MAX", "port_word"]
+
+#: 送去判定／寫出的那兩種埠**在畫面上叫什麼**（F124）。recipe 裡的鍵是
+#: ``numbers`` / ``results``（`step.NUMBERS` / `RESULTS`，存在 `recipe.edges`
+#: 上，不准改）；畫面上講的是**那一段流是什麼階段的資料** —— 量完的、分好類的。
+#: 使用者（2026-09-29）：「數字線跟 Feature 差在哪」—— 埠上寫 `numbers`，而
+#: 程式與文件把同一種東西叫 feature，一件事兩個名字。
+_PORT_WORDS = {"numbers": "measured", "results": "classified"}
+
+
+def port_word(name: Any) -> str:
+    """一顆資料埠在畫面上的字；不是資料埠就原樣回來（影像流、區域名）。"""
+    from . import strings
+    text = str(name or "")
+    word = _PORT_WORDS.get(text)
+    return strings.tr(word) if word else text
 
 #: 一行摘要最長幾個字（F117 G3 定的，H3 起兩個地方共用）。
 HEADLINE_MAX = 72
