@@ -7,7 +7,7 @@ bc543e31aaf0d68aef8a52fdd799c2e587c06487 AGENTS.md
 39ee1d1bdcada946ce1450ec56e87c863390c88e CLAUDE.md
 095a34ce7ca783934d2901bce9ee1154aa3d445f LICENSE
 12fbe1d21fba739e2a6e78b459733da7e5701922 README.md
-bbe6c13639bdcac94ba8de06f53464fe6c37e123 SESSION_LOG.md
+fbc549df2d22255f4dfe9e77f2d937b5b27412d9 SESSION_LOG.md
 4140d8b6ffc5c3b03a84d94968a2fadc51e233b0 conftest.py
 b6b460252efdafaf651c696f5e1c354c6d135479 d4t/__init__.py
 c3717698e6d9ccf9263fec6e849875debc5980d8 d4t/__main__.py
@@ -110,7 +110,7 @@ a2bef1c5504ba66b2165727e27800c5d72de791b d4t/ui/assets/d4t.svg
 8185c63eff68ad70b171109e2e48674c5c19240d d4t/ui/baseline.py
 fc655de13fde7e2d4319beb32e0c9f6c76f4784a d4t/ui/branding.py
 5e77c4d8ecdaf8996d63096f385907c1768cbeee d4t/ui/buttons.py
-d8004bb955f2b778da80f40b3cbf789b088e559e d4t/ui/canvas.py
+cd5f7736b32f9a2341649390c709666e1adebe09 d4t/ui/canvas.py
 b03ce61da339a0cce0673d34ed573cde8c0aecf1 d4t/ui/canvas_edges.py
 9381bc3ae9c1227eb645efa89e5ad0a40855ba4f d4t/ui/card_menu.py
 e78f82f7bc4f40733f8f34d3a690fd7b975320c0 d4t/ui/cell_canvas.py
@@ -151,6 +151,7 @@ dac095b7957a9356cf7e9bb0cf0c0cb50b2a5c9a d4t/ui/language.py
 489c5a6279f79249da2def6f41e3c59479c01299 d4t/ui/lattice_dialog.py
 236fa569d6e61900ab8a5c654aa29714b34bae77 d4t/ui/layout.py
 3ae460d9afe25a5db61b7e72389c30b3d059b05f d4t/ui/library.py
+9d3456ea35d0d18b91f0711a7f35b436752f6550 d4t/ui/link_drop.py
 f3d966c7383ef89db30e6d9e20dcb04086e5bd25 d4t/ui/locales/zh_TW.json
 f524f56e07eb3af61e8a9756b37c49c56b23b140 d4t/ui/manual.py
 44ad3ba81e088264db8b20d551959b0ee3468fd4 d4t/ui/number_picker.py
@@ -190,7 +191,7 @@ eff8a08464183b100a9dc2f8dd3ce38c428fde68 d4t/ui/widgets.py
 c3e3a843ef9c831411f3bb5622eff6fb7a2ef993 d4t/ui/wording.py
 133bc87c427642bfce9f4c9c533d589b8e597efe d4t/ui/workbench.py
 6c5fd93a7f587fe12c567549e1fa52e4eb8308a6 d4t/ui/workers.py
-7d86e6d70f24fbe313bcd43264dcb8b2cf5e11fc docs/ARCHITECTURE.md
+f91624d15cd9d3626fb851ae35f6e070f74a5220 docs/ARCHITECTURE.md
 86fbdd0f692fc4900b72f7f5e906fbb9f108bf9a docs/FAB-VALIDATION.md
 1365e450a6a568fb0520113e40af42a87cb907df docs/GLAS-INTERFACE.md
 b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
@@ -198,7 +199,7 @@ b51343e066dd891dfa733228b35bc12cb861f18c docs/HANDOVER.md
 89d987aabf174fa9d37a26c45e84ec6242799ca1 docs/NO-GIT-SETUP.md
 1da1025c74531425bc872e9724b171ce9c8492c1 docs/OFFLINE-INSTALL.md
 e37c86163a9375d8a6c41bdb01954afec169abdd docs/PITFALLS.md
-afd4399d5a18ffb94e58134a8565176777fa42db docs/ROADMAP.md
+1114ed31a6d133c799b68d72ebcb1d806ce616c5 docs/ROADMAP.md
 7d6e3d3a6e7ca55d6c61bd7d218efe51f9d4fa38 docs/USING-CD.md
 8841651b7fe832235955363bd992dab59041b507 docs/USING-CHARACTERIZATION.md
 3cf0f0732a846d963f3fb33cc589270da64f3c79 docs/USING-FOCUS.md
@@ -207,7 +208,7 @@ b0eb7eef59981a601edc03b95bb3ec4568e86f06 docs/USING-SIMGEN.md
 c02b5ed1aa8d2c33e7bfa8a9ca830a324fbd0cb4 docs/plans/F117-ui-review.md
 45f1e8d8a78055d054e6bd4d799644b046856481 docs/plans/F121-simple-input.md
 79710ff832663a05b11c2f6fe57e1bd070e5c993 docs/plans/F122-adc-and-output.md
-3fb16661a18b50f54f6908b14709194d3ced59b0 docs/plans/F124-measured-flow.md
+591da5f7fbce061335cd67d94483a299a2247595 docs/plans/F124-measured-flow.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
@@ -218,7 +219,7 @@ bfbd92feb10febaef5472eb75f18d78080a2852e recipes/ebi-die-to-die.json
 6cc4ba9945f1a7883719212563adfbdef0d6980a recipes/one-image-uniformity.json
 18cb7b133bc19124b221033d0b364b8bf8a3b554 recipes/rsem-worst-box.json
 cf5284f96a1d071e240ef88199e54d580b48c57c requirements.txt
-9905b0e78a026a74641fe54d97781c8a1b7307b2 tests/conftest.py
+6aac1ef6f25359068ba427a2fa0ba8c1c2755efd tests/conftest.py
 c96b78b09514426cafa0ce283d53d7e5a4b4e015 tests/fixtures/bench_baseline.json
 a7af1bb5f3e22bb931224d3cfb4db3eef3b9c339 tests/fixtures/golden/die_to_die_basic__make_sample.json
 ae64b3717a4c8410ca916b09fd31b3dfe500cc56 tests/fixtures/golden/dual_route_basic__make_sample.json
@@ -469,6 +470,7 @@ f2df1ad1df5a9c246f7f181997ff2a1e0e79cf41 tests/test_ui_info_level.py
 0f7447bee32093710fef2a59af90d79f1abd951b tests/test_ui_language.py
 e080d7615bf2f2b8df2c17b6bd0d9b4e4c1b9107 tests/test_ui_layout_follows_the_wires.py
 455ea8223907af8aa3a9a5516bdb09c2fdc0eced tests/test_ui_layout_modes.py
+6f1131a38896a44d02a2040c524e19f13c6db5fa tests/test_ui_link_drop.py
 26e65c59a96f1b4eb97e59b6647752e5c9f388fc tests/test_ui_lot_strip.py
 be81587dff305af2206c3d28fe5eda46972a8b9f tests/test_ui_manual.py
 c1c402893f31f756cfd74730eb50a127f8f09aa7 tests/test_ui_measured_flow.py

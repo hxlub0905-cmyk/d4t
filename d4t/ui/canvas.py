@@ -63,6 +63,8 @@ from PySide6.QtWidgets import (
 
 from . import region_words
 from . import edge_route
+from . import link_drop
+from .link_drop import accepts as _accepts
 # 排版是純函式（F124 期 3 搬出去）；名字留在這裡給既有的呼叫端。
 from .layout import WRAP, layout_columns
 from . import strings
@@ -380,15 +382,6 @@ def _diamond(centre: QPointF, r: float) -> QPainterPath:
     path.lineTo(centre + QPointF(-r, 0.0))
     path.closeSubpath()
     return path
-
-
-def _accepts(spec: Dict[str, Any], kind: str) -> bool:
-    """這顆輸入埠收不收 ``kind`` 那種線（``accepts`` 沒寫就是它自己的那一種）。
-
-    Output 的 ``results`` 埠兩種都收（F123 期 2：直接接量測卡也可以）。
-    """
-    return str(kind) in (spec.get("accepts")
-                         or [str(spec.get("kind") or "image")])
 
 
 def _rounded_path(pts: Sequence[QPointF], r: float) -> QPainterPath:
@@ -2834,9 +2827,12 @@ class PipelineCanvas(QGraphicsView):
                 if 0 <= port < len(specs) else "image")
         for item in self._scene.items(scene_pos):
             if isinstance(item, _NodeItem) and item is not src:
-                self.edge_added.emit(
-                    src.node_id, item.node_id, self.stream_of(src, port),
-                    item.in_param_at(item.mapFromScene(scene_pos), kind))
+                # 丟在卡上就好（F124 期 4）：接哪一格由 `link_drop` 決定，
+                # 兩格以上會問；取消＝不接。
+                stream = self.stream_of(src, port)
+                param = link_drop.drop_param(self, item, kind, stream, scene_pos)
+                if param is not None:
+                    self.edge_added.emit(src.node_id, item.node_id, stream, param)
                 return
         # 落在空白處：講出來，讓 Studio 開一張「接得上的卡」的選單。
         self.link_dropped.emit(src.node_id, kind, self.stream_of(src, port),

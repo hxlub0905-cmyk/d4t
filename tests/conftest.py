@@ -38,6 +38,12 @@ def _no_modal_dialogs_in_tests():
     lang = sys.modules.get("d4t.ui.language")
     if lang is not None:
         lang.ASK = False
+    # F124 期 4：線丟在有兩格以上接得上的卡上時跳的小選單。關掉＝退回「最近的
+    # 那一格」；要驗選單的測試用 `link_drop.CHOOSE` 換掉使用者的選擇。
+    drop = sys.modules.get("d4t.ui.link_drop")
+    if drop is not None:
+        drop.ASK = False
+        drop.CHOOSE = None
     yield
 
 
