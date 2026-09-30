@@ -1,6 +1,6 @@
 # F124 — 畫布是一條從頭接到尾的資料流
 
-狀態：**期 1、2 做完（2026-09-30）；期 3、4 未動。** 使用者看過六張示意圖說「可以」。
+狀態：**期 1～3 做完（2026-09-30）；期 4 未動。** 使用者看過六張示意圖說「可以」。
 前一份：[`F123`](../history/plans/F123-decision-and-output-cards.md)（Decision 與 Output
 變成真的卡）。這一份修 F123 期 2 的規則，F123 其餘三期照留。
 
@@ -210,3 +210,22 @@ characterization 那條流因此是 Pair source → H2H → Decision：判定第
   → `bridge` → `connect`，跟手拉的線同一條路、一步復原。計畫書原本寫「Decision
   的在判定面板頂端、Output 的在設定區」，改成這一個地方。
 * 規模尺：`canvas.py` 3,263 → 3,278（+15，簽了）。
+
+## 10. 期 3 的紀錄（2026-09-30）
+
+* **線不從卡背後穿過**：`ui/edge_route.forward_detour` —— 往前走的曲線（取 32 個點）
+  壓到夾在中間的卡，就改走那幾張卡上方（或下方）的空隙，跟換行的線同一種折法。
+  rsem-worst-box 與 one-image-uniformity 的 Input → GLV 以前從 ROI 卡背後穿過。
+* **一顆輸入埠一條道**（`edge_route.lane`）：繞行的線最後那段垂直的，越下面的埠
+  離卡越遠；而且整段落在埠名外面（`_EdgeItem.SIDE` ＝ 埠名寬 ＋ 8）。換行的線也照
+  這一條（F7-24 那條「甩太遠」的測試放寬到這兩個數，寫了理由）。
+* **「整理」照流排**（排版搬進 `ui/layout.py`，純函式）：
+  * **沒有入口、也不讀東西的卡是起點**（Input、Pair source、layout(GDS)）—— 不替它
+    補「route 前一張」的依賴。characterization 的 Pair source 因此疊在 Input 下面，
+    不再排在 Input 右邊（讀起來像 Input 餵給它）。
+  * **最後一帶只剩終點就不換行**（`_tuck_the_tail`）：Output 排在它最深的那張上游
+    那一欄、最下面。ebi-die-to-die 的 Write report 以前孤零零換到下一列第 0 欄，
+    那條線從最右邊繞回最左邊；characterization 的 Write comparison 三條線疊成一束。
+* 「停一張卡在線的中點上」那條測試：線現在會繞開，所以拆成兩條 —— 一條驗「會
+  繞開」，一條把繞行關掉、照舊驗「被蓋住時 × 按得到」（換行的線還是可能被蓋）。
+* 規模尺：`canvas.py` 3,278 → 3,245（排版與繞行的幾何搬出去）。

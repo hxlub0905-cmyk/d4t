@@ -62,6 +62,9 @@ from PySide6.QtWidgets import (
 )
 
 from . import region_words
+from . import edge_route
+# 排版是純函式（F124 期 3 搬出去）；名字留在這裡給既有的呼叫端。
+from .layout import WRAP, layout_columns
 from . import strings
 from . import wording
 from . import theme
@@ -245,8 +248,6 @@ def on_grid(value: float) -> float:
     return float(int((float(value) + step - 1e-9) // step) * step)
 
 
-#: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
-WRAP = 4
 
 
 def wrap_for_width(width: float) -> int:
@@ -272,65 +273,6 @@ def wrap_for_width(width: float) -> int:
     usable = max(1.0, float(width)) * 1.15
     fits = int((usable + COL_GAP) // (NODE_W + COL_GAP))
     return max(1, min(WRAP, fits))
-
-
-def layout_columns(node_ids: Sequence[str],
-                   edges: Sequence[Tuple[str, str]],
-                   wrap: Optional[int] = None) -> Dict[str, Tuple[int, int]]:
-    """自動排版：``node_id -> (欄, 列)``。
-
-    欄 = 拓撲深度（最長前置路徑長度），列 = 同欄內依 ``node_ids`` 的原順序。
-    沒有任何連線時每個節點各自深度 0 —— 那會全部疊在第一欄，所以退化情況下
-    改成「一個接一個往右排」，讓空 recipe 加卡片時看起來仍然是一條鏈。
-
-    但那條鏈**會換行**（``WRAP``，F7-9）。一份九張卡、還沒拉線的 recipe 排成
-    一列會超過 2500px；``fit()`` 為了塞進畫面得縮到看不出字，而它又有下限
-    （縮成小方塊比留捲軸更糟），結果是「一排讀不出來的小方塊 + 一條捲軸」。
-    換行之後同樣九張卡是 3×3，每一張都讀得到字。閱讀順序仍然是左到右、
-    上到下 —— 跟文字一樣，不需要額外學。
-    """
-    wrap = WRAP if wrap is None else max(1, int(wrap))
-    ids = [str(n) for n in node_ids]
-    idx = {n: i for i, n in enumerate(ids)}
-    preds: Dict[str, List[str]] = {n: [] for n in ids}
-    for a, b in edges:
-        if a in idx and b in idx:
-            preds[b].append(a)
-
-    if not any(preds[n] for n in ids):
-        return {n: (i % wrap, i // wrap) for i, n in enumerate(ids)}
-
-    depth: Dict[str, int] = {}
-    for n in ids:                       # ids 已是拓撲順序，一遍就夠
-        depth[n] = max((depth.get(p, 0) + 1 for p in preds[n]), default=0)
-
-    # 一「帶」= 換行之前的 ``wrap`` 個深度。帶高取「最擠的那個深度有幾個節點」，
-    # 這樣換行之後上下兩帶不會疊在一起。
-    per_depth: Dict[int, int] = {}
-    for n in ids:
-        per_depth[depth[n]] = per_depth.get(depth[n], 0) + 1
-    band_h = max(per_depth.values(), default=1)
-
-    # 同欄內的列序用 **barycenter**（上游都排在第幾列，我就往那個平均靠）。
-    # 以前照 node_order 排：上游在第 0 列、下游被排到第 2 列，線就斜跨整欄，
-    # 而三條斜線交叉起來「亂」的觀感比任何配色問題都大。跟上游對齊之後，
-    # 大部分的線接近水平 —— 交叉不是被畫得更好看，是**根本不發生**。
-    # 平手（沒有上游、或平均相同）退回原順序，既有測試鎖的就是這個順序。
-    rows_of: Dict[str, int] = {}
-    out: Dict[str, Tuple[int, int]] = {}
-    for d in sorted(set(depth.values())):
-        members = [n for n in ids if depth[n] == d]
-
-        def _bary(n: str) -> float:
-            prs = [rows_of[p] for p in preds[n] if p in rows_of]
-            return (sum(prs) / float(len(prs))) if prs else float(idx[n])
-
-        members.sort(key=lambda n: (_bary(n), idx[n]))
-        band, col = divmod(d, wrap)
-        for r, n in enumerate(members):
-            rows_of[n] = r
-            out[n] = (col, band * band_h + r)
-    return out
 
 
 def _draw_elided(p: QPainter, rect: QRectF, text: str,
@@ -1609,8 +1551,12 @@ class _EdgeItem(QGraphicsItem):
         outs = self.src.port_names()
         return str(outs[self.port]) if 0 <= self.port < len(outs) else ""
 
-    #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。
+    #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。它同時是「這條線
+    #: 算不算往回走」的門檻（``dx < 2 × BACK_REACH``）—— 相鄰兩欄的線 dx 是欄距。
     BACK_REACH = 46.0
+    #: 繞行的線（換行、繞過卡）**垂直那一段離卡多遠**（F124 期 3）：落在埠名
+    #: （``_PORT_LABEL_W``）外面，線才不會從 `Left picture` 那幾個字上劃過去。
+    SIDE = _PORT_LABEL_W + 8.0
 
     def path(self) -> QPainterPath:
         """左→右的三次貝茲；**往回走的線走另一個形狀**。
@@ -1635,19 +1581,26 @@ class _EdgeItem(QGraphicsItem):
             # 之後只剩 28px）曲線就退化成斜的直線，n8n 那種「從埠水平流出、
             # 水平流入」的秩序感整個不見 —— 看起來像線亂穿，其實是切線不夠平。
             h = max(COL_GAP * 0.67, dx * 0.5)
+            # 中間隔著一張卡就繞過去（F124 期 3，`edge_route` 的說明）。
+            pts = edge_route.forward_detour(a, b, h, self.canvas.card_bodies(
+                skip=(self.src, self.dst)), self.SIDE, ROW_GAP,
+                edge_route.lane(self.SIDE, self.dst_port))
+            if pts:
+                return _rounded_path(pts, 12.0)
             p.cubicTo(a + QPointF(h, 0), b - QPointF(h, 0), b)
             return p
         # **繞行**（F123 期 4）：從來源右邊出來、走到目標那一列旁邊的空隙、沿
         # 空隙水平走、再進目標左邊的埠。以前是一條從右上直接彎到左下的曲線，
         # 中段斜穿過夾在中間的卡（截圖上結果線穿過 Write charts）。水平那一段
         # 落在列與列之間，所以不壓任何卡；兩端仍只超出 ``BACK_REACH``。
-        h = self.BACK_REACH
+        h = self.SIDE
+        h_in = edge_route.lane(h, self.dst_port)    # 一顆埠一條道（F124 期 3）
         top = self.dst.scenePos().y()
         gy = (top - ROW_GAP / 2.0 if b.y() >= a.y()
               else top + self.dst.height() + ROW_GAP / 2.0)
         return _rounded_path([a, QPointF(a.x() + h, a.y()),
-                              QPointF(a.x() + h, gy), QPointF(b.x() - h, gy),
-                              QPointF(b.x() - h, b.y()), b], 12.0)
+                              QPointF(a.x() + h, gy), QPointF(b.x() - h_in, gy),
+                              QPointF(b.x() - h_in, b.y()), b], 12.0)
 
     def boundingRect(self) -> QRectF:
         # ``_CUT_R + 2`` 是那顆 × 的半徑。**boundingRect 必須涵蓋所有畫得出去的
@@ -2048,9 +2001,18 @@ class PipelineCanvas(QGraphicsView):
         # 畫，而在一張由左往右讀的畫布上，那讀起來是「它先跑」。
         # `docs/PITFALLS.md` 上「Region 卡排在量測卡右邊」那一條記的是同一種
         # 誤讀造成的真 bug。
+        #
+        # **本來就沒有入口的卡是起點**（F124 期 3）：Input、Pair source、
+        # layout(GDS)。替它補一個「route 前一張」的依賴，它就被排到前一張的右邊
+        # —— characterization 的 Pair source 因此排在 Input 右邊，讀起來像
+        # Input 餵給它。起點跟 Input 疊在第一欄。
         wired = {b for _a, b in self._pairs}
+        starts = {str(info.get("node_id")) for info in nodes
+                  if not (info.get("inputs") or info.get("region_inputs")
+                          or info.get("reads"))}
         self._implicit = [pair for pair in zip(self._order, self._order[1:])
-                          if pair not in set(self._pairs) and pair[1] not in wired]
+                          if pair not in set(self._pairs) and pair[1] not in wired
+                          and pair[1] not in starts]
 
         self._laid_wrap = self.wrap()
         pos = layout_columns(self._order, self._pairs + self._implicit,
@@ -2817,6 +2779,11 @@ class PipelineCanvas(QGraphicsView):
         self._node_anim = anim
         step(0.0)
         anim.start(QAbstractAnimation.DeleteWhenStopped)
+
+    def card_bodies(self, skip: Sequence[Any] = ()) -> List[QRectF]:
+        """每一張卡佔的矩形（場景座標，含腳帶）—— 線要繞開的東西。"""
+        return [QRectF(c.scenePos().x(), c.scenePos().y(), NODE_W, c.height())
+                for c in self._items.values() if c not in skip]
 
     def refresh_edges(self) -> None:
         for e in self._edges:

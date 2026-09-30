@@ -317,9 +317,13 @@ def test_an_edge_that_runs_backwards_stays_near_its_two_ends(window, qapp):
         backwards.append((edge.pair(), over_left, over_right))
 
     assert backwards, "這份 recipe 應該至少有一條往回走的線（換行）"
-    reach = view._edges[0].BACK_REACH
+    # F124 期 3：垂直那一段落在埠名外面（`SIDE`），進目標那一側一顆埠一條道
+    # （`edge_route.lane`）—— 從 46 放寬到那兩個數，理由是線不再從埠名上劃過去。
+    from d4t.ui import edge_route
+    side = view._edges[0].SIDE
+    lanes = {e.pair(): edge_route.lane(side, e.dst_port) for e in view._edges}
     bad = [(pair, l, r) for pair, l, r in backwards
-           if l > reach + 2 or r > reach + 2]
+           if l > lanes[pair] + 2 or r > side + 2]
     assert not bad, \
         "這些往回走的線甩得太遠（允許 %.0f px）：%s" % (reach, bad)
 

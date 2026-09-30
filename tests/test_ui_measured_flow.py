@@ -134,3 +134,89 @@ def test_the_button_draws_the_line_like_a_hand_would(window):
     window.model.undo()
     edges = [e.to_json() for e in window.model.to_recipe().edges]
     assert ["glv", "numbers", "decision", "numbers"] not in edges, "一步復原"
+
+
+# --------------------------------------------------------------------------- #
+# 5. 期 3：線不從卡背後穿過、「整理」照流排
+# --------------------------------------------------------------------------- #
+def _stroke_hits(view, edge):
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainterPathStroker, QPen
+    line = QPainterPathStroker(QPen(Qt.black, 2.0)).createStroke(edge.path())
+    hits = []
+    for nid, card in view._items.items():
+        if nid in (edge.src.node_id, edge.dst.node_id):
+            continue
+        body = QRectF(card.scenePos().x(), card.scenePos().y(),
+                      canvas_mod.NODE_W, card.height())
+        if line.intersects(body):
+            hits.append(nid)
+    return hits
+
+
+def test_a_line_does_not_run_behind_the_card_between_its_ends(qapp):
+    """rsem-worst-box：Input → GLV 以前從 ROI · on_pattern 背後穿過去，看起來像
+    是 ROI 吐出來的。⚠ 比的是描邊之後的外形（`QPainterPath.intersects` 看的是
+    填滿的面積）。"""
+    win = studio_mod.StudioWindow(show_welcome_on_start=False)
+    try:
+        win.resize(2000, 1100)
+        win.show()
+        assert win.load_recipe_path(
+            str(REPO / "recipes" / "rsem-worst-box.json"), sync=True)
+        view = win.pipeline
+        view.tidy()
+        edge = next(e for e in view._edges if e.pair() == ("load", "glv"))
+        on_pattern = next(n for n in view._items if "on_pattern" in n)
+        assert view.card(on_pattern).scenePos().y() == \
+            view.card("load").scenePos().y(), "前提：夾在同一列中間"
+        assert _stroke_hits(view, edge) == []
+    finally:
+        win.close()
+
+
+def test_a_card_with_no_inputs_is_a_start_not_the_next_step():
+    """Pair source 沒有入口：以前被補一個「route 前一張」的依賴，排到 Input 右邊，
+    讀起來像 Input 餵給它。"""
+    from d4t.ui.layout import layout_columns
+    order = ["load", "pair", "h2h", "decision", "cmp"]
+    lines = [("load", "h2h"), ("pair", "h2h"), ("load", "cmp"), ("h2h", "cmp"),
+             ("h2h", "decision"), ("decision", "cmp")]
+    pos = layout_columns(order, lines, 4)
+    assert pos["pair"][0] == pos["load"][0] == 0
+
+
+def test_the_starts_are_not_chained_on_the_canvas(window):
+    nid = window.model.add_step("pair_source")
+    window._refresh_pipeline()
+    assert (window.pipeline._order.index(nid) > 0
+            and not [p for p in window.pipeline._implicit if p[1] == nid])
+
+
+def test_an_output_left_alone_on_the_last_row_sits_under_its_source():
+    """ebi-die-to-die 在三欄寬的畫布上：Write report 以前孤零零換到下一列的
+    第 0 欄，那條線從最右邊繞回最左邊。"""
+    from d4t.ui.layout import layout_columns
+    order = ["load", "norm_ref", "norm", "sub", "dn", "glv", "decision", "report"]
+    lines = [("load", "norm"), ("load", "norm_ref"), ("norm", "sub"),
+             ("norm_ref", "sub"), ("sub", "dn"), ("dn", "glv"),
+             ("glv", "decision"), ("decision", "report")]
+    pos = layout_columns(order, lines, 3)
+    col, row = pos["decision"]
+    assert pos["report"] == (col, row + 1)
+
+
+def test_a_last_row_that_still_flows_on_wraps_as_before():
+    from d4t.ui.layout import layout_columns
+    pos = layout_columns(["a", "b", "c", "d"], [("a", "b"), ("b", "c"),
+                                                ("c", "d")], 2)
+    assert pos == {"a": (0, 0), "b": (1, 0), "c": (0, 1), "d": (1, 1)}
+
+
+def test_two_routed_lines_into_one_card_keep_their_own_lanes():
+    from d4t.ui import edge_route
+    lanes = [edge_route.lane(80.0, i) for i in range(3)]
+    assert len(set(lanes)) == 3 and lanes == sorted(lanes), \
+        "越下面的埠離卡越遠：它的垂直那段才不切過上面那幾顆埠"
+    assert canvas_mod._EdgeItem.SIDE > canvas_mod._PORT_LABEL_W, \
+        "繞行的垂直那段落在埠名外面"

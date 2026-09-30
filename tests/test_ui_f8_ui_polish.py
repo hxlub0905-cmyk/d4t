@@ -92,7 +92,15 @@ def test_forward_edges_leave_and_enter_horizontally(window, qapp):
             continue                    # 往回走的線走另一個形狀（F7-24）
         if abs(b.y() - a.y()) < 8:
             continue                    # 同列的線本來就近似水平，驗不出東西
-        p10 = edge.path().pointAtPercent(0.10)
+        path = edge.path()
+        if path.elementCount() > 4:
+            # 繞過中間那張卡的折線（F124 期 3）：它的第一段本來就是水平的，
+            # 驗的是「離埠那一段貼著埠的高度」，不是 10% 處。
+            p = path.pointAtPercent(path.percentAtLength(edge.SIDE / 2.0))
+            assert abs(p.y() - a.y()) < 1.0, (edge.src.node_id, edge.dst.node_id)
+            checked += 1
+            continue
+        p10 = path.pointAtPercent(0.10)
         drop = abs(p10.y() - a.y())
         total = abs(b.y() - a.y())
         assert drop < total * 0.25, (

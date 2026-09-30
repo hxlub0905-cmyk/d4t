@@ -384,6 +384,8 @@ d4t/
     │                         #     / `run_controller` / `canvas_edges`
     │                         #     留下的是 `model → UI`、signal 接線、狀態列、門面
     ├── canvas.py             #   節點畫布（n8n 式；純 UI，引擎零改動）
+    ├── edge_route.py         #   往前走的線碰到夾在中間的卡就繞過去；一顆輸入埠一條道（F124）
+    ├── layout.py             #   自動排版（純函式）：欄＝深度、起點不串接、最後只剩終點不換行（F124）
     ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
     ├── tree_scene.py tree_panel.py     #   判定樹掛在 Decision 卡底下／點一步就編輯那一步（F24、F123）
     ├── decide_panel.py route_panel.py route_badge.py  #   判定段編輯器／`route_by` 編輯器與徽章

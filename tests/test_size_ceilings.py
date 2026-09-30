@@ -375,7 +375,11 @@ FILE_CEILINGS = {
     # 原樣送出又沒接線的埠畫小畫淡（`_draw_port` 的 ``quiet``）。資料埠那一段
     # 專用的小字分支拿掉了（所有埠名都小一號），抵掉一部分。「哪幾顆是原樣
     # 送出、有沒有線」住 `canvas_edges.data_ports`，不在這裡。
-    "d4t/ui/canvas.py": 3278,
+    # 2026-09-30（F124 期 3）：3,278 → 3,245（−33）。排版（`layout_columns`，
+    # 純函式）搬進 `ui/layout.py`、「線繞開卡片」的幾何放 `ui/edge_route.py`；
+    # 留在這裡的是 `path` 叫它的那幾行、`card_bodies`、`SIDE`，與「沒有入口的
+    # 卡是起點」那一條排版前提。
+    "d4t/ui/canvas.py": 3245,
     # `CLAUDE.md` **每個 session 都會被讀進去**。2026-09-09 之前它是 647 行，
     # 一半是「某年某月使用者說了什麼」的故事 —— 規則留下、故事搬進
     # `docs/history/CLAUDE-2026-09-09.md`，瘦到 319 行。這一格擋它長回去：
