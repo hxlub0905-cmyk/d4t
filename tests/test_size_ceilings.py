@@ -213,7 +213,19 @@ FILE_CEILINGS = {
     # 剪一條線在 model 上是什麼意思（鐵則 10 的主場）進 `ui/canvas_edges.py`。
     # 計畫書把這一塊猜成「本質上就是接線」，量出來不是：437 行裡六支規則型的
     # 方法就佔 284 行，真正的 handler 只有 67 行。
-    "d4t/ui/studio.py": 4347,
+    # 2026-09-29（F121 期 1～4）：4,347 → **4,302**（−45）。入口簡單化：Input 卡
+    # 上那張「你要開哪一種」的選單拿掉（見下面 `HARD_CAPS` 那一段）。
+    # 2026-09-29（F122 期 2）：4,302 → **4,293**（−9）。「這一批的底稿」搬進
+    # `RunController.snapshot`（它多記了判定的簽章）。
+    # 2026-09-29（F122 期 3）：4,293 → **4,236**（−57）。舊門檻那條路退役：
+    # 分數直方圖上的門檻線、它的兩個 handler、重算 bin 數與準確率那兩支。
+    # 2026-09-29（F123 期 1）：4,236 → **4,186**（−50）。Decision 變成一張卡：
+    # 卡片庫的 `__score__` 偽卡、`_decision_problem`（判定的 lint 走卡片那條路）
+    # 拿掉，`remove_decision` 的確認搬進 `canvas_edges`。
+    # 2026-09-29（F123 期 2）：4,186 → **4,168**（−18）。判定摘要搬進
+    # `tree_scene.score_summary_text`（騰出位子給資料埠那一行，`canvas_edges.
+    # data_ports`）。
+    "d4t/ui/studio.py": 4168,
     # 19 道 `_migrate_*` 住在這裡（見下面 `recipe_migrations`）。它會用跟
     # `studio.py` 完全一樣的機制長成第二個 `studio.py`。
     #
@@ -284,7 +296,19 @@ FILE_CEILINGS = {
     # 擋得住每一張卡，不只被走查點到的那一張。
     # 2026-09-24：4,522 → 648。拆成四支（schema／migrations／validate 與留下來的
     # `Recipe`＋執行順序），另外三支都在一般上限底下。
-    "d4t/core/pipeline/recipe.py": 648,
+    # 2026-09-24（F121 期 1＋2）：648 → 650（+2）。`route_for` 的轉出口一行、
+    # `load_single` → Input 那一道的呼叫一行。**遷移的呼叫順序只住在
+    # `from_json_dict`**（`recipe_migrations` 的檔頭這樣規定），所以這一行只能加
+    # 在這裡；F11 那一道的版本閘收進那一支自己的參數，沒有在這裡多長一段 if。
+    # 2026-09-29（F123 期 1）：650 → 653（+3）。第 6 版的版本閘（判定變成一張卡
+    # 的那一道）與它的轉入口一行。版本閘拆成兩段（`< 5` / `< 6`）是必要的：
+    # 第 5 版以前那三道**不能**對第 5 版的檔案再跑一次（F68 那一道會把逐框比較
+    # 的參照釘回舊行為）。
+    # 2026-09-29（F123 期 2）：653 → 659（+6）。第 7 版遷移要**整份 recipe**
+    # （「誰產出哪個數字」只有 `bound_specs` 一份答案），所以它排在組好之後：
+    # `rec = cls(...)` ／ `if wire:` 那幾行與 `is_data_edge` 的轉出口。內容住在
+    # `recipe_migrations._migrate_data_lines` 與新的 `data_lines.py`。
+    "d4t/core/pipeline/recipe.py": 659,
     # 逐卡儀表板。這一支變長**通常是健康的**（加一張卡就多一個面板），所以
     # 這一格比其他四格更常需要調高 —— 那沒關係，重點是調高時有人看見。
     # 2026-09-08（F99 P0-2）：3,622 → 3,660。`header_boxes` —— 共用 header 左右
@@ -296,7 +320,11 @@ FILE_CEILINGS = {
     # 多的幾行是「跟卡片要名字，不自己拼字串」與那句為什麼。
     # 2026-09-24：3,669 → 1,733。基底、GLV、CD、Enhance 四塊各搬進自己的
     # `ui/inspector_*.py`（每支都在一般上限底下）；這裡剩註冊表與小面板。
-    "d4t/ui/inspectors.py": 1733,
+    # 2026-09-29（F122 期 2）：1,733 → 1,745（+12）。Write KLARF 的儀表要分得出
+    # 「拿不到 KlarfDoc」與「這份資料**沒有** KLARF」（後者寫的時候跳過，儀表不准
+    # 給一個「N 顆會改」的估計），而「Write to」空著時要寫出**真的會寫到**的那個
+    # 檔（預設在原檔旁邊）。兩件都是這一個面板的內容，不是接線。
+    "d4t/ui/inspectors.py": 1745,
     # 節點畫布。沒有被點名，只是它超過一般上限，凍住免得它安靜地漂。
     #
     # 2026-09-08（U18/U19/U20）：2,705 → 2,887（+182）。三件都長在畫布上，
@@ -328,7 +356,30 @@ FILE_CEILINGS = {
     # 2026-09-20（F117 A6）：3,160 → 3,163（+3）。卡片的外框改用畫布自己的
     # `canvas_card_border` —— `border_default` 是配面板底色調的，畫在畫布上
     # 淺色只有 **1.03** 的對比（那條框等於不存在）。多的三行是那句說明。
-    "d4t/ui/canvas.py": 3163,
+    # 2026-09-29（F123 期 1）：3,163 → 3,154（−9）。判定區的外框拿掉了（樹掛在
+    # Decision 卡底下、拖卡就拖樹），整區拖曳那一族（位移、重設）跟著走。
+    # 2026-09-29（F123 期 2）：3,154 → 3,193（+39）。**第三種埠**：數字／結果
+    # 的方埠（`_draw_port`）、一顆埠收哪幾種線（`_accepts`：Output 的 results
+    # 兩種都收）、數字線丟在卡上落在資料埠而不是最近的影像埠（`in_param_at`
+    # 的 kind）、資料出埠、放得下 `numbers` 的標籤。每一條都是「畫一顆埠、
+    # 判斷一條線落在哪」—— 畫布的本分；線的**規矩**住 `edit_plan` 與
+    # `canvas_edges`（接、剪、給埠）。＋6：`port_names`（每一顆出埠，含資料埠）
+    # 跟 `out_names`（流與區域）分開 —— 後者的說明與十幾支測試講的都是「流」。
+    # 2026-09-29（F123 期 4）：3,199 → 3,263（+64）。使用者：「線的顏色偏亂」→
+    # 照資料種類上色（`line_color`），「這條從哪裡來」改成停上去整條路徑亮
+    # （`set_hover_path` / `hover_path`，`focus_state` 讓它優先），換行的線沿
+    # 列與列之間的空隙繞（`path` 的繞行 ＋ `_rounded_path`）。三件都是「一條線
+    # 長什麼樣」—— 畫布的本分；每一件的理由寫在那一支的說明裡。
+    # 2026-09-30（F124 期 2）：3,263 → 3,278（+15）。使用者選了「欄距加寬、
+    # 埠名放得下」：欄距 116 → 156 與埠名寬 52 → 74 的理由（兩段常數說明）、
+    # 原樣送出又沒接線的埠畫小畫淡（`_draw_port` 的 ``quiet``）。資料埠那一段
+    # 專用的小字分支拿掉了（所有埠名都小一號），抵掉一部分。「哪幾顆是原樣
+    # 送出、有沒有線」住 `canvas_edges.data_ports`，不在這裡。
+    # 2026-09-30（F124 期 3）：3,278 → 3,245（−33）。排版（`layout_columns`，
+    # 純函式）搬進 `ui/layout.py`、「線繞開卡片」的幾何放 `ui/edge_route.py`；
+    # 留在這裡的是 `path` 叫它的那幾行、`card_bodies`、`SIDE`，與「沒有入口的
+    # 卡是起點」那一條排版前提。
+    "d4t/ui/canvas.py": 3245,
     # `CLAUDE.md` **每個 session 都會被讀進去**。2026-09-09 之前它是 647 行，
     # 一半是「某年某月使用者說了什麼」的故事 —— 規則留下、故事搬進
     # `docs/history/CLAUDE-2026-09-09.md`，瘦到 319 行。這一格擋它長回去：
@@ -465,14 +516,23 @@ COUNT_CEILINGS = {
     # 2026-09-08 的 23 個：viewmodel 8、studio 10、inspectors 3、scope 1、
     # canvas 1。要加第 24 個之前先問：這件事能不能改成問卡片自己
     # （`Step` 上多一個宣告），而不是在 UI 裡問「你是不是那張卡」。
+    # 2026-09-24（F121 期 2）：23 → 20。`load_single` 併回 Input，問「你是
+    # `load_patch` 還是 `load_single`」的那三處只剩一個答案。
     "ui_card_key_coupling": (
-        23,
+        20,
         "d4t/ui 裡按卡片名字分支的地方（不含 INSPECTORS/BY_METHOD 兩張註冊表）",
         lambda: len(card_key_couplings()),
     ),
     # god object 的兩個投影。261 → 268（六天）。
     "studio_window_methods": (
-        197,
+        190,
+        # 2026-09-29（F123 期 2）：191 → 190。`_score_summary_text` 搬進
+        # `tree_scene.score_summary_text`。
+        # 2026-09-29（F123 期 1）：192 → 191。`_decision_problem` 拿掉 —— 判定的
+        # lint 現在掛在 Decision 卡上，走跟每一張卡同一條路（`_node_problems`）。
+        # 2026-09-29（F122 期 3）：197 → 192。舊門檻那條路退役：分數直方圖上的
+        # 門檻線那一族五支（兩個 handler、`_uses_a_threshold`、
+        # `_refresh_bin_summary`、`_accuracy_text`）。
         # 2026-09-19（F116 第 6 步）：210 → 197。搬走 16 支，回來三支門面
         # （`_on_edge_added` **191 處／21 個測試檔**、`_connect` 17／3、
         # `_on_edge_removed` 16／5）——門面留**舊名字**，所以那 191 處一個字
@@ -542,7 +602,9 @@ COUNT_CEILINGS = {
         lambda: _class_shape("d4t/ui/studio.py", "StudioWindow")[0],
     ),
     "studio_window_attributes": (
-        266,
+        261,
+        # 2026-09-29（F122 期 3）：266 → 261。同上那一族拿掉，掉的是它們讀的
+        # `self.model.threshold` / `self.trial_scores` 那幾個參照。
         # 2026-09-19（F116 第 6 步）：279 → 266。這一族**沒有任何自己的狀態**
         # （全部讀寫 `win.model`），掉的是那 437 行裡的 `self.*` 參照。
         # 2026-09-19（F116 第 5 步）：292 → 279。只有 `_trial_t0` 與
@@ -615,9 +677,16 @@ COUNT_CEILINGS = {
     # 用著 align 而且撐著三組黃金值裡的兩組，出貨的 recipe 也可能帶著舊參數 ——
     # 不寫這道遷移，那些檔案開起來是一張參數全空的卡，跑出來的數字跟以前不一樣
     # **而且不會報錯**。那正是這個 repo 最貴的失敗（「跑得完、有數字、而且是錯的」）。
+    # 2026-09-24（F121 期 2）：22 → 23。`load_single`「SEM image」併回
+    # `load_patch`「Input」（使用者同意合卡、舊 recipe 自動升級）。**這一格問的
+    # 那句話有答案**：兩份出貨 recipe 與 `dual_route_basic.json` 都寫著
+    # `load_single`，不遷移的話它們開起來是一條 `unknown-step`。
     "recipe_migrations": (
-        22,
-        "recipe_migrations.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 5）",
+        # 2026-09-29（F123 期 2）：24 → 25。數字線與結果線（第 7 版）：舊檔案補
+        # 線，判定與寫出去的東西逐項不變。
+        # 2026-09-29（F123 期 1）：23 → 24。判定變成一張卡（第 6 版）。
+        25,
+        "recipe_migrations.py 裡 _migrate_* 的道數（RECIPE_VERSION 現在是 7）",
         _migration_count,
     ),
 }
@@ -674,9 +743,25 @@ HARD_CAPS = {
     # 2026-09-19（F116 第 6 步）：行 4,785 → 4,347、方法 210 → 197、
     # `self.*` 279 → 266。**六步全部做完**：7,686 → 4,347（−3,339，−43%）、
     # 293 → 197（−96）、433 → 266（−167）。
-    "d4t/ui/studio.py": 4347,
-    "studio_window_methods": 197,
-    "studio_window_attributes": 266,
+    # 2026-09-29（F121 期 1～4）：行 4,347 → 4,302（−45）。入口簡單化那四期在
+    # `studio.py` 上刪的比加的多：開資料時不再默默換 route、起手卡的說明收短、
+    # Input 卡上那張「你要開哪一種」的選單拿掉（入口只剩一顆）。方法與 `self.*`
+    # 一個都沒動。**刪掉的餘裕鎖住**，不留給下一個人偷偷用掉。
+    # 2026-09-29（F122 期 2）：行 4,302 → 4,293（−9）。「這一批的底稿」
+    # （`_last_run` 那個 dict）搬進 `RunController.snapshot` —— 它要多記判定的
+    # 簽章（Write outputs 拿來擋「改了判定沒按 Re-run 就寫」），而那一行不該
+    # 加在這裡。方法與 `self.*` 沒動。
+    # 2026-09-29（F122 期 3）：行 4,293 → 4,236（−57）、方法 197 → 192、
+    # `self.*` 266 → 261。舊門檻那條路退役（判定只剩判定樹）：分數直方圖上
+    # 那條拖得動的門檻線、`_on_threshold_changed/_committed`、
+    # `_uses_a_threshold`、`_refresh_bin_summary`、`_accuracy_text` 整族拿掉。
+    # 2026-09-29（F123 期 1）：行 4,236 → 4,186（−50）、方法 192 → 191。
+    # Decision 變成一張卡：`__score__` 偽卡、`_decision_problem` 拿掉。
+    # 2026-09-29（F123 期 2）：行 4,186 → 4,168、方法 191 → 190（判定摘要搬進
+    # `tree_scene`）。
+    "d4t/ui/studio.py": 4168,
+    "studio_window_methods": 190,
+    "studio_window_attributes": 261,
 }
 
 

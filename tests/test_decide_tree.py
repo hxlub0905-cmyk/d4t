@@ -299,7 +299,8 @@ def test_editing_through_a_bad_path_changes_nothing():
 # U1：佔位值 "0" 不可以變成一條 `0 >= 0` 的假規則（2026-08-24）
 # --------------------------------------------------------------------------- #
 def test_a_brand_new_recipe_does_not_start_with_a_fake_rule():
-    """全新 recipe 的 ``expr`` 是 **佔位值** ``"0"``，不是使用者的門檻。
+    """全新 recipe 的 ``expr`` **不是**使用者的門檻（F122 起它是空的；以前是
+    佔位值 ``"0"``）。
 
     以前 `use_decide` 只問「``expr`` 是不是空的」，於是每一份新 recipe 都從
     ``Rule(when="0 >= 0")`` 開始 —— 一個對每一顆都成立的假條件。後果有三層，
@@ -310,7 +311,9 @@ def test_a_brand_new_recipe_does_not_start_with_a_fake_rule():
     from d4t.ui.viewmodel import RecipeModel
 
     m = RecipeModel.starter("ebi_patch")
-    assert m.expr == "0", "前提變了：這條測試要的是那個佔位值"
+    # F122：沒有判定就是空的（佔位值 "0" 在引擎裡是一條真的判定）。常數那一條
+    # 路由 `is_a_constant_expression` 守著（舊檔案打開時還可能帶著 "0"）。
+    assert m.expr == "", "前提變了：全新 recipe 不該帶著一條判定"
 
     m.use_decide(True)
 

@@ -35,6 +35,7 @@ from .recipe import (
     execution_order,
     is_region_edge,
     resolve_route,
+    route_for,
     route_miss_message,
     validate,
 )
@@ -63,7 +64,7 @@ __all__ = [
     "validate", "execution_order", "RecipeError", "is_region_edge",
     "RECIPE_VERSION",
     # 分流（F23）
-    "RouteBy", "resolve_route", "route_miss_message",
+    "RouteBy", "resolve_route", "route_for", "route_miss_message",
     # expression
     "parse_expression", "Expression", "ExpressionError",
     # engine

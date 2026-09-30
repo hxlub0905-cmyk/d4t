@@ -21,7 +21,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication          # noqa: E402
 
-from conftest import first_source                   # noqa: E402
+from conftest import first_source, first_single_source  # noqa: E402
 from d4t.ui import studio as studio_mod             # noqa: E402
 from d4t.ui import theme as theme_mod               # noqa: E402
 from d4t.ui.wiring_slot import (                    # noqa: E402
@@ -92,8 +92,8 @@ def test_the_slot_changes_nothing_by_itself(qapp):
 # 3. 插槽挑一個 == 在畫布上拉那條線（逐位元組）
 # --------------------------------------------------------------------------- #
 def _gds_card(window):
-    """`load_single → roi_reference(GDS) → glv_stats`，只接了必要的影像線。"""
-    src = first_source(window, "load_single")
+    """`Input（1:single）→ roi_reference(GDS) → glv_stats`，只接了必要的影像線。"""
+    src = first_single_source(window)
     gds = window.add_card_after(src, "roi_reference")
     window.model.set_param(gds, "method", "layout layers")
     glv = window.add_card_after(gds, "glv_stats")
@@ -161,7 +161,7 @@ def test_show_it_on_the_canvas_points_at_the_card_that_feeds_the_slot(window):
 
 def test_showing_an_image_slot_points_at_the_card_that_produces_the_stream(window):
     _gds, glv = _gds_card(window)
-    src = first_source(window, "load_single")
+    src = first_single_source(window)
     window.select_node(glv)
 
     window.param_form.wire_show_requested.emit("source")

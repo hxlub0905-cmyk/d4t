@@ -11,7 +11,7 @@
 ## 0. 一分鐘上手
 
 **最快的路是不要自己搭**：工具列 `Open recipe…` → **`one-image-uniformity`**，
-然後 `Open images…` 挑你那張圖。跑一次就有四張圖。
+然後 `Open data…` 挑你那張圖。跑一次就有四張圖。
 
 > ⚠ **那張卡以前叫 `Write uniformity`**（2026-09-07 改名 `Write charts` ——
 > 它現在還畫一張**你自己配的圖**，不只均勻度那四張）。**recipe 裡的鍵沒有
@@ -28,20 +28,23 @@
 
 ```
                               ┌──→ [Write charts]   那幾張圖
-[SEM image] ─→ [ROI] ┄┄→ [Gray level]
+[Input] ─────→ [ROI] ┄┄→ [Gray level]
         └──────實線───────────→ ┘   └──→ [Write report]      defects.csv
 ```
 
 （`ROI` 到 `Gray level` 那一條是**虛線**：區域走的是菱形埠。）
 
-1. **`Open images…`** 挑一張圖（不需要 KLARF）。
+1. **`Open data…`** 挑一張圖（不需要 KLARF）。
 2. **ROI** 卡把框鋪滿整張圖（`Find them by` = `stripes in the image`，
    `Pick` = `none`）。
 3. **Gray level**：卡片**最上面**那排 `What to measure` 按
    **`Odd box out`** —— 那顆鈕會幫你把 `Boxes in the region` 設成 `each box`。
    （三顆鈕在還沒拉區域虛線之前是灰的，所以順序是**先拉線、再按鈕**。）
    然後 `How even are the boxes` 勾你要的數字。
-4. **`Write charts`**：`Write to` 填**完整路徑**的資料夾。
+4. **`Write charts`**：`Write to` 填**完整路徑**的資料夾，然後**拉一條線進它
+   左邊那顆方埠** —— 從 Gray level 的 `numbers`，或從接了 Gray level 的
+   Decision 的 `results`。它只畫**上游**那幾張 Gray level 量的框（F123）：
+   一份 recipe 有兩張 Gray level 時，畫哪一張的由線決定。
 5. **`Write report`**：`Write to` 填**同一個**資料夾，`What to put in the
    folder` 勾 `table` —— 數字才有 CSV 可以進 Excel。
 

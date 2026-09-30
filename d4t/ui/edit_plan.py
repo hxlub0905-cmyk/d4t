@@ -31,15 +31,16 @@ from __future__ import annotations
 from d4t.core.log import swallowed
 
 from dataclasses import dataclass, field
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 
 from ..core.pipeline import get_step, list_steps
-from ..core.pipeline.recipe import is_region_edge
-from ..core.pipeline.step import REGION_TYPES
+from ..core.pipeline.recipe import is_data_edge, is_region_edge
+from ..core.pipeline.step import DATA_PORTS, NUMBERS, REGION_TYPES, RESULTS
+from . import wording
 from .scope import visible_steps
 
 __all__ = [
-    "IMAGE", "REGION", "REJECT", "ConnectPlan", "UnpointPlan",
+    "IMAGE", "REGION", "DATA", "REJECT", "ConnectPlan", "UnpointPlan",
     "line_kind", "is_region_param", "param_for_stream", "conflicting_edges",
     "region_conflicts", "plan_connect", "plan_unpoint", "producers_of",
     "unmet_needs", "copyable_params",
@@ -51,6 +52,8 @@ REJECT = "reject"
 IMAGE = "image"
 #: 具名區域的線（畫布上是虛線 + 菱形埠）。
 REGION = "region"
+#: 數字線與結果線（F123 期 2）：量測卡 → Decision → Output。
+DATA = "data"
 
 
 @dataclass
@@ -77,7 +80,7 @@ class ConnectPlan:
     conflicts: List[Any] = field(default_factory=list)
 
     def ok(self) -> bool:
-        return self.kind in (IMAGE, REGION) and not self.reject
+        return self.kind in (IMAGE, REGION, DATA) and not self.reject
 
 
 @dataclass
@@ -223,6 +226,9 @@ def plan_connect(model: Any, src: str, dst: str, stream: str,
     落點由呼叫端給（使用者放開滑鼠的那一格，F10）；沒給才自己挑
     （:func:`param_for_stream`）。
     """
+    data = _plan_data(model, src, dst, stream, str(dst_in or ""))
+    if data is not None:
+        return data
     param = str(dst_in or "") or param_for_stream(model, dst)
     kind = line_kind(model, src, stream)
     region_param = is_region_param(model, dst, param)
@@ -231,6 +237,49 @@ def plan_connect(model: Any, src: str, dst: str, stream: str,
     if region_param or kind == REGION:
         return _plan_region(model, src, dst, stream, param, kind, region_param)
     return _plan_image(model, src, dst, stream, param)
+
+
+def _plan_data(model: Any, src: str, dst: str, port: str,
+               dst_in: str) -> Optional[ConnectPlan]:
+    """數字線與結果線（F123 期 2）；不是資料線回 ``None``（走影像／區域那兩條）。
+
+    判準兩頭都看：從資料出埠拉出來的（``numbers`` / ``results``），或落在資料
+    入埠上的。擋的四件事每一件都講得出下一句話：資料線只進 Decision 與 Output；
+    Decision 只收數字；影像與區域進不了資料埠；線本來就在。**一顆資料埠接很多條**
+    —— 沒有「擠掉舊線」這一步。
+    """
+    s, d = model.nodes.get(src), model.nodes.get(dst)
+    if s is None or d is None:
+        return None
+    try:
+        s_cls, d_cls = get_step(s.step), get_step(d.step)
+    except KeyError:                       # pragma: no cover
+        return None
+    sends = s_cls.data_output(s.params)
+    from_data = bool(port) and port == sends and port in DATA_PORTS
+    into = dst_in if dst_in in d_cls.data_inputs else ""
+    if not from_data and not into:
+        return None
+    if not from_data:
+        return ConnectPlan(
+            kind=REJECT, param=into,
+            reject="“%s” takes %s here - that line carries an image or a "
+                   "region. Drag from the %s port of a measuring card."
+                   % (dst, wording.port_word(into), wording.port_word(NUMBERS)))
+    takes = (RESULTS if RESULTS in d_cls.data_inputs
+             else NUMBERS if (port == NUMBERS and NUMBERS in d_cls.data_inputs)
+             else "")
+    if not takes:
+        why = ("a Decision takes numbers, not the results of a decision"
+               if d_cls.data_inputs else
+               "numbers go into a Decision or an Output card")
+        return ConnectPlan(kind=REJECT, param=into,
+                           reject="“%s” cannot take %s - %s."
+                                  % (dst, wording.port_word(port), why))
+    if model.has_line(src, dst, port, takes):
+        return ConnectPlan(kind=DATA, param=takes,
+                           already="%s → %s is already connected." % (src, dst))
+    return ConnectPlan(kind=DATA, param=takes)
 
 
 def _plan_image(model: Any, src: str, dst: str, stream: str,
@@ -396,8 +445,9 @@ def unmet_needs(model: Any, node_id: str) -> str:
     have |= {e.src_out for e in model.edges
              if e.dst == str(node_id) and e.src_out
              # 區域線帶的是**區域名**，不是影像流（F42 B2）。算進來的話一張
-             # 接了 `epi` 的卡會被當成「它已經有一條叫 epi 的流」。
-             and not is_region_edge(e, model.nodes)}
+             # 接了 `epi` 的卡會被當成「它已經有一條叫 epi 的流」。資料線同理。
+             and not is_region_edge(e, model.nodes)
+             and not is_data_edge(e, model.nodes)}
     missing = [s for s in needs if s and s not in have]
     if not missing:
         return ""

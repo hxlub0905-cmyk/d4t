@@ -43,8 +43,8 @@ from .step import (  # noqa: F401  有人從 recipe 拿 REGISTRY／Step 等（�
 
 __all__ = [
     "RecipeError", "RecipeNode", "ScoreSpec", "Edge", "Recipe",
-    "RouteBy", "resolve_route", "route_miss_message",
-    "Issue", "execution_order", "validate", "is_region_edge",
+    "RouteBy", "resolve_route", "route_for", "route_miss_message",
+    "Issue", "execution_order", "validate", "is_region_edge", "is_data_edge",
     "region_edge_values", "hydrate_regions", "RECIPE_VERSION",
     "describe_migration",
     "referenced_features",
@@ -82,10 +82,12 @@ from .recipe_schema import (  # noqa: F401
     _tree_whens,
     _version_tuple,
     hydrate_regions,
+    is_data_edge,
     is_region_edge,
     let_names_written,
     region_edge_values,
     resolve_route,
+    route_for,
     route_miss_message,
     rules_to_tree,
     version_skew,
@@ -111,6 +113,8 @@ from .recipe_migrations import (  # noqa: F401
     _migrate_also_apply,
     _migrate_chart_params_into_look,
     _migrate_compare_method_into_reference,
+    _migrate_measured_lines,
+    _migrate_decision_into_a_card,
     _migrate_drop_use_within,
     _migrate_folded_output_cards,
     _migrate_folded_region_cards,
@@ -125,6 +129,7 @@ from .recipe_migrations import (  # noqa: F401
     _migrate_rescued_feature_names,
     _migrate_roi_compare_into_glv_stats,
     _migrate_roi_from_mask_into_roi_reference,
+    _migrate_single_into_input,
     _migrate_split_load_cards,
     _migrate_split_out_combine,
     _migrate_template_regions,
@@ -156,7 +161,7 @@ def _region_line_says(recipe: "Recipe", nid: str, param: str) -> Any:
 class Recipe:
     """一份完整 recipe（單一 JSON 檔可互傳）。"""
     recipe_id: str
-    routes: Dict[str, List[str]]      # dataset kind → 依序的節點 id（v1 線性）
+    routes: Dict[str, List[str]]      # route 鍵 → 節點 id（只有一條時鍵只是標籤，見 route_for）
     nodes: Dict[str, RecipeNode]
     score: ScoreSpec
     #: 這份 recipe 的形狀版本（見 :data:`RECIPE_VERSION`）。**預設是現在這一版**
@@ -179,7 +184,7 @@ class Recipe:
     #: 多類別判定（F21-D）。``None`` = 這份 recipe 走 ``score`` 那條老路
     #: （一個位元都不動）。兩個都寫是 ``ambiguous-decision`` 的 error。
     decide: Optional["DecideSpec"] = None
-    #: 分流（F23）。``None`` = 照舊用 dataset kind 選 route（一個位元都不動）。
+    #: 分流（F23）。``None`` = 由 `route_for` 選 route（一條就是那一條，見那一支）。
     #: 有它時每一顆逐顆看 KLARF 的一欄決定走哪條 route（:func:`resolve_route`）。
     route_by: Optional["RouteBy"] = None
 
@@ -363,8 +368,9 @@ class Recipe:
         _migrate_merged_cards(nodes)
         # 最後把改過名的**參數值**換掉（F8：兩層的 dark/bright → 排名）。
         _migrate_renamed_values(nodes)
-        # Input 卡按 source 拆成兩張之後，單張影像那條 route 要換卡（F11 Input-4）。
-        _migrate_split_load_cards(nodes, routes)
+        # Input 卡：F11 拆卡（只對第 1 版，見那一支）→ F121 期 2 把 `load_single` 併回。
+        _migrate_split_load_cards(nodes, routes, d.get("version", 1))
+        _migrate_single_into_input(nodes)
         # roi_template 的一框一區域 → regions 字串（F11 Region-1）。
         _migrate_template_regions(nodes)
         # 只改了名字的卡（＋分數表達式裡它寫出來的 feature 名）。
@@ -427,13 +433,16 @@ class Recipe:
         # 區域參數 → 線（F42 B3）。**以版本號為判準**，而且要排在
         # `hydrate_regions` **前面** —— 它補的線正是下一行要讀的東西。
         version = _as_int(d.get("version", 1), "recipe 'version'")
-        if version < RECIPE_VERSION:
+        if version < 5:
             _migrate_region_params_into_edges(nodes, routes, edges)
             # 逐框比較的參照怎麼取（F68）—— 舊檔案釘回當時的行為。
             _migrate_glv_ref_pairing(nodes)
             # align 換形狀（F109）—— 連下游指著 `ref_aligned` 的地方一起改。
             _migrate_align_into_streams(nodes, edges)
-            version = RECIPE_VERSION
+        if version < 6:      # 判定變成一張卡（F123 期 1）
+            _migrate_decision_into_a_card(nodes, routes, decide, score)
+        wire = version < 8   # 送去判定／寫出的線（F123 期 2、F124）—— 要整份 recipe
+        version = max(version, RECIPE_VERSION)
         # F110：`subtract` 拆成比較卡與融合卡。**兩道都看舊的東西在不在**
         # （鐵則 9 的正牌用法），所以不掛在版本閘底下 —— 跑第二次是 no-op。
         # ⚠ 換卡那一道要排在 `absolute` 那一道**前面**：換完之後的節點已經不是
@@ -441,7 +450,7 @@ class Recipe:
         _migrate_split_out_combine(nodes, edges)
         _migrate_absolute_into_sign(nodes)
         hydrate_regions(nodes, edges)
-        return cls(
+        rec = cls(
             recipe_id=str(d["recipe_id"]),
             routes=routes,
             nodes=nodes,
@@ -454,6 +463,9 @@ class Recipe:
             decide=decide,
             route_by=route_by,
         )
+        if wire:
+            _migrate_measured_lines(rec)
+        return rec
 
     def save(self, path: Any) -> None:
         """寫成一份 recipe JSON（utf-8、``indent=2``、**atomic**，鐵則 5）。

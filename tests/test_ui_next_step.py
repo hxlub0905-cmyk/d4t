@@ -213,6 +213,20 @@ def test_an_upgrade_is_described_in_words():
         "已經是現在這一版的檔案沒有被升級，不該講話"
 
 
+def test_the_decision_card_the_upgrade_adds_is_not_called_a_split():
+    """第 6 版補上來的 Decision 卡不是「拆出來的」（F123 期 1）—— 判定一直都在，
+    只是以前不是一張卡。那一句要講它是什麼。"""
+    from d4t.core.pipeline.recipe import Recipe, describe_migration
+
+    raw = {"recipe_id": "old", "version": 5, "routes": {"ebi_patch": ["load"]},
+           "nodes": {"load": {"step": "load_patch", "params": {}}},
+           "score": {"expr": "glv_max", "threshold": 3.0,
+                     "bins": {"below": 0, "above": 1}}}
+    says = describe_migration(raw, Recipe.from_json_dict(raw))
+    assert any("decision" in t and "card" in t for t in says), says
+    assert not any("split" in t for t in says), says
+
+
 def test_a_renamed_card_is_named():
     """「多了兩條線」講得出來，「那張卡換了名字」也要 —— 那是畫布上最明顯的差別。"""
     from d4t.core.pipeline.recipe import describe_migration

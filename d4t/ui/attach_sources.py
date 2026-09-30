@@ -186,7 +186,7 @@ class AttachSources(QObject):
         這一支管主資料集。分開兩支是因為它們問的是**兩份不同的 KLARF**。
         """
         node = self.w.model.nodes.get(str(node_id))
-        if node is None or node.step not in ("load_patch", "load_single"):
+        if node is None or node.step != "load_patch":
             return
         if name != "carry":
             return

@@ -39,7 +39,9 @@ def _model():
     m = RecipeModel()
     glv = m.add_step("glv_stats")
     m.set_param(glv, "output_prefix", "N")
-    m.add_step("output_report")
+    out = m.add_step("output_report")
+    # Output 卡的清單只列它上游的數字（F123 期 3）—— GLV 接進來。
+    m.add_edge(glv, out, src_out="numbers", dst_in="results")
     m.decide = DecideSpec(let=[Let(name="QAA", expr="N_glv_max * 2", fill="0")],
                           tree=TreeLeaf(bin=0))
     return m

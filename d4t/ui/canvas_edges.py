@@ -28,10 +28,11 @@
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
 from d4t.core.pipeline import ParamError, get_step
-from d4t.core.pipeline.recipe import is_region_edge
+from d4t.core.pipeline.step import NUMBERS, RESULTS
+from d4t.core.pipeline.recipe import Edge, is_data_edge, is_region_edge
 
 from . import card_menu
 from . import edit_plan
@@ -202,6 +203,50 @@ def on_edge_added(win: "StudioWindow", src: str, dst: str, stream: str = "",
     with win.model.compound("connect"):
         connect(win, src, dst, stream, str(dst_in or ""))
 
+def data_ports(info: Dict[str, Any], model: Any, node_id: str,
+               step_cls: Any, unwired: bool) -> None:
+    """畫布上這張卡的**資料埠**（F123 期 2）：加進 Studio 組好的那份 info。
+
+    * 入埠：Decision 的 ``numbers``、Output 的 ``results``（``accepts`` 講它收
+      哪幾種線 —— Output 兩種都收，拖線時亮哪幾顆埠看它）。
+    * 出埠：寫數字的卡一顆 ``numbers``、Decision 一顆 ``results``。還沒接上
+      來源的卡不長（F10：前後都是空的）。
+    * 副標：有資料線接進來才講（``numbers → results``）；沒有就照舊說
+      ``(not connected)`` —— 那正是實情。
+
+    住在這裡而不是 `studio.py`：這件事從頭到尾都是線的事，而 `studio.py`
+    那一格只准往下（CLAUDE.md §4）。
+    """
+    if step_cls is None:
+        return
+    # **原樣送出、沒有線接出去的輸出埠**（F124）：畫布把它畫小、畫淡。判準用
+    # 畫布的定義（`writes` 減 `produces`、`regions_out` 減 `regions_produced` ——
+    # `docs/PITFALLS.md`「那張卡有哪些輸出埠有兩個答案」），「有沒有線」問 model。
+    used = {e.src_out for e in model.edges if e.src == node_id}
+    made = (set(info["produces"] if "produces" in info
+                else info.get("writes") or ())
+            | set(info["regions_produced"] if "regions_produced" in info
+                  else info.get("regions_out") or ()))
+    info["quiet_out"] = [n for n in list(info.get("writes") or [])
+                         + list(info.get("regions_out") or [])
+                         if n not in made and n not in used]
+    for port in step_cls.data_inputs:
+        info["inputs"].append({
+            "name": port, "label": wording.port_word(port), "stream": "",
+            "role": "", "kind": port,
+            "accepts": [RESULTS, NUMBERS] if port == RESULTS else [port]})
+    out = "" if unwired else step_cls.data_output(model.nodes[node_id].params)
+    info["data_out"] = out
+    if step_cls.data_inputs and any(
+            e.dst == node_id and is_data_edge(e, model.nodes)
+            for e in model.edges):
+        # 副標講畫面上的字（`measured → classified`，F124），不是 recipe 的鍵。
+        info["reads"] = (list(info.get("reads") or [])
+                         + [wording.port_word(x) for x in step_cls.data_inputs])
+        if out:
+            info["produces"] = [wording.port_word(out)]
+
+
 def remove_card(win: "StudioWindow", node_id: str) -> None:
     """刪掉一張卡（F117 J4 把它從 `studio.py` 搬過來）。
 
@@ -210,6 +255,8 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
     而它那一格是 `HARD_CAPS`：要往它加東西，先從它手上搬走等量的東西。
     """
     node_id = str(node_id)
+    if node_id == win.model.decision_node() and not _drop_the_tree(win):
+        return
     # 刪掉一張卡 = 把它餵出去的每一條線都剪掉（F10-5）。下游那幾格要跟著
     # 空出來，否則它們指著一條再也沒有人產出的流 —— 跟按 × 剪掉是同一件事，
     # 所以走同一條路（`_unpoint_stream`），不要在這裡另寫一份。
@@ -219,14 +266,17 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
             # 它那一格是**水合**出來的 —— 在線還在的時候先把它清掉，
             # 「參數 ＝ 線說的」那條不變量就當場破了（而它是常開的斷言）。
             # `model.remove` 拿掉線之後水合會把它空出來，這裡不必動它。
-            if is_region_edge(e, win.model.nodes):
-                continue
+            if is_region_edge(e, win.model.nodes) or is_data_edge(
+                    e, win.model.nodes):
+                continue                  # 資料線沒有下游那一格要空（F123）
             unpoint_stream(win, e.dst, e.src_out, e.dst_in)
         # 區域線**不必**在這裡處理了（F42 B2）：它現在是一條真的 Edge，
         # 而 `RecipeModel.remove` 刪卡時本來就會把它兩端的線一起拿掉 ——
         # 拿掉之後水合就把下游那幾格空出來。以前它是從參數推導的，
         # 所以「把那一格空掉」非得在這裡自己做一次不可。
         name = wording.card(win.model, node_id)   # 先取名，移除之後查不到
+        # 誰還指著它產出的數字（F122）—— 同樣要在刪之前問。
+        fallout = win.model.removal_fallout(node_id)
         # **補線的提議要在刪之前算**（F117 J4）—— 刪完之後那幾條線已經
         # 不在 model 裡了，算不出「本來接到哪」。
         plan = win.model.bridge_plan(node_id)
@@ -234,16 +284,44 @@ def remove_card(win: "StudioWindow", node_id: str) -> None:
     if win.selected_node == node_id:
         win.selected_node = None
         win.param_form.set_step(None, {}, [])
+    if getattr(win.model, "decide", None) is None:
+        win.show_param_page()     # 右邊不留一個判定已經不在的編輯面板
+    tail = (" " + " ".join(fallout)) if fallout else ""
     if plan:
         # ⚠ **提議，不是自動接**（鐵則 10：畫布上每一條線都是使用者拉
         # 的）。按下去才成真，而按下去的是使用者。
         win._status_next_step(
-            "Removed “%s” — %d line%s went with it." % (
-                name, len(plan), "" if len(plan) == 1 else "s"),
+            "Removed “%s” — %d line%s went with it.%s" % (
+                name, len(plan), "" if len(plan) == 1 else "s", tail),
             "Reconnect", lambda: bridge(win, plan),
             tip="Wire what fed “%s” straight into what it fed." % name)
+    elif fallout:
+        win._status("Removed “%s”.%s" % (name, tail))
     else:
         win._status("Removed “%s”" % name)
+
+
+def _drop_the_tree(win: "StudioWindow") -> bool:
+    """刪 Decision 卡＝拿掉整棵判定樹 —— **先問過**（2026-08-25 起的規矩）。
+
+    底下掛著使用者自己畫的整棵樹，而刪卡的重量看起來跟刪一張 Denoise 一樣。
+    復原回得來（一步），但「一個 Delete 把三層樹默默吃掉」不是那個鍵該有的重量。
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    from .tree_scene import display_tree, layout_cells
+
+    d = getattr(win.model, "decide", None)
+    if d is None:
+        return True
+    n = sum(1 for c in layout_cells(display_tree(d), d) if c.get("kind") == "leaf")
+    answer = QMessageBox.question(
+        win, "Remove the decision?",
+        "This takes the whole decision off the canvas - %d class%s and every "
+        "question that sorts into them.\n\nUndo brings it back."
+        % (n, "" if n == 1 else "es"),
+        QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+    return answer == QMessageBox.Yes
 
 
 def bridge(win: "StudioWindow", plan) -> int:
@@ -264,6 +342,36 @@ def bridge(win: "StudioWindow", plan) -> int:
             connect(win, str(src), str(dst), str(src_out or ""),
                     str(dst_in or ""))
     return len(rows)
+
+
+def connect_into(win: "StudioWindow", dst: str, sources: Sequence[str]) -> int:
+    """「Connect ＿」那顆鈕（F124，`Issue.connect`）：從 ``sources`` 各拉一條
+    送去判定／寫出的線進 ``dst``。
+
+    ⚠ **走 :func:`bridge`**（也就是 :func:`connect`）—— 跟手拉的線同一條路，
+    整批一步復原。鈕是使用者按的，所以這還是「使用者拉的線」（鐵則 10）。
+    哪一顆埠由卡片自己說（`Step.data_output` / `data_inputs`），不是猜。
+    """
+    model = win.model
+    d = model.nodes.get(str(dst))
+    if d is None:
+        return 0
+    try:
+        takes = tuple(get_step(d.step).data_inputs)
+    except KeyError:
+        return 0
+    rows = []
+    for src in sources:
+        s = model.nodes.get(str(src))
+        if s is None or not takes:
+            continue
+        try:
+            sends = get_step(s.step).data_output(s.params)
+        except KeyError:
+            continue
+        if sends:
+            rows.append((str(src), sends, str(dst), takes[0]))
+    return bridge(win, rows)
 
 
 def connect(win: "StudioWindow", src: str, dst: str, stream: str,
@@ -288,6 +396,15 @@ def connect(win: "StudioWindow", src: str, dst: str, stream: str,
         return
     if plan.kind == edit_plan.REGION:
         _connect_region(win, src, dst, stream, plan)
+        return
+    if plan.kind == edit_plan.DATA:
+        # 數字線與結果線（F123 期 2）：一條線就是全部，沒有參數要指、沒有舊線
+        # 要擠掉（一顆資料埠接很多條）。成環由 `add_edge` 擋。
+        if win.model.add_edge(src, dst, src_out=stream, dst_in=plan.param):
+            win._status("Connected %s → %s (%s)" % (src, dst, stream))
+        else:
+            win._status("Cannot connect %s → %s — that would make the "
+                        "pipeline loop back on itself." % (src, dst), "error")
         return
     if not win.model.add_edge(src, dst, src_out=stream,
                                dst_in=plan.param):
@@ -463,6 +580,15 @@ def _apply_edge_removed(win: "StudioWindow", src: str, dst: str, stream: str = "
     # **區域線現在是一條真的 Edge**（F42 B2）：剪它跟剪影像線一樣，
     # 而「那一格跟著空掉」是水合的自然結果（`RecipeModel._hydrate_regions`）
     # —— 不必在這裡另外清一次。以前它沒有 Edge 可刪，所以清參數就是全部。
+    if dst_in and is_data_edge(Edge(src, dst, stream, dst_in),
+                               win.model.nodes):
+        # 數字線與結果線（F123 期 2）：一條就是一條，剪掉它不動任何參數。
+        if win.model.remove_edge(src, dst, src_out=stream or None,
+                                 dst_in=dst_in):
+            win._status("Disconnected %s → %s (%s)"
+                        % (wording.card(win.model, src),
+                           wording.card(win.model, dst), wording.port_word(stream)))
+        return
     if _is_region_param(win, dst, dst_in):
         node = win.model.nodes.get(dst)
         before = dict(node.params) if node is not None else {}

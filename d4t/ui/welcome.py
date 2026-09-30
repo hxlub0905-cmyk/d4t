@@ -126,8 +126,9 @@ def axes_note() -> str:
     return strings.tr(AXES_NOTE) % len(GROUPS)
 
 
-#: 判定那一段的五個字（F117 D4）。**順序是使用者遇到它們的順序**，不是
-#: 字母序 —— 這張表要讀起來像一句話：分數 → 問題 → 類別 → 編號 → 結果。
+#: 判定那一段的四個字（F117 D4；F122 期 3 收掉第五個「verdict」—— 它講的就是
+#: 一顆 defect 的 class，現在畫面上那一格也叫 Class）。**順序是使用者遇到它們的
+#: 順序**，不是字母序 —— 這張表要讀起來像一句話：分數 → 問題 → 類別 → 編號。
 #:
 #: 為什麼需要它
 #: ------------
@@ -141,26 +142,26 @@ def axes_note() -> str:
 GLOSSARY = (
     ("score", "One number per defect, worked out from what the cards "
               "measured. You write the expression."),
-    ("decision", "The tree on the canvas. Each step asks the score (or any "
-                 "other number) a question."),
+    # 「Decision」大寫：F123 期 1 起它是一張卡（卡片庫與畫布上就叫這個名字）。
+    ("Decision", "The card on the canvas that sorts the defects - open it to "
+                 "see its tree. Each step asks the score (or any other number) "
+                 "a question."),
     ("class", "Where a defect ends up on that tree - you name it yourself "
-              "(“a spot stands out”)."),
+              "(“a spot stands out”). The chip beside the preview shows the "
+              "class one defect got, with its bin."),
     ("bin", "The number that class writes into the KLARF. One class, one "
             "bin."),
-    ("verdict", "What one defect got: its class name and its bin, on the "
-                "chip beside the preview."),
 )
 
 
-def ways_in() -> int:
-    """「開啟 KLARF」以外還有幾條路進得來（F117 G1）。
+def open_title() -> str:
+    """那顆「開自己的資料」鈕在 Studio 上叫什麼（F121 期 4：入口只有一顆）。
 
-    **數出來的，不是寫死的數字** —— 這裡以前寫著「the other three kinds」並且
-    點名了 ``a multi-page TIFF``，而 ``tiff_stack`` 2026-09-18（F114）就從產品面
-    拿掉了：**第一次見面的那一頁在介紹一種打不開的東西**，而且沒有任何測試
-    問得出來。
+    **從表上讀，不寫死**（F117 G1 那一課：這一頁的數字與名字寫死過兩次，兩次
+    都漂了）。以前這裡是 ``ways_in()`` —— 「開 KLARF 以外還有幾條路」—— 而入口
+    合成一顆之後那個數字只剩附加檔，句子也就不該再數了。
     """
-    return max(0, len(scope.INPUT_SOURCES) - 1) + len(scope.ATTACHMENTS)
+    return scope.INPUT_SOURCES[0].title if scope.INPUT_SOURCES else ""
 
 
 def _intro_text() -> str:
@@ -179,7 +180,7 @@ def _intro_text() -> str:
     return (
         "d4t reads the tool's patch / Review SEM images — with or without a "
         "KLARF — and lets you build a pipeline out of step cards: it scores "
-        "every defect, splits them into bins by a threshold, and writes the "
+        "every defect, sorts them into bins with a decision tree, and writes the "
         "result back to KLARF."
         "\nNo programming needed — you decide what a real defect looks like, "
         "and the pipeline works it out.")
@@ -193,8 +194,9 @@ def _footer_hint() -> str:
     ⚠ **是函式不是常數**（F117 G1）。兩個理由，而第二個是 bug：
 
     1. 最後那一句以前寫著「the four kinds of data it reads」—— 而
-       `scope.INPUT_SOURCES` 現在是**三**條（F114 拿掉 stack 之後）。
-       寫死的數字會漂，所以它現在是數出來的。
+       `scope.INPUT_SOURCES` 那時是**三**條（F114 拿掉 stack 之後）。寫死的
+       數字會漂，所以它改成數出來的；F121 期 4 入口合成一顆之後不再數，改成
+       講那顆鈕的名字（也是從表上讀的，:func:`open_title`）。
     2. 常數是在 **import 的那一刻**算的，於是 `scope.use_profile()` 換過
        profile 之後這一句還停在舊的分支 —— 那正是 U10 那條「旗標要透過模組
        讀」在講的事，而這一行剛好是漏網的那個。
@@ -206,9 +208,9 @@ def _footer_hint() -> str:
         return ("Open your own data, then press “Templates…” — do not start "
                 "from an empty pipeline; every template is a complete, "
                 "runnable one.")
-    return ("Close this window and Studio shows you the %d kinds of data it "
-            "reads, one entry each; then build the pipeline card by card from "
-            "the library on the left." % len(scope.INPUT_SOURCES))
+    return ("Close this window, open your data with “%s”, then build the "
+            "pipeline card by card from the library on the left."
+            % open_title())
 
 
 # --------------------------------------------------------------------------- #
@@ -511,9 +513,9 @@ class WelcomeDialog(QDialog):
         self.btn_open = QPushButton(strings.tr("Open my own data"), self)
         self.btn_open.setCursor(Qt.PointingHandCursor)
         self.btn_open.setToolTip(
-            "Close this window and go straight to picking a KLARF - the most "
-            "common case. Studio's start screen lists the other %d ways in, "
-            "one entry each." % ways_in())
+            "Close this window and pick your data - a KLARF, a folder of "
+            "images, or one image; d4t works out which (Studio's “%s”)."
+            % open_title())
         self.btn_open.setMinimumHeight(34)
         self.btn_open.clicked.connect(self.click_open)
 

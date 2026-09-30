@@ -63,7 +63,8 @@ def snapshot(results: Sequence[Dict[str, Any]],
              ground_truth: Optional[Dict[Any, Any]] = None,
              bins: Optional[Dict[str, int]] = None,
              threshold: Optional[float] = None,
-             label: str = "") -> Dict[str, Any]:
+             label: str = "",
+             decide: Any = None) -> Dict[str, Any]:
     """一次跑 → 一小塊可以存進 JSON 的東西。
 
     ``threshold`` 有給就照它重算 bin（等同拖門檻線的那條路，
@@ -73,12 +74,13 @@ def snapshot(results: Sequence[Dict[str, Any]],
     「這一輪比上一輪多抓了 5 顆」在沒有答案卷的時候仍然是使用者要看的 ——
     他自己知道那 5 顆是不是他要的。回 ``None`` 的話畫面上就什麼都不剩。
     """
+    from d4t.core.pipeline.decide_tree import called_real, positive_bins
+
     rows = list(results or [])
-    flagged = 0
-    for r in rows:
-        b = r.get("bin")
-        if b is not None and int(b) != 0:
-            flagged += 1
+    # 「判成真的」看每一類標的好消息／壞消息（F122 期 3；沒標的照舊 bin != 0）
+    # —— 跟正確率那一行、Results 表上紅著的格子同一條規矩。
+    outcomes = decide.bin_outcomes() if decide is not None else {}
+    flagged = sum(1 for r in rows if called_real(r.get("bin"), outcomes))
 
     out: Dict[str, Any] = {
         "at": float(time.time()),
@@ -98,7 +100,9 @@ def snapshot(results: Sequence[Dict[str, Any]],
     from .viewmodel import accuracy_at
     if threshold is None:
         from d4t.core.export import summarize
-        g = summarize(rows, ground_truth=ground_truth).get("ground_truth")
+        g = summarize(rows, ground_truth=ground_truth,
+                      positive_bins=positive_bins(decide, rows)
+                      ).get("ground_truth")
     else:
         g = accuracy_at(rows, float(threshold), bins, ground_truth)
     if not g:

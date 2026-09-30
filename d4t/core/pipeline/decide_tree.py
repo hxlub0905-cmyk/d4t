@@ -45,7 +45,8 @@ __all__ = [
     "answer", "walk", "features_used",
     "LEAF_PALETTE", "leaf_color", "verdict_rows", "NUISANCE_HEX",
     "cuts_on",
-    "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY",
+    "DANGER_HEX", "FAILED_KEY", "UNBINNED_KEY", "UNANSWERED_KEY",
+    "called_real", "positive_bins",
 ]
 
 
@@ -204,7 +205,7 @@ def count_yes(rows: Any, name: str, op: str, value: float):
 _NOT_A_QUESTION = ("score", "route_taken")
 
 
-def suggest_condition(rows: Any, prefer: Any = ()):
+def suggest_condition(rows: Any, prefer: Any = (), allowed: Any = None):
     """幫使用者挑一個起手的問題：``(名字, ">", 門檻)``；挑不出來回 ``None``。
 
     規則刻意簡單、而且講得出理由：**挑這一批上分得最開的那個數字**
@@ -214,7 +215,11 @@ def suggest_condition(rows: Any, prefer: Any = ()):
 
     ``prefer`` 是這份 recipe 的 working numbers（`decide.let` 的名字）——
     使用者自己組出來的數字優先，那是他心裡的量。
+
+    ``allowed``（F123 期 2）：只挑這幾個名字 —— 判定只問得到**接進 Decision**
+    的卡的數字，建議一個沒接線的數字等於建議一個 lint error。``None`` = 不限。
     """
+    allowed = None if allowed is None else {str(x) for x in allowed}
     stats: Dict[str, List[float]] = {}
     for r in rows or []:
         if not r.get("ok"):
@@ -223,6 +228,8 @@ def suggest_condition(rows: Any, prefer: Any = ()):
             k = str(k)
             if k in _NOT_A_QUESTION or k.endswith("_missing") \
                     or k.endswith("_raw"):
+                continue
+            if allowed is not None and k not in allowed:
                 continue
             if isinstance(v, (int, float)):
                 stats.setdefault(k, []).append(float(v))
@@ -375,6 +382,20 @@ def _path_of(tree: Any, feats: Dict[str, Any]) -> str:
     return walk(tree, feats)[1]
 
 
+def diverted(decide: Any, tree: Any, feats: Dict[str, Any]) -> bool:
+    """這一顆是不是被「問不出來的送去 bin N」拿走了（F122）。
+
+    判準跟引擎一字不差（`engine._eval_decision` 的 ``routed``）：recipe 設了
+    ``unanswered_bin``，**而且**這一顆走樹的路上有一題問不出來。重走的是同一支
+    :func:`walk` —— 引擎的 path 不進結果 JSON（見檔頭），所以每一個「每一類
+    幾顆」都是重走出來的，而重走的人以前不知道有這一格：引擎把它放進 bin N，
+    判定帶、報表、box plot 卻把它算在它走到的那片葉子上。
+    """
+    if getattr(decide, "unanswered_bin", None) is None or tree is None:
+        return False
+    return bool(walk(tree, feats)[2])
+
+
 def flow_counts(tree: Any, rows: Any) -> Dict[str, int]:
     """每個節點「流過幾顆」：``路徑前綴 → 顆數``（``""`` = 根 = 全部）。
 
@@ -446,7 +467,31 @@ def decision_info(decide: Any, rows: Any = None,
         "cells": layout_cells(tree, decide),
         "counts": flow_counts(tree, rows) if ran else None,
         "leaf_stats": leaf_stats(tree, rows, ground_truth) if ran else {},
+        # 走到那片葉子、但被「問不出來的送去 bin N」拿走的顆數（F122）——
+        # 托盤上的數字仍是「走到這裡的」（分支流量要守恆），旁邊講有幾顆
+        # 其實去了 bin N。
+        "diverted": _diverted_by_leaf(decide, tree, rows) if ran else {},
+        "unanswered_bin": getattr(decide, "unanswered_bin", None),
     }
+
+
+def _diverted_by_leaf(decide: Any, tree: Any, rows: Any) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    if getattr(decide, "unanswered_bin", None) is None or tree is None:
+        return out
+    for r in rows or []:
+        if not r.get("ok") or r.get("bin") is None:
+            continue
+        feats = dict(r.get("features") or {})
+        try:
+            if not diverted(decide, tree, feats):
+                continue
+            p = _path_of(tree, feats)
+        except Exception:  # 顯示用，走不動就不計（同 flow_counts）
+            swallowed("decide_tree._diverted_by_leaf")
+            continue
+        out[p] = out.get(p, 0) + 1
+    return out
 
 
 def path_text(tree: Any, path: str) -> str:
@@ -482,6 +527,8 @@ DANGER_HEX = "#d05a4c"
 #: 「算不出來」那兩列的 key（不可能跟樹的路徑撞名 —— 路徑只有 y/n）。
 FAILED_KEY = "!failed"
 UNBINNED_KEY = "!unbinned"
+#: 「問不出來的送去 bin N」那一格（`DecideSpec.unanswered_bin`）的列鍵。
+UNANSWERED_KEY = "!unanswered"
 
 
 def features_used(decide: Any) -> List[str]:
@@ -534,6 +581,43 @@ def features_used(decide: Any) -> List[str]:
     return order
 
 
+def called_real(bin_: Any, outcomes: Optional[Dict[int, str]] = None
+                ) -> Optional[bool]:
+    """這個 bin 算不算「判成真缺陷」（F122 期 3：**好消息只有一個判準**）。
+
+    F119 讓使用者在每一類上標「好消息／壞消息／中性」，顏色照它畫；而正確率、
+    抓漏、誤殺、Results 表上紅著的格子以前一律看 ``bin != 0`` —— 同一份 recipe
+    兩個答案（例：「nothing to measure」bin 9 標成中性，卻被算成「判成真的」）。
+    現在：標了 ``bad`` ＝判成真的；``good`` / ``neutral`` ＝不是；**沒標的照舊**
+    ``bin != 0``（舊 recipe 一個數字都不變）。``None``（沒判定）→ ``None``。
+    """
+    if bin_ is None:
+        return None
+    try:
+        b = int(bin_)
+    except (TypeError, ValueError):
+        return None
+    marked = (outcomes or {}).get(b)
+    if marked in ("good", "neutral"):
+        return False
+    if marked == "bad":
+        return True
+    return b != 0
+
+
+def positive_bins(decide: Any, results: Any) -> Optional[List[int]]:
+    """`export.summarize(positive_bins=…)` 要的那一串（F122 期 3）。
+
+    一類都沒標 → ``None``（`summarize` 的預設 ``bin != 0``，逐位元組照舊）。
+    """
+    outcomes = decide.bin_outcomes() if decide is not None else {}
+    if not outcomes:
+        return None
+    seen = {int(r["bin"]) for r in (results or [])
+            if r.get("bin") is not None} | set(outcomes)
+    return sorted(b for b in seen if called_real(b, outcomes))
+
+
 def leaf_color(bin_: int, nuisance: str = NUISANCE_HEX) -> str:
     """一個 bin 一個穩定的顏色（同一份 recipe 重開顏色不變）。
 
@@ -578,13 +662,19 @@ def verdict_rows(decide: Any, results: Any,
     tree = display_tree(decide)
 
     if tree is not None:
-        # path → 走到那裡的 defect_id（順序照結果的順序）。
+        # path → 走到那裡的 defect_id（順序照結果的順序）。被「問不出來的
+        # 送去 bin N」拿走的顆**不算在葉子上**（F122）—— 引擎給它們的是 bin N。
         by_path: Dict[str, List[str]] = {}
+        sent_away: List[str] = []
         for r in rows_in:
             if not r.get("ok") or r.get("bin") is None:
                 continue
+            feats = dict(r.get("features") or {})
             try:
-                p = _path_of(tree, dict(r.get("features") or {}))
+                if diverted(decide, tree, feats):
+                    sent_away.append(str(r.get("defect_id")))
+                    continue
+                p = _path_of(tree, feats)
             except Exception:  # 顯示用，走不動就不計
                 swallowed("decide_tree.verdict_rows")
                 continue
@@ -612,6 +702,22 @@ def verdict_rows(decide: Any, results: Any,
                 "labelled": labelled,
                 "colour": leaf_color(int(cell.get("bin")), nuisance),
                 "kind": "class",
+            })
+        ub = getattr(decide, "unanswered_bin", None)
+        if ub is not None and sent_away:
+            real = labelled = 0
+            for did in sent_away:
+                gt = truth.get(did)
+                if isinstance(gt, dict) and "is_real" in gt:
+                    labelled += 1
+                    real += 1 if gt.get("is_real") else 0
+            out.append({
+                "key": UNANSWERED_KEY,
+                "name": str(getattr(decide, "unanswered_label", "") or
+                            "could not be decided"),
+                "bin": int(ub), "count": len(sent_away), "ids": sent_away,
+                "real": real, "labelled": labelled,
+                "colour": leaf_color(int(ub), nuisance), "kind": "class",
             })
     else:
         # 沒有判定樹（二元 score 的老路）—— 一列一個 bin。

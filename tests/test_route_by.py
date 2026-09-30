@@ -208,9 +208,19 @@ def test_a_clean_route_by_recipe_validates_even_with_the_dataset_kind():
 
 
 def test_without_route_by_an_unknown_kind_is_still_an_error():
-    """上一條放行的是 route_by；老路的 unknown-route 一個字都不能鬆。"""
-    assert "unknown-route" in _codes(validate(_plain_recipe(), kind="rsem"),
-                                     "error")
+    """上一條放行的是 route_by；老路的 unknown-route 不能跟著鬆。
+
+    ⚠ **F121 期 1（2026-09-24）改了這一條的對照組**：只有一條 route 的 recipe
+    現在不看鍵名（`route_for`：一條就跑那一條 —— 使用者回報一份 `ebi_patch`
+    的 recipe 在影像資料夾上每一顆都 unknown-route）。所以單 route 那一份不再是
+    「不認得的 kind」；還會講 unknown-route 的只剩**好幾條、沒有一條是這種資料
+    的**，而那正是這一條要守的「沒有 route_by 就不放行」。"""
+    two = _plain_recipe()
+    two.routes["rsem"] = ["load", "glv"]
+    assert "unknown-route" in _codes(validate(two, kind="folder"), "error")
+    # 單 route 的那一份：刻意放行（`tests/test_route_for.py` 守正向）。
+    assert "unknown-route" not in _codes(
+        validate(_plain_recipe(), kind="rsem"), "error")
 
 
 def test_two_routes_with_the_same_card_but_different_settings_get_a_note():

@@ -6,8 +6,9 @@
 1. **配對用 manifest 的 ``label_png`` 欄位，不是自己拼檔名。** GLAS 的
    ``_safe_name`` 會把非 ``[A-Za-z0-9-_.]`` 的字元換成底線 —— 自己拼的話
    乾淨的 id 會過、髒的會**安靜地**對不上。
-2. **附加檔不准混進 ``DefectItem.images``。** ``load_single`` 的契約建立在
-   「一顆幾張」上，混進去的話每一顆 RSEM defect 都會突然變成兩張而載不進來。
+2. **附加檔不准混進 ``DefectItem.images``。** Input 卡的名字表照「一顆幾張」
+   填（F121 期 2；F11 那時的 ``load_single`` 更是一顆兩張就拒絕載入），混進去
+   的話每一顆 RSEM defect 都會突然變成兩張。
 3. **換一份匯出，快取要失效。** 有 KLARF 的時候 lot token 只看 KLARF 的 stat，
    而換 mask 目錄不會動到 KLARF —— 那會讓影像段快取把**上一份匯出算出來的框**
    餵回來（鐵則 9 講的正是這個形狀）。
@@ -204,9 +205,9 @@ def test_no_label_map_is_a_warning_with_what_to_do(tmp_path):
 # 3. 附加檔不准混進 images
 # --------------------------------------------------------------------------- #
 def test_the_sidecar_does_not_become_one_of_the_defect_images(tmp_path):
-    """``load_single`` 在一顆有兩張時會拒絕載入，而那個拒絕是對的。
-    label 混進 ``images`` 的話，每一顆 RSEM defect 都會突然載不進來 ——
-    而錯誤訊息會說謊（「這顆有 2 張影像」）。"""
+    """``images`` 的意思是「機台拍了幾張」，而 Input 卡的名字表照它填。
+    label 混進去的話，每一顆 RSEM defect 都會突然變成兩張 —— 畫布多一顆假的
+    埠，錯誤訊息也會說謊（「這顆有 2 張影像」）。"""
     ds = _lot(tmp_path, ["1"])
     glas_export.attach(ds, _export(tmp_path, [("1", "1_label.png")]))
     item = ds.items[0]

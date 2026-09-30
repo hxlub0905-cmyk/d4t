@@ -20,7 +20,8 @@ Output 段是什麼（使用者 2026-08-20 定調）
 `tests/test_batch_steps.py` 的逐位元組比對，那是之後拿掉 Export 精靈的前提）。
 
 **三張卡**（F38，2026-08-26。使用者：「七張裡有五張在回答同一個問題，收成
-三張」）：
+三張」）—— 之後多了第四張 ``output_uniformity``（「Write charts」，F85 的均勻度
+圖），它不在下面這張表裡是因為它不是從那七張收來的：
 
 ==================  =======================================  =================
 卡                  寫什麼                                   引擎
@@ -99,10 +100,11 @@ from ..export import html as export_html
 from ..export import klarf_out, overlay
 from ..export import report as export_report
 from ..pipeline import decide_tree
+from ..pipeline.engine import image_through_line
 from ..pipeline.context import Context
 from ..pipeline.step import (
-    CATEGORY_BATCH, GROUP_OUTPUT, SCALE_LOT, ParamSpec, Step, StepError,
-    register_step,
+    CATEGORY_BATCH, GROUP_OUTPUT, RESULTS, SCALE_LOT, ParamSpec, Step,
+    StepError, register_step,
 )
 from ..log import swallowed
 from ._util import parse_key_list
@@ -126,6 +128,10 @@ class _OutputStep(Step):
     # 快取邊界改成從宣告推導之後，這一格可以講實話了。
     category = CATEGORY_BATCH
     group = GROUP_OUTPUT
+    #: 寫的是**整張結果表**（F124）；從 Decision 接 ``results`` 就有類別，直接
+    #: 從量測卡接 ``numbers`` 就沒有（F123 期 2，使用者：「不想綁死一定要有
+    #: Decision」）。可以接很多條（`batch.rows_for_output`）。
+    data_inputs = (RESULTS,)
     # **整批一次**（F17-④）。`is_batch` 現在是這一格推導出來的 ——
     # 直接寫 `is_batch = True` 仍然認得（舊卡片、外掛），但新的卡片
     # 請宣告尺度：布林答不出「還有第三種嗎」。
@@ -138,6 +144,11 @@ class _OutputStep(Step):
     PATH = "path"
     #: `configuration_issues` 講「這裡填什麼」時用的字（子類覆寫）。
     WHAT = "file"
+    #: 「Write to」空著時寫到哪（F122，使用者：「預設寫到資料旁邊」）。相對
+    #: 路徑，跟填了相對路徑一樣接在資料旁邊（`_anchor`）。**每張卡一個名字**：
+    #: 兩張卡都空著時不會寫進同一個資料夾互蓋。Write KLARF 不用這一格
+    #: （它的預設跟著 KLARF 的檔名走，見 `OutputKlarfStep.default_path`）。
+    DEFAULT = ""
 
     @classmethod
     def resolve_reads(cls, params: Dict[str, Any]) -> List[str]:
@@ -180,10 +191,12 @@ class _OutputStep(Step):
 
     @classmethod
     def configuration_issues(cls, params: Dict[str, Any]) -> List[str]:
+        # **空著不是錯**（F122）：空＝寫到資料旁邊的預設位置。以前這裡是一條
+        # error，而 error 會擋住**試跑** —— 試跑根本不寫（鐵則 11），於是新加
+        # 一張 Output 卡就什麼都跑不了，直到使用者想出一條路徑。
         path = str(params.get(cls.PATH, "") or "").strip()
         if not path:
-            return ["This card has nowhere to write yet. Put the full path of "
-                    "the %s into “Write to”." % cls.WHAT]
+            return []
         wrong = cls.path_issue(path)
         return [wrong] if wrong else []
         # ⚠ **不檢查「資料夾存不存在」**：`report.write_csv` 那一族會自己建
@@ -192,7 +205,7 @@ class _OutputStep(Step):
 
     def _folder_of(self, p: Dict[str, Any], bctx: Any = None) -> str:
         """寫資料夾那幾張卡的開場白（**三行一模一樣的東西收成一支**）。"""
-        folder = str(p[self.PATH]).strip()
+        folder = str(p[self.PATH]).strip() or self.DEFAULT
         if not folder:
             raise StepError(self.key, "nowhere to write - fill in “Write to”.")
         folder = _anchor(folder, bctx)
@@ -200,6 +213,17 @@ class _OutputStep(Step):
         if wrong:
             raise StepError(self.key, wrong)
         return folder
+
+    def destination(self, params: Dict[str, Any], dataset: Any) -> str:
+        """「Write to」解出來**真的是哪裡**（乾跑用，F122 期 4）。
+
+        跟 `run_batch` 走同一支（`_folder_of` / `_path_of`）：相對路徑接在資料
+        旁邊、空著用這張卡的預設。解不出來就 raise `StepError`（那句話就是答案）。
+        """
+        p = self.validate_params(params)
+        where = _DataOnly(dataset)
+        return (self._folder_of(p, where) if self.wants_folder()
+                else self._path_of(p, where))
 
     def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
         """**不會被呼叫**：整批一次的卡由 `run_batch_steps` 跑。
@@ -218,6 +242,13 @@ class _OutputStep(Step):
         if not path:
             raise StepError(self.key, "nowhere to write - fill in “Write to”.")
         return _anchor(path, bctx)
+
+
+class _DataOnly:
+    """只帶著資料集的替身 —— `_anchor` / `_path_of` 只問 ``.dataset``。"""
+
+    def __init__(self, dataset: Any) -> None:
+        self.dataset = dataset
 
 
 def _anchor(path: str, bctx: Any) -> str:
@@ -662,6 +693,7 @@ class OutputReportStep(_OutputStep):
     label = "Write report"
     PATH = "folder"
     WHAT = "folder"
+    DEFAULT = "d4t_report"
     help = ("Write this run into one folder: a report you can open in a "
             "browser, the same numbers as a spreadsheet, a picture of every "
             "defect, and the recipe that produced them. Tick what you want in "
@@ -674,7 +706,8 @@ class OutputReportStep(_OutputStep):
             name="folder", type="str", default="",
             label="Write to",
             help=("Folder to write everything into. It is created if it does "
-                  "not exist; files with the same names are overwritten."),
+                  "not exist; files with the same names are overwritten. "
+                  "Empty = a folder called “d4t_report” next to your data."),
         ),
         contents_spec(),
         *picture_specs(),
@@ -947,7 +980,7 @@ class OutputReportStep(_OutputStep):
         的，而它們是使用者眼中兩個不同的類別（`verdict_rows` 的說明）。順序與
         顏色跟畫布上的樹一樣 —— 三個地方講同一件事的時候，長相也該是同一個。
         """
-        decide = getattr(bctx.recipe, "decide", None)
+        decide = bctx.decision()
         names = parse_key_list(p["plot_features"])
         if not names:
             # **判定問過的那幾個** —— 使用者想看的散布，九成是他拿來分類的那些。
@@ -1082,7 +1115,7 @@ class OutputReportStep(_OutputStep):
             CONTENT_REPORT: lambda path: export_html.write_html(
                 export_html.build_report(
                     rows, title, export_report.detail_feature_keys(rows),
-                    decide=getattr(bctx.recipe, "decide", None),
+                    decide=bctx.decision(),
                     images=images, info=run),
                 path),
             CONTENT_TABLE: lambda path: export_report.write_csv(
@@ -1153,6 +1186,9 @@ class OutputKlarfStep(_OutputStep):
     """整批的結果 → 寫回 KLARF（三種模式）。"""
 
     key = "output_klarf"
+    #: 它寫的是每一顆的類別 —— 上游要有 Decision（`data_lines` 的
+    #: ``needs-decision``）。
+    needs_decision = True
     label = "Write KLARF"
     WHAT = "KLARF file"
     help = ("Write the results back into a KLARF file when the whole lot has "
@@ -1167,8 +1203,9 @@ class OutputKlarfStep(_OutputStep):
             icons=["klarf_inplace", "klarf_annotate", "klarf_topn"],
             choice_labels={"inplace": "In place", "topn": "Top N"},
             label="How to write it",
-            help=("annotate = a new file with ADCSCORE and ADCCLASS added "
-                  "(the original is untouched - start here). inplace = edit "
+            help=("annotate = a new file with ADCCLASS (the bin) added, and "
+                  "ADCSCORE when the decision has a score (the original is "
+                  "untouched - start here). inplace = edit "
                   "the original file, changing only the bytes that have to "
                   "change. topn = a new file with only the highest scoring "
                   "defects in it."),
@@ -1178,7 +1215,9 @@ class OutputKlarfStep(_OutputStep):
             label="Write to",
             help=("Full path of the KLARF file to write. Folders that do not "
                   "exist yet are created. For “in place” this is the file "
-                  "that gets edited, so point it at the original."),
+                  "that gets edited, so point it at the original. Empty = "
+                  "next to the original, with “_adc” (top N: “_top”) added "
+                  "to its name; for “in place”, the original itself."),
         ),
         # ---- mode = topn ---------------------------------------------------
         ParamSpec(
@@ -1272,18 +1311,54 @@ class OutputKlarfStep(_OutputStep):
         name = str(params.get("size_feature", "") or "").strip()
         return [name] if name else []
 
+    #: 沒有 KLARF 的資料上，這張卡講的那一句（開資料時掛在卡上、寫的時候跳過時
+    #: 各講一次 —— 同一句話，所以只寫一份）。
+    NO_KLARF = ("This data has no KLARF (a folder of images carries no "
+                "coordinates), so there is nothing to write the verdicts back "
+                "into - this card is skipped when you write, and the other "
+                "outputs are still written. “Write report” puts the same "
+                "verdicts in a spreadsheet.")
+
+    @classmethod
+    def data_issues(cls, params: Dict[str, Any],
+                    data: Any) -> List[Tuple[str, str, str, str]]:
+        """沒有 KLARF 的資料 → **開資料的那一刻**就在卡上講（F122）。
+
+        以前這件事要等按下「Write outputs」、整批寫到這張卡才失敗，而那之前
+        儀表還顯示「N 顆會改」的估計。warning 不是 error：它不擋跑、也不擋其他
+        輸出（使用者：「按寫時跳過並講，其他輸出照寫」）。
+        """
+        if getattr(data, "has_klarf", True):
+            return []
+        return [("klarf-out-no-klarf", "warning",
+                 "“Write KLARF” has no KLARF to write into", cls.NO_KLARF)]
+
+    #: 「Write to」空著時寫到哪（F122）—— 住在 `klarf_out`（寫 KLARF 的那一層），
+    #: 儀表與 Studio 的確認對話框叫同一支。
+    default_path = staticmethod(klarf_out.default_output_path)
+
+    def _path_of(self, p: Dict[str, Any], bctx: Any = None) -> str:
+        path = str(p[self.PATH]).strip()
+        if path:
+            return _anchor(path, bctx)
+        doc = getattr(getattr(bctx, "dataset", None), "klarf", None)
+        path = self.default_path(str(p["mode"]),
+                                 str(getattr(doc, "source_path", "") or ""))
+        if not path:
+            raise StepError(self.key, "nowhere to write - fill in “Write to”.")
+        return path
+
     def run_batch(self, bctx: Any, params: Dict[str, Any]) -> None:
         p = self.validate_params(params)
-        path = self._path_of(p, bctx)
         doc = getattr(bctx.dataset, "klarf", None)
         if doc is None:
-            # 沒有 KLARF 的兩種輸入（folder / tiff_stack）—— 那件事在載入的當下
-            # 就講過了（資料集標籤上常駐 `· no KLARF`），這裡不要假裝是別的問題。
-            raise StepError(
-                self.key,
-                "this data has no KLARF to write back into (it came from a "
-                "folder of images or a TIFF stack, which carry no "
-                "coordinates). Use the report card instead.")
+            # **跳過並講，不是失敗**（F122，使用者定的）。這件事開資料時已經
+            # 掛在卡上（`data_issues`），資料集標籤上也常駐 `· no KLARF`；
+            # 以前這裡是一個 StepError —— CLI 回 1、Studio 跳「Some outputs
+            # were not written」，而其他卡明明都寫好了。
+            bctx.warn("%s: skipped. %s" % (self.label, self.NO_KLARF))
+            return
+        path = self._path_of(p, bctx)
         # **每個 mode 吃的選項不一樣**，而 `apply_writeback` 會把多給的那個
         # 當成錯誤（那是對的 —— 悄悄忽略一個使用者填了的值更糟）。
         # `size_scale` 只有 inplace 用得到（它是寫進 DSIZE 欄的那個換算）。
@@ -1360,6 +1435,7 @@ class OutputCharStep(_OutputStep):
     label = "Write comparison"
     PATH = "folder"
     WHAT = "folder"
+    DEFAULT = "d4t_comparison"
     help = ("Write a folder that puts the two lots side by side, one defect "
             "per row: the ground-truth picture, the matching picture from the "
             "second lot, the numbers you pick, and what the recipe decided. "
@@ -1371,7 +1447,8 @@ class OutputCharStep(_OutputStep):
             name="folder", type="str", default="",
             label="Write to",
             help=("Folder to write everything into. It is created if it does "
-                  "not exist; files with the same names are overwritten."),
+                  "not exist; files with the same names are overwritten. "
+                  "Empty = a folder called “d4t_comparison” next to your data."),
         ),
         ParamSpec(
             name="limit", type="int", default=200, min=0, max=100000,
@@ -1383,21 +1460,26 @@ class OutputCharStep(_OutputStep):
                   "listed, without pictures, and the card says so. %s"
                   % LIMIT_ZERO_HELP),
         ),
+        # **兩顆真的影像埠**（F123 期 3）。以前是兩格自由文字 —— 打一個流名，
+        # 卡片去整份結果裡撈「最後一個寫這個名字的人」：畫布上沒有線，而那張圖
+        # 可能是後面某張 Enhance 卡改過的那一份。現在線接哪一張卡的哪一顆埠，
+        # 拿的就是那一張卡當時吐的那一份（`engine.image_through_line`）。
         ParamSpec(
-            name="main_stream", type="str", default="",
+            name="main_stream", type="image_key", direction="in", default="",
             label="Left picture",
-            help=("Which image stream to show on the left - the lot you are "
-                  "running (the ground truth, in a characterization). Leave "
-                  "it empty to use whichever image the run started from."),
+            help=("Drag the image to show on the left into this port - the "
+                  "lot you are running (the ground truth, in a "
+                  "characterization). Leave it unconnected to use whichever "
+                  "image the run started from."),
         ),
         ParamSpec(
-            name="pair_stream", type="str", default="paired",
-            label="Right picture",
-            help=("Which image stream to show on the right - what the Pair "
-                  "card brought over from the second lot (\"paired\"), or the "
-                  "cut-out the H2H card aligned (\"aligned\"). A defect with "
-                  "no match has no such image, and that cell is left empty - "
-                  "which is the point: it is one of the answers."),
+            name="pair_stream", type="image_key", direction="in",
+            default="paired", label="Right picture",
+            help=("Drag the image to show on the right into this port - what "
+                  "the Pair card brought over from the second lot, or the "
+                  "cut-out the H2H card aligned. A defect with no match has "
+                  "no such image, and that cell is left empty - which is the "
+                  "point: it is one of the answers."),
         ),
         ParamSpec(
             name="columns", type="feature_keys",
@@ -1455,6 +1537,14 @@ class OutputCharStep(_OutputStep):
     CSV_NAME = "defects.csv"
     RECIPE_NAME = "recipe.json"
     IMAGE_DIR = "images"
+
+    @classmethod
+    def optional_streams_in(cls, params: Dict[str, Any]) -> List[str]:
+        """左右兩張圖的流名（F122）—— 這張卡沒有埠，打錯了只會是空的那一格。
+        左邊空著＝「這一顆跑的起點」，不是一個名字，所以不算。"""
+        return [n for n in (str(params.get("main_stream", "") or "").strip(),
+                            str(params.get("pair_stream", "") or "").strip())
+                if n]
 
     @classmethod
     def planned_files(cls, params: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -1538,7 +1628,11 @@ class OutputCharStep(_OutputStep):
                                .get("stream") or "")
                 pair = {}
                 for side, key in (("main", main_key), ("pair", pair_key)):
-                    arr = (pix.get(key) if key
+                    # 照線拿（F123 期 3）—— 線接的是哪一張卡的哪一顆埠，就是
+                    # 那一張卡當時吐的那一份；左邊沒接＝這一顆跑的起點。
+                    arr = (image_through_line(
+                               bctx.recipe, ctx, item, bctx.node_id,
+                               "%s_stream" % side, bctx.kind) if key
                            else (overlay.pick_base(pix)[1] if pix else None))
                     if arr is None:
                         # 配不到的那一顆沒有第二張圖 —— 那一格留白，
@@ -1564,7 +1658,7 @@ class OutputCharStep(_OutputStep):
                 skipped += 1
 
         # ---- ③ 判定：葉子的名字**不在 rows 裡**，要反查一次 ----------------
-        decide = getattr(bctx.recipe, "decide", None)
+        decide = bctx.decision()
         verdicts: Dict[str, Dict[str, Any]] = {}
         for entry in decide_tree.verdict_rows(decide, rows):
             for did in entry.get("ids") or []:
@@ -1637,6 +1731,7 @@ class OutputUniformityStep(_OutputStep):
     label = "Write charts"
     PATH = "folder"
     WHAT = "folder"
+    DEFAULT = "d4t_charts"
     help = ("Write a page of charts for each defect - one point per "
             "measurement box. Four of them are ready-made (a box plot, a "
             "histogram, a position profile and a heat map) and one you build "
@@ -1655,7 +1750,8 @@ class OutputUniformityStep(_OutputStep):
             name="folder", type="str", default="",
             label="Write to",
             help=("Folder to write everything into. It is created if it does "
-                  "not exist; files with the same names are overwritten."),
+                  "not exist; files with the same names are overwritten. "
+                  "Empty = a folder called “d4t_charts” next to your data."),
         ),
         ParamSpec(
             name="charts", type="multi_choice",
@@ -1957,7 +2053,10 @@ class OutputUniformityStep(_OutputStep):
                 r = bctx.rerun(item, sources={k: getattr(v, "items", v)
                                               for k, v in sources.items()})
                 ctx = getattr(r, "context", None)
-                notes = (getattr(ctx, "meta", None) or {}).get("glv_hist") or []
+                # 每一張 GLV 量的框都畫（F124：線講流到哪裡，不挑哪幾張 ——
+                # F123 期 3 只畫上游那幾張，那一版跟著「只寫上游」一起退掉）。
+                notes = list((getattr(ctx, "meta", None) or {}).get("glv_hist")
+                             or [])
                 series = export_unif.chart_series(
                     notes, metric=str(p["metric"]).strip())
             except Exception:  # 鐵則 7 的跨顆版

@@ -418,7 +418,7 @@ def _tool_button(win: "StudioWindow", text: str, tip: str, slot: Any,
 def build_shortcuts(win: "StudioWindow") -> None:
     handlers = {
         "open_klarf": partial(open_dialogs.open_source, win,
-                              "klarf"),
+                              scope.INPUT_SOURCES[0].key),
         "open_recipe": partial(open_dialogs.open_recipe, win),
         "save_recipe": partial(open_dialogs.save_recipe, win),
         "save_recipe_as": partial(open_dialogs.save_recipe_as, win),
@@ -555,6 +555,10 @@ def build_body(win: "StudioWindow") -> None:
     # 那件事。
     win.problems = ProblemsBar(win)
     win.problems.problem_activated.connect(win._on_problem_activated)
+    # 「Connect ＿」（F124）：走跟手拉的線同一條路。
+    from . import canvas_edges
+    win.problems.connect_requested.connect(
+        lambda dst, srcs: canvas_edges.connect_into(win, dst, srcs))
     # **開窗時沒有選任何卡片，所以設定區是收起來的**（F13-1）。
     # 以前它一律攤開，於是畫面最大的一塊（中欄下半，1600×1000 上量到
     # 551px 高）裝的是一行灰字「(Pick a card from the library…)」——
@@ -1023,7 +1027,9 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     vrow.setContentsMargins(0, 0, 0, 0)
     vrow.setSpacing(8)
     win.verdict = VerdictChip(win.verdict_live)
-    vrow.addWidget(QLabel("Verdict", win.verdict_live))
+    # 「Class」（F122 期 3）：以前叫「Verdict」—— 同一件事的第五個名字。膠囊上
+    # 寫的就是這一顆落在哪一類（樹上那片葉子的名字）＋ bin。
+    vrow.addWidget(QLabel("Class", win.verdict_live))
     vrow.addWidget(win.verdict)
     vrow.addStretch(1)
     vcol.addLayout(vrow)
@@ -1032,7 +1038,7 @@ def build_preview_pane(win: "StudioWindow") -> QWidget:
     vrow2.setSpacing(8)
     # **score 那個數字跟 bin 一起常駐**（F76 刀 4 之後）。以前它是特徵表
     # 最後一列、粗體、永遠不被收合走的那一格 —— 理由是「它是這張表的
-    # 結論」。新面板把它歸進 `Score / Bin` 那一段，而那一段收得起來，
+    # 結論」。新面板把它歸進 `Decision` 那一段，而那一段收得起來，
     # 所以那條不變量搬到這裡：結論跟判定在同一塊，永遠看得到。
     win.verdict_score = QLabel("", win.verdict_live)
     win.verdict_score.setStyleSheet("font-weight:700;")

@@ -16,7 +16,7 @@ from d4t.core.log import swallowed
 import json
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 from . import decide_tree
@@ -25,9 +25,11 @@ from .expression import ExpressionError, parse_expression
 from .recipe import (
     Recipe, RecipeError, execution_order, resolve_route, route_miss_message,
 )
+from .recipe_schema import legacy_decision
 from .step import REGISTRY, SCALE_LOT, Step, StepError
 
 __all__ = ["StepTrace", "DefectResult", "run_defect", "run_defect_cached",
+           "image_through_line",
            "run_dataset", "image_segment_signature", "result_to_json_dict"]
 
 
@@ -427,6 +429,47 @@ def _bindings(recipe: Recipe, order: List[str],
     return merged
 
 
+def image_through_line(recipe: Recipe, ctx: Any, item: Any, node_id: str,
+                       param: str, kind: str = "",
+                       registry: Optional[Dict[str, Type[Step]]] = None) -> Any:
+    """整批一次的卡**照它的入線**拿一張圖（F123 期 3；``None`` = 這條線上沒有）。
+
+    Write comparison 的左右兩張圖以前用流名去整份結果裡撈（``ctx.images``：
+    「名字 → 最後一個寫它的人」）—— 畫布上那條線接的是 Input 的 ``test``，
+    拿到的卻是後面某張 Enhance 卡改過的 ``test``。這裡走跟逐顆那一層同一套
+    （:func:`_bindings` ＋ ``ctx._produced``）：線說是哪一張卡的哪一顆埠，就拿
+    那一張卡當時吐的那一份。
+
+    沒有明講的線（舊檔案、快取續跑沒留下產地）退回名字 —— 同 `_run_nodes`。
+    """
+    reg = REGISTRY if registry is None else registry
+    node = recipe.nodes.get(node_id)
+    step_cls = reg.get(node.step) if node is not None else None
+    if node is None or step_cls is None:
+        return None
+    name = str(step_cls.validate_params(node.params).get(param, "") or "")
+    if not name:
+        return None
+    images = dict(getattr(ctx, "images", None) or {})
+    k = kind or str(getattr(ctx, "meta", {}).get("_dataset_kind") or "")
+    try:
+        route = resolve_route(recipe, item, k)[0]   # 同 run_defect 那一條
+        if route is None:
+            return images.get(name)
+        order = execution_order(recipe, route)
+    except Exception:  # route 有問題由 lint 講；照名字拿
+        swallowed("engine.image_through_line")
+        return images.get(name)
+    bind = _bindings(recipe, order, reg, k)
+    src = bind.get((node_id, name), False)
+    if src is None:
+        return None                  # 線指到一張停用的卡，往上也沒有（F9-8）
+    produced = dict(getattr(ctx, "_produced", None) or {})
+    if src is not False and src in produced:
+        return produced[src]
+    return images.get(name)
+
+
 def _run_nodes(recipe: Recipe, order: List[str], start: int, stop: int,
                ctx: Context, traces: List[StepTrace],
                registry: Dict[str, Type[Step]],
@@ -576,9 +619,14 @@ def _eval_decision(recipe: Recipe,
        都要變成一個畫得出分布的數字）。後面一行看得到前面一行。
     2. ``rules`` **由上往下，第一個成立的贏**。所以「改順序＝改優先權」，
        而那句話使用者讀得懂。
-    3. ``score`` 最後算（它可以用 ``let`` 出來的中間值），寫進
-       ``ctx.features["score"]`` —— 跟老路一字不差，所以 KLARF 的 DSIZE、
-       Top-N 排序、CSV 的 score 欄都不必知道這一段換過。
+    3. ``score`` 在 ``let`` 之後、**判定之前**算（它可以用 ``let`` 出來的中間
+       值），寫進 ``ctx.features["score"]`` —— 所以 KLARF 的 ADCSCORE、Top-N
+       排序、CSV 的 score 欄都不必知道這一段換過，**而且樹上可以問它**。
+
+       ⚠ 2026-09-29（F122）以前它排在判定**之後**，而 lint 讓樹問 ``score``：
+       整批跑的時候那一題永遠問不出來（答「否」），Re-run 的時候
+       （`batch.redecide`）上一次的分數還躺在 features 裡，於是答得出來 ——
+       同一份 recipe、同一批數字，兩條路分到不同的 bin。
 
     規則的值怎麼判真假：**非 0 就是成立**。表達式的比較運算子本來就回 1.0／0.0
     （`expression.py` 的左結合折疊），所以 ``"a > 5"`` 與 ``"(a > 5) * (b < 2)"``
@@ -616,6 +664,32 @@ def _eval_decision(recipe: Recipe,
                 ctx.features[name + "_missing"] = 0.0
             continue
         ctx.features[name] = expr_obj.eval(ctx.features)
+
+    # **沒有分數表達式 ⇒ 沒有分數**（F30）。以前這裡是 `else 0.0`，而判定樹
+    # 是一個**分類器** —— 多數樹根本沒有 score 表達式，於是每一顆的分數都是
+    # 一個假的 0。三個後果，一個比一個嚴重：
+    #
+    # 1. CSV 多一欄全是 0 的 `score`；
+    # 2. 每一張疊圖左上角寫著 `score=0.000`（讀起來像「這顆得 0 分」）；
+    # 3. **「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」** —— 全部同分時
+    #    `sorted` 是穩定的，於是它原封不動地回傳輸入順序。而
+    #    `pick_overlay_results` 自己的說明寫著「檔案順序上的前 N 顆幾乎一定不是
+    #    使用者想看的那幾顆」。排序正是使用者要那份報表的理由。
+    #
+    # 算不出來的那一格**不寫**（同量測卡的規矩 3）：`DefectResult.score` 本來
+    # 就是 `Optional[float]`（`upto_node` 那條路一直在回 None），所以下游都
+    # 擋得住 —— 但「排不出來」要**講出來**，不可以安靜地退回檔案順序。
+    #
+    # ⚠ **判定寫的名字先拿掉**（F122）：Re-run 與整批換算（`batch.redecide`）
+    # 把上一次存下來的 features 整包倒回來，裡面有上一次的 ``score`` 與
+    # ``decide_unanswered``。不拿掉的話，一份拿掉了分數表達式的 recipe 在樹上
+    # 問 ``score`` 會拿到**上一次**的分數 —— 而整批跑的時候那一題問不出來。
+    ctx.features.pop("score", None)
+    ctx.features.pop("decide_unanswered", None)
+    expr = str(recipe.decide.score or "").strip()
+    score = _score_of(expr, ctx) if expr else None
+    if score is not None:
+        ctx.features["score"] = score
 
     path: List[str] = []
     unanswered: List[str] = []
@@ -675,24 +749,6 @@ def _eval_decision(recipe: Recipe,
                  % (len(unanswered), ", ".join(names),
                     "was" if len(names) == 1 else "were", chosen_bin))
 
-    # **沒有分數表達式 ⇒ 沒有分數**（F30）。以前這裡是 `else 0.0`，而判定樹
-    # 是一個**分類器** —— 多數樹根本沒有 score 表達式，於是每一顆的分數都是
-    # 一個假的 0。三個後果，一個比一個嚴重：
-    #
-    # 1. CSV 多一欄全是 0 的 `score`；
-    # 2. 每一張疊圖左上角寫著 `score=0.000`（讀起來像「這顆得 0 分」）；
-    # 3. **「照分數排序取前 N 顆」變成「檔案順序的前 N 顆」** —— 全部同分時
-    #    `sorted` 是穩定的，於是它原封不動地回傳輸入順序。而
-    #    `pick_overlay_results` 自己的說明寫著「檔案順序上的前 N 顆幾乎一定不是
-    #    使用者想看的那幾顆」。排序正是使用者要那份報表的理由。
-    #
-    # 算不出來的那一格**不寫**（同量測卡的規矩 3）：`DefectResult.score` 本來
-    # 就是 `Optional[float]`（`upto_node` 那條路一直在回 None），所以下游都
-    # 擋得住 —— 但「排不出來」要**講出來**，不可以安靜地退回檔案順序。
-    expr = str(recipe.decide.score or "").strip()
-    score = parse_expression(expr).eval(ctx.features) if expr else None
-    if score is not None:
-        ctx.features["score"] = score
     # 哪一條規則對上了 —— 給面板與報表。**不進 `DefectResult`**：那會動到
     # SQLite schema 與 CSV 的欄。（寫這一段時黃金值是壞的（見 F21 §6）；
     # 尺 2026-08-23 重凍回來了，但「要不要進結果 schema」是另一個決定，
@@ -704,39 +760,57 @@ def _eval_decision(recipe: Recipe,
     return score, chosen_bin
 
 
-def _eval_score(recipe: Recipe,
-                ctx: Context) -> Tuple[Optional[float], int]:
-    """ADC 判定：score = expr(features) → bin。失敗會 raise（呼叫端攔截）。
+def _score_of(expr: str, ctx: Context) -> float:
+    """分數表達式 → 一個數。**缺數字就失敗，而且講人話**。
 
-    ``recipe.decide`` 有東西的時候走多類別那一支（F21-D）—— **沒有的時候
-    這一支一個位元都沒動**。寫的當下的理由是黃金值壞了（見
-    `docs/history/plans/F21-algo-and-roi.md` §6，2026-08-23 已重凍）；
-    現在的理由是那條老路仍然有 recipe 在走，動它要有人證明數字沒變。
+    分數**沒有**「答否往下走」那條退路（F30 是給樹上的題目的）：一條分數
+    表達式算不出來的時候沒有第二個答案，硬給 0 分是發明一個數字。所以這裡是
+    失敗 —— 但要講出**為什麼**那一格不見了，否則使用者會去找一個不存在的 bug。
+    （這一段以前只在舊的門檻那條路上；F122 期 3 那條路收進判定樹之後，判定樹
+    的分數也講同一句話。）
     """
-    if getattr(recipe, "decide", None) is not None:
-        return _eval_decision(recipe, ctx)
-    expr = parse_expression(recipe.score.expr)
-    # 老路**沒有**「答否往下走」那條退路（F30）：一條分數表達式算不出來的時候
-    # 沒有第二個答案，硬給 0 分是發明一個數字。所以這裡仍然是失敗 ——
-    # 但要講出**為什麼**那一格不見了，否則使用者會去找一個不存在的 bug。
-    gaps = sorted(v for v in expr.variables if v not in ctx.features)
+    e = parse_expression(expr)
+    gaps = sorted(v for v in e.variables if v not in ctx.features)
     if gaps:
         raise ExpressionError(
             "%s %s not measured on this defect, so the score cannot be "
             "worked out. A card writes nothing at all when it cannot measure "
             "(that is deliberate - it is not a zero), so some defects will "
-            "always be missing some numbers. Use a decision tree instead: "
-            "there, a question that cannot be asked is answered 'no' and the "
-            "defect still gets classified."
+            "always be missing some numbers. Ask about it in the decision "
+            "tree instead: there, a question that cannot be asked is answered "
+            "'no' and the defect still gets classified."
             % (", ".join(gaps), "was" if len(gaps) == 1 else "were"),
-            recipe.score.expr, 0)
-    score = expr.eval(ctx.features)
-    ctx.features["score"] = score
-    if score < float(recipe.score.threshold):
-        b = int(recipe.score.bins["below"])
-    else:
-        b = int(recipe.score.bins["above"])
-    return score, b
+            expr, 0)
+    return e.eval(ctx.features)
+
+
+def _eval_score(recipe: Recipe,
+                ctx: Context) -> Tuple[Optional[float], Optional[int]]:
+    """ADC 判定：score → bin。失敗會 raise（呼叫端攔截）。
+
+    **判定只有一種算法：判定樹**（F122 期 3，使用者：「舊門檻整條退役」）。
+    舊檔案的 ``score`` 區塊（一條分數公式＋門檻＋兩個 bin）照舊讀得進來，但在
+    這裡換成**一模一樣的一題樹**（`recipe_schema.legacy_decision`：``score >=
+    門檻``）再走 `_eval_decision` —— 以前這裡有一段自己的門檻比法，而 CLI 的
+    rescore 又有一份。結果逐項相同，多的只有判定樹本來就寫的
+    ``decide_unanswered``（黃金值那一欄因此重凍過一次，見 SESSION_LOG）。
+
+    **沒有判定＝沒有 bin**（F122 期 1）：沒有 ``decide``、``score.expr`` 也是空的
+    → ``(None, None)``，這一顆量完了、沒有被分類（`verdict_rows` 叫它
+    「no verdict」、KLARF 寫 ``-1``）。
+    """
+    decide = getattr(recipe, "decide", None)
+    if decide is None:
+        decide = legacy_decision(recipe.score)
+        if decide is not None:
+            recipe = replace(recipe, decide=decide)
+    # **停用的 Decision 卡不判**（F123 期 1）：判定是一張卡之後，「停用的卡不會
+    # 跑」這一條也要對它成立。沒有那張卡（手寫的 recipe）照舊判。
+    cards = [n for n in recipe.nodes.values() if n.step == "decision"]
+    if decide is None or (cards and not any(n.enabled for n in cards)):
+        ctx.features.pop("score", None)
+        return None, None
+    return _eval_decision(recipe, ctx)
 
 
 def run_defect(recipe: Recipe, item: Any, kind: str, *,

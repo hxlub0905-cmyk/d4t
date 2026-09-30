@@ -39,7 +39,10 @@ def _model(kind: str = "ebi_patch") -> RecipeModel:
     ``node_order[0]`` 當「上游那張卡」。
     """
     m = RecipeModel.starter(kind)
-    m.add_step(RecipeModel.starter_step_for(kind))
+    nid = m.add_step(RecipeModel.STARTER_STEP)
+    # 一顆一張的資料：名字表一列（F121 期 2 之前這裡是 `load_single`）。
+    if kind in ("rsem", "folder"):
+        m.set_param(nid, "channel_map", "1:single")
     return m
 
 

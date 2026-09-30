@@ -368,18 +368,18 @@ class ResultsTableModel(QAbstractTableModel):
     TRUTH_WORDS = {True: "real", False: "nuisance"}
 
     #: 判定說「這是真缺陷」的 bin。**跟正確率那一行用的是同一條規矩**
-    #: （`export/report._confusion` 的預設：``bin != 0``）—— 兩邊各訂一套的
-    #: 那天，表上紅著的列數會跟上面寫的 `missed 4` 對不起來，而沒有人知道
-    #: 哪一個是對的。
-    @staticmethod
-    def _called_real(row: Dict[str, Any]) -> Optional[bool]:
-        b = row.get("bin")
-        if b is None or not row.get("ok", True):
+    #: （`decide_tree.called_real`：標了壞消息的類＝判成真的，沒標的照舊
+    #: ``bin != 0``，F122 期 3）—— 兩邊各訂一套的那天，表上紅著的列數會跟
+    #: 上面寫的 `missed 4` 對不起來，而沒有人知道哪一個是對的。
+    #: ``bin`` → 好消息／壞消息／中性（`DecideSpec.bin_outcomes`；宿主餵）。
+    outcomes: Dict[int, str] = {}
+
+    def _called_real(self, row: Dict[str, Any]) -> Optional[bool]:
+        from d4t.core.pipeline.decide_tree import called_real
+
+        if row.get("bin") is None or not row.get("ok", True):
             return None            # 沒跑出判定：不能說它判錯
-        try:
-            return int(b) != 0
-        except (TypeError, ValueError):
-            return None
+        return called_real(row.get("bin"), self.outcomes)
 
     def wrong_count(self) -> int:
         """**現在列出來的**這些裡面，判定跟答案對不上的有幾顆（F117 E1）。
@@ -896,6 +896,11 @@ class ResultsTable(QTableView):
         """換一份答案卷（宿主寫完檔餵回來）。"""
         self._model.set_truth(truth)
 
+    def set_outcomes(self, outcomes: Dict[int, str]) -> None:
+        """每一類是好消息還是壞消息 —— 「判錯了」那幾格跟著它（F122 期 3）。"""
+        self._model.outcomes = dict(outcomes or {})
+        self._model.layoutChanged.emit()
+
     def truth_of(self, row: int) -> Optional[bool]:
         return self._model.truth_of(row)
 
@@ -1200,6 +1205,9 @@ class ResultsTablePane(QWidget):
 
     def set_truth(self, truth: Optional[Dict[str, Any]]) -> None:
         self.table.set_truth(truth)
+
+    def set_outcomes(self, outcomes: Dict[int, str]) -> None:
+        self.table.set_outcomes(outcomes)
 
     def truth_of(self, row: int) -> Optional[bool]:
         return self.table.truth_of(row)

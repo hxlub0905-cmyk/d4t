@@ -1,6 +1,6 @@
 {
   "recipe_id": "ebi_die_to_die",
-  "version": 5,
+  "version": 8,
   "app_version": "0.1.0.dev0",
   "author": "d4t",
   "description": "EBI patch lot, two images per defect: the test patch and a reference patch of the same place on another die. Bring the two to the same brightness first - the reference is stretched to the test's own range so the pair stays comparable - then subtract them, quiet the difference image with a small median, and let GLV read the brightest spot left in it. A real defect is the one thing the two dies do not share, so it is what survives the subtraction; noise and slight pattern drift do not reach the same height. The decision asks one question: is that peak higher than the quiet level. Nothing has to be set up by hand; the report folder is the one thing you will want to change. This is also the recipe behind 'Try with sample data' in Studio.",
@@ -12,6 +12,7 @@
       "sub",
       "dn",
       "glv",
+      "decision",
       "report"
     ]
   },
@@ -80,6 +81,11 @@
         "jpeg_quality": 80
       },
       "enabled": true
+    },
+    "decision": {
+      "step": "decision",
+      "params": {},
+      "enabled": true
     }
   },
   "edges": [
@@ -124,6 +130,18 @@
       "diff",
       "glv",
       "source"
+    ],
+    [
+      "glv",
+      "numbers",
+      "decision",
+      "numbers"
+    ],
+    [
+      "decision",
+      "results",
+      "report",
+      "results"
     ]
   ],
   "score": {

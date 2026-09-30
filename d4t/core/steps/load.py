@@ -1,41 +1,46 @@
 # d4t step-card library — authored 2026-07-28 (M1).
-"""載入影像的卡 —— **一種 source 一張卡**（F11 Input-4）。
+"""載入影像的卡 —— **一張 Input 卡**（F121 期 2，2026-09-24）。
 
 從 ``ctx.meta["_defect_item"]``（ingest 層的 DefectItem，由引擎放入）讀出
 這顆 defect 的像素並寫進 ``ctx.images``。
 
 | 卡 | 一顆給什麼 | 吐什麼 |
 |---|---|---|
-| ``load_patch``「Patch」| 好幾張（EBI patch、多通道）| ``channel_map`` 表格裡的名字 |
-| ``load_single``「SEM image」| 一張（RSEM、資料夾）| 一條，名字由 ``out`` 決定 |
+| ``load_patch``「Input」| 一張或好幾張（RSEM、影像資料夾、EBI patch、多通道）| ``channel_map`` 表格裡的名字 |
 
-為什麼要拆（使用者回報 2026-08-17）
------------------------------------
-> 我還是傾向不同資料流（IMAGE SOURCE）卡片要拆分不要放在一起，這樣放在一起反而
-> 變得很複雜。例如我現在 load 一張 RSEM image 他就是單張的，但其後的 NODE 節點會
-> 有 TEST 跟 REF？但實際上是 Single。**這樣畫布跟實際對不起來。**
+**key 留 `load_patch`**：它是 recipe 的鍵，不是給人看的字（`CLAUDE.md` §5：只改
+``label`` 零代價）—— 出貨 recipe 與黃金值裡的那個字一個都不動。
 
-拆之前這裡是**一張卡服務四種 kind**，而它的宣告隨 kind 改變
-（``resolve_writes_for_kind``）。量出來的後果是同一個問題有**三個不同的答案**：
-``resolve_writes`` 說 ``["test"]``、``resolve_writes_for_kind("rsem")`` 說
-``["single", "test"]``、畫布畫的是 ``["test", "ref"]``，而資料真的只有
-``["single"]``。
+為什麼又合回一張（使用者 2026-09-24）
+-------------------------------------
+F11 Input-4（2026-08-17）照使用者的話拆成兩張 —— `load_patch`「Patch」與
+`load_single`「SEM image」：
 
-拆完之後**兩張卡都不需要知道 kind**：`load_patch` 的 writes 只看 `channel_map`、
-`load_single` 的 writes 只看 `out` —— **宣告從「隱形的資料型別」變成「使用者看得到
-的值」**，那正是畫布不說謊的條件。``resolve_writes_for_kind`` 因此沒有人覆寫它了。
+> 我現在 load 一張 RSEM image 他就是單張的，但其後的 NODE 節點會有 TEST 跟 REF？
+> 但實際上是 Single。**這樣畫布跟實際對不起來。**
 
-拆的軸是「**一顆長什麼樣**」而不是檔案格式：`rsem` 與 `folder` 在卡片這一層一模
-一樣（都是一顆一張），做成兩張會是兩份會各自長歪的程式碼；檔案格式的差別在
-Studio 的三個 Open 入口就分完了。
+那一刀解掉的是「**宣告跟著隱形的資料型別變**」（拆之前 ``resolve_writes`` 說
+``["test"]``、``resolve_writes_for_kind("rsem")`` 說 ``["single", "test"]``、畫布
+畫 ``["test", "ref"]``，而資料只有 ``["single"]``）。拆完之後兩張卡的宣告都只看
+使用者看得到的值 —— 而**那個條件合回一張也成立**：埠＝名字表，名字表在開資料時
+照資料填（一顆一張就是一列 ``1:single``，見 :func:`channel_map_for`）。
+
+合的理由是使用者要的「入口簡單化」（`docs/plans/F121-simple-input.md`）：兩張卡
+要使用者先選對，而選錯的下場是每一顆都報錯。實測 `load_single(out="x")` 與
+`load_patch(channel_map="1:x")` 在一顆一張的資料上**像素與特徵逐一相同** —— 兩張卡
+差的只是預設值。舊 recipe 的 `load_single` 由 `recipe_migrations` 換成這一張。
+
+⚠ **合完之後差的那一格是使用者同意過的**：一顆好幾張、名字表只寫一列時讀第一張，
+並警告其餘沒載入（以前 `load_single` 會拒絕）。
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..pipeline.channels import (
     highest_image_number, mapped_names, parse_channel_map,
 )
+from ..ingest.dataset import images_in_order
 from ..pipeline.context import Context
 from ..pipeline.step import (
     CATEGORY_IMAGE, ParamSpec, Step, StepError, register_step, GROUP_INPUT,
@@ -49,20 +54,6 @@ from ._util import (
 _PREFERRED_ORDER = ("test", "ref", "single")
 
 
-def _in_defect_order(images: Dict[str, Any]) -> List[str]:
-    """這一顆的影像**依「第幾張」排序**的 ingest channel 名。
-
-    多頁 TIFF 的每一張都帶 ``page``（0-based 絕對頁號），同一顆的幾張是連續的，
-    所以照 page 排就是「這一顆的第 1、2、3… 張」。沒有 page 的（每顆一個檔案的
-    資料集）就照 ingest 放進 dict 的順序 —— 那也是它給的順序。
-    """
-    keys = list(images)
-    pages = [getattr(images[k], "page", None) for k in keys]
-    if keys and all(p is not None for p in pages):
-        return [k for _p, k in sorted(zip(pages, keys), key=lambda t: t[0])]
-    return keys
-
-
 #: ``load_patch`` 的 ``channel_map`` 預設值 —— 也就是 EBI patch 的老規矩
 #: （第 1 張 test、第 2 張 ref）。
 #:
@@ -74,15 +65,17 @@ DEFAULT_CHANNEL_MAP = "1:test, 2:ref"
 
 @register_step
 class LoadPatchStep(Step):
-    """把 DefectItem 的**好幾張**影像載入成 Context 影像流（一律 uint8 灰階）。"""
+    """把 DefectItem 的影像（一張或好幾張）載入成 Context 影像流（一律 uint8 灰階）。"""
 
     key = "load_patch"
-    label = "Patch"
+    label = "Input"
     category = CATEGORY_IMAGE
     group = GROUP_INPUT
-    help = ("Load this defect's images into the pipeline (a test/reference pair, "
-            "or several detector channels), always converted to 8-bit "
-            "grayscale. One image per defect? Use “SEM image” instead.")
+    help = ("Load this defect's images into the pipeline, always converted to "
+            "8-bit grayscale - one image (Review SEM, a folder of images) or "
+            "several (a test/reference pair, detector channels). The table "
+            "names each image; the names are the streams on the canvas, and "
+            "opening data fills it in for you.")
     params = [
         ParamSpec(
             name="channel_map", type="channel_map", default=DEFAULT_CHANNEL_MAP,
@@ -138,6 +131,83 @@ class LoadPatchStep(Step):
         return [w for w in wanted if not mapped or w in mapped] or mapped
 
     @classmethod
+    def data_issues(cls, params: Dict[str, Any],
+                    data: Any) -> List[Tuple[str, str, str, str]]:
+        """這張卡跟**開著的那份資料**對不對得上（F121 期 3，見 `Step.data_issues`）。
+
+        三件事，每一件在開資料那一刻就知道，而跑下去的話是**每一顆報一次**：
+
+        * 名字表要的張數比資料多（EBI 的 ``1:test, 2:ref`` 開在一張一張的 RSEM
+          上 —— 使用者回報的那一個）→ error；
+        * 名字表比資料少 → info（使用者同意的行為：讀有名字的那幾張，其餘不載入）；
+        * ``carry`` / ``only_*`` 要 KLARF 的欄位，而這份資料沒有 KLARF 或沒有那一欄
+          → error（沒有 KLARF 時 ``only_*`` 以前講的是「篩選條件沒對上」，真正的
+          原因沒講）。
+        """
+        out: List[Tuple[str, str, str, str]] = []
+        n_min = int(getattr(data, "images_min", 0) or 0)
+        n_max = int(getattr(data, "images_max", 0) or 0)
+        have = [str(n) for n in (getattr(data, "image_names", ()) or ())]
+        try:
+            pairs = parse_channel_map(params.get("channel_map",
+                                                 DEFAULT_CHANNEL_MAP))
+        except Exception:                 # 壞值由 bad-param 講，這裡不重複
+            pairs = []
+        need = highest_image_number(pairs)
+        if n_min == n_max:
+            count = "%d image%s" % (n_min, "" if n_min == 1 else "s")
+        else:                             # 有幾顆少拍了：講範圍，不挑一個數
+            count = "%d to %d images" % (n_min, n_max)
+        if n_max and need > n_min:
+            out.append((
+                "input-too-few-images", "error",
+                "“Name the images” asks for more images than this data has",
+                "This data has %s per defect (%s), and “Name the images” asks "
+                "for %d (%s). Fill the names in from this data, or open the "
+                "data this recipe was written for."
+                % (count, ", ".join(have) or "none", need,
+                   ", ".join(mapped_names(pairs)))))
+        elif n_max and pairs and need < n_max:
+            named = {int(pos) for pos, _n in pairs}
+            unnamed = [have[i] if i < len(have) else "image %d" % (i + 1)
+                       for i in range(n_max) if (i + 1) not in named]
+            out.append((
+                "input-unnamed-images", "info",
+                "Some of this data's images are not loaded",
+                "This data has %s per defect, and “Name the images” names %d "
+                "of them - the rest (%s) are not loaded. Name them too if you "
+                "want them on the canvas."
+                % (count, len(named), ", ".join(unnamed))))
+
+        has_klarf = bool(getattr(data, "has_klarf", False))
+        klarf_cols = [str(c) for c in (getattr(data, "columns", ()) or ())]
+        wants = [("“Carry these columns”", _carry_names(params))]
+        only = parse_only_codes(params)
+        if only is not None:
+            wants.append(("“Only run this column”", [only[0].strip().upper()]))
+        for field_label, cols in wants:
+            if not cols:
+                continue
+            if not has_klarf:
+                out.append((
+                    "input-needs-klarf", "error",
+                    "%s needs a KLARF, and this data has none" % field_label,
+                    "%s is set to %s, but this data has no KLARF to read it "
+                    "from - every defect would fail. Clear it, or open the "
+                    "KLARF this recipe was written for."
+                    % (field_label, ", ".join(cols))))
+                continue
+            missing = [c for c in cols if klarf_cols and c not in klarf_cols]
+            if missing:
+                out.append((
+                    "input-no-such-column", "error",
+                    "This KLARF has no column called %s" % ", ".join(missing),
+                    "%s asks for %s, and this KLARF has no such column. It "
+                    "has: %s." % (field_label, ", ".join(missing),
+                                  ", ".join(klarf_cols))))
+        return out
+
+    @classmethod
     def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
         """``n_channels`` ＋ ``carry`` 點名的那幾欄（F16）。
 
@@ -165,22 +235,21 @@ class LoadPatchStep(Step):
         # 資料時**必須擋下來**：宣告了第 5 張的名字而這顆只有 2 張，照順序硬套的
         # 後果是「BSE 的數字寫在 SE 的名字上」—— 跑得完、有數字、而且是錯的。
         pairs = parse_channel_map(p.get("channel_map", ""))
-        order = _in_defect_order(images)
+        order = images_in_order(images)
         #: 流名 → **ingest 給的 channel 名**。改名只改「流叫什麼」，讀圖仍然要
         #: 用資料自己的 key（`item.load()` 只認得它自己那一份）。
         src_of = {k: k for k in order}
         if pairs:
             need = highest_image_number(pairs)
             if need > len(order):
-                hint = ("Use “SEM image” for data with one image per "
-                        "defect. " if len(order) == 1 else "")
                 raise StepError(
                     self.key,
                     "the image names say there are at least %d images per "
-                    "defect, but defect %s has %d (%s). %sFix “Name the "
-                    "images” or open the data this recipe was written for."
+                    "defect, but defect %s has %d (%s). Fix “Name the "
+                    "images” to match this data, or open the data this "
+                    "recipe was written for."
                     % (need, getattr(item, "defect_id", "?"), len(order),
-                       ", ".join(order), hint))
+                       ", ".join(order)))
             src_of = {name: order[page - 1] for page, name in pairs}
             unnamed = [k for k in order if k not in set(src_of.values())]
             if unnamed:
@@ -221,8 +290,8 @@ class LoadPatchStep(Step):
 
         # ⚠ 這裡以前有一段「``single`` 順手鏡射成 ``test``」（讓單張資料的下游用
         # 預設參數就吃得到圖）。**F11 Input-4 拿掉了** —— 那是「宣告比現實多」的
-        # 一個實例：資料只有一張圖，畫布上卻有兩顆埠。單張資料現在走
-        # :class:`LoadSingleStep`，它吐**一條**流、名字由使用者決定。
+        # 一個實例：資料只有一張圖，畫布上卻有兩顆埠。單張資料的名字表就是一列
+        # （開資料時 :func:`channel_map_for` 填的），吐**一條**流。
 
         _apply_nm_per_px(ctx, p, loaded)
         _write_input_panel(ctx, item, kind, loaded, images)
@@ -231,101 +300,36 @@ class LoadPatchStep(Step):
         return ctx
 
 
-@register_step
-class LoadSingleStep(Step):
-    """一顆一張影像的資料（RSEM、資料夾）→ **一條**具名影像流（F11 Input-4）。
+def channel_map_for(item: Any) -> str:
+    """**這一顆的影像**照順序排成一張名字表（開資料時填 Input 卡用，F121 期 2）。
 
-    為什麼它是自己一張卡，見模組說明：一張卡服務四種 source 的時候，「這張卡吐
-    哪幾條流」有三個不同的答案，而畫布拿到的是錯的那一個。這張卡的宣告只看一個
-    使用者看得到的值 —— ``out``。
+    名字就是 ingest 給的 channel 名（patch 是 ``test`` / ``ref`` / ``img3``…，
+    一顆一張是 ``single``），所以 EBI patch 填出來正好是
+    :data:`DEFAULT_CHANNEL_MAP`，而 RSEM／影像資料夾是 ``1:single`` —— 畫布上的埠
+    因此一開始就等於資料真的有的那幾張（畫布不說謊）。沒有影像回空字串。
     """
+    return fit_channel_map("", item)
 
-    key = "load_single"
-    label = "SEM image"
-    category = CATEGORY_IMAGE
-    group = GROUP_INPUT
-    help = ("Load this defect's single image into the pipeline (Review SEM, or "
-            "a folder of images), converted to 8-bit grayscale. Several images "
-            "per defect? Use “Patch” instead.")
-    params = [
-        ParamSpec(
-            name="out", type="image_key", direction="out", default="single",
-            label="Name this image",
-            help=("Name of the image stream this card produces. It is what the "
-                  "next card connects to, and the prefix on this image's "
-                  "features."),
-        ),
-        nm_per_px_spec(),
-        carry_spec(),
-    ] + only_code_specs()
-    reads: List[str] = []
-    writes = ["single"]
-    #: 永遠是 1。留著它是為了**特徵表的名字不因為換一張卡而消失** —— 舊的 rsem
-    #: recipe 匯出過含 `n_channels` 的 CSV，而分數表達式指得到它。一個常數特徵
-    #: 的資訊量是零，但「同一份資料換一張卡就少一欄」的代價不是零。
-    features_out = ["n_channels"]
-    FEATURE_HELP = {"n_channels": "how many images this defect had"}
 
-    @classmethod
-    def item_filter(cls, params):
-        """只跑 KLARF 某一欄符合的那幾顆（F50）—— 見 `Step.item_filter`。"""
-        return parse_only_codes(params)
+def fit_channel_map(current: Any, item: Any) -> str:
+    """把一張名字表**對齊到這一顆的影像**（「照這份資料填」那顆鈕，F121 期 3）。
 
-    @classmethod
-    def configuration_hints(cls, params: Dict[str, Any]) -> List[str]:
-        return only_code_hints(params)
+    規則是「**線能留的就留**」：資料有的那幾個位置保留原本的名字（下游接的是
+    名字，名字不動線就不動）；資料沒有的位置拿掉（那幾顆埠消失，接著它們的
+    下游卡在畫布上變紅 —— 使用者一眼看得出哪幾張卡在這種資料上做不到）；
+    資料多出來的位置補上 ingest 給的名字。
 
-    @classmethod
-    def resolve_writes(cls, params: Dict[str, Any]) -> List[str]:
-        name = str(params.get("out", "single") or "").strip()
-        return [name] if name else []
-
-    @classmethod
-    def resolve_features(cls, params: Dict[str, Any]) -> List[str]:
-        """``n_channels`` ＋ ``carry`` 點名的那幾欄（F16）。
-
-        **宣告要跟著參數走**，不然那幾欄在 `available_features` 的下拉裡不存在
-        —— 使用者就得用打的，而打錯只會得到一條 `unknown-feature` 警告。
-        非數字的欄位仍然宣告：卡片手上沒有 KLARF，分不出哪一欄是數字，而
-        「宣告」的意思是「可能會碰到的」（同 `MultiSourceStep` 的 nm 那一份）。
-        """
-        return ["n_channels"] + _carry_names(params)
-
-    def run(self, ctx: Context, params: Dict[str, Any]) -> Context:
-        p = self.validate_params(params)
-        item = ctx.meta.get("_defect_item")
-        kind = ctx.meta.get("_dataset_kind")
-        if item is None:
-            raise StepError(self.key, "no defect data in the Context "
-                            "(meta['_defect_item']); this card must be run by "
-                            "the engine after a dataset is loaded.")
-        images = getattr(item, "images", None) or {}
-        order = _in_defect_order(images)
-        if not order:
-            raise StepError(
-                self.key,
-                "defect %s has no image to load." % getattr(item, "defect_id", "?"))
-        if len(order) > 1:
-            # **不偷偷拿第一張。** 這張卡承諾「一顆一張」，而這份資料一顆有好幾張
-            # —— 那是選錯卡，不是需要幫忙猜的情況（畫布不能說謊）。
-            raise StepError(
-                self.key,
-                "defect %s has %d images (%s), and this card loads exactly one. "
-                "Use “Patch” — it names each image and gives you one "
-                "output per name."
-                % (getattr(item, "defect_id", "?"), len(order), ", ".join(order)))
-
-        name = str(p["out"]).strip()
-        try:
-            arr = item.load(order[0])
-        except Exception as e:      # 檔案毀損 / 位元深度不對等
-            raise StepError(self.key, "could not read the image: %s" % e) from e
-        ctx.set_image(name, to_uint8(ensure_gray(arr)))
-        _apply_nm_per_px(ctx, p, [name])
-        _write_input_panel(ctx, item, kind, [name], {name: images[order[0]]})
-        ctx.add_feature("n_channels", 1.0)
-        _carry_features(ctx, item, p, self.key)
-        return ctx
+    使用者回報的那一個：EBI 的 ``1:test, 2:ref`` 對上一顆一張的 RSEM →
+    ``1:test`` —— test 那一條照跑，吃 ref 的那幾張變紅。空的名字表就是
+    :func:`channel_map_for`。解不開的舊值當成空的（壞值由 bad-param 講話）。
+    """
+    have = images_in_order(dict(getattr(item, "images", None) or {}))
+    try:
+        named = {int(pos): str(n) for pos, n in parse_channel_map(current or "")}
+    except Exception:                     # 壞值：當成沒填，照資料給
+        named = {}
+    return ", ".join("%d:%s" % (i + 1, named.get(i + 1, name))
+                     for i, name in enumerate(have))
 
 
 def _carry_names(params: Dict[str, Any]) -> List[str]:
@@ -354,7 +358,7 @@ def columns_for_main(nodes: Any) -> List[str]:
     out: List[str] = []
     for node in (nodes or ()):
         step = str(getattr(node, "step", "") or "")
-        if step not in ("load_patch", "load_single"):
+        if step != "load_patch":
             continue
         params = dict(getattr(node, "params", None) or {})
         for col in _carry_names(params):
@@ -426,7 +430,7 @@ def _write_input_panel(ctx: Context, item: Any, kind: Any,
     或 ``channel_map`` 改過名字的資料集，只有這份 meta 講得出實際載進來的是什麼。
     平均灰階則是拿來判「這兩張比得起來嗎」。
 
-    兩張 Input 卡共用它 —— 抄兩份的話，總有一份會長歪（這個 repo 記過三次）。
+    F11 那兩張 Input 卡共用過它（抄兩份的話總有一份會長歪）；F121 合回一張。
     """
     pages = []
     for ch in loaded:

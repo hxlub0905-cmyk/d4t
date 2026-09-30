@@ -31,6 +31,7 @@ recipe JSON 的結構沒有 ``pos`` 欄位，為了在畫布上存座標而改�
 """
 from __future__ import annotations
 from d4t.core.log import swallowed
+from d4t.core.pipeline.step import DATA_PORTS
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -61,7 +62,13 @@ from PySide6.QtWidgets import (
 )
 
 from . import region_words
+from . import edge_route
+from . import link_drop
+from .link_drop import accepts as _accepts
+# 排版是純函式（F124 期 3 搬出去）；名字留在這裡給既有的呼叫端。
+from .layout import WRAP, layout_columns
 from . import strings
+from . import wording
 from . import theme
 from .theme import TOKENS
 from .widgets import CARD_MIME, IconButton, draw_group_icon, small_button
@@ -121,8 +128,10 @@ _MAX_REGION_PORTS = 18
 #: 看起來完全正常。形狀在滑鼠靠近之前就講出這件事。
 _REGION_PORT_R = 5.5
 
-#: 埠標籤佔的寬度（畫在節點右緣之外，boundingRect 必須算進去）。
-_PORT_LABEL_W = 52.0
+#: 埠標籤佔的寬度（畫在節點右緣之外，boundingRect 必須算進去）。F124：52 → 74、
+#: 字小一號 —— `Ref image`、`Right picture`、`Search inside` 以前一律被切成
+#: `Re…ge` 那種讀不出來的字。74 是欄距 156 裡兩邊各一塊不相疊的上限。
+_PORT_LABEL_W = 74.0
 
 #: 節點左側 icon 的邊長，以及裝著它的圓角色塊。
 #: 用**色塊**而不是細色條（F7-8）：n8n 的節點一眼認得出來，靠的就是左邊那顆
@@ -144,8 +153,10 @@ _TILE = 32.0
 #: * **欄距 96 → 116**：埠的標籤畫在卡片**外面**，左右各 ``_PORT_LABEL_W``
 #:   （52）。96 的欄距塞不下兩個 52 —— 上游的輸出名與下游的輸入名會疊在
 #:   同一塊空白上（實測 `layout_label` 與 `single` 疊在一起）。
+#: * **欄距 116 → 156**（F124，使用者選的）：埠名要放得下（`_PORT_LABEL_W`
+#:   74 × 2 ＋ 兩邊各 4px 的縫）。``NODE_W + COL_GAP`` = 360，仍是 ``GRID`` 的倍數。
 NODE_W, NODE_H = 204.0, 64.0
-COL_GAP, ROW_GAP = 116.0, 26.0
+COL_GAP, ROW_GAP = 156.0, 26.0
 _PORT_R = 5.0
 #: 埠的**命中**半徑（比畫出來的圓點大 —— 5px 的點用滑鼠瞄很痛苦）。
 #: ``out_port_at`` 與 ``_NodeItem.shape`` 都讀它：命中範圍只能有一個定義，
@@ -239,8 +250,6 @@ def on_grid(value: float) -> float:
     return float(int((float(value) + step - 1e-9) // step) * step)
 
 
-#: 還沒拉線時，一列最多排幾張卡（見 :func:`layout_columns`）。
-WRAP = 4
 
 
 def wrap_for_width(width: float) -> int:
@@ -266,65 +275,6 @@ def wrap_for_width(width: float) -> int:
     usable = max(1.0, float(width)) * 1.15
     fits = int((usable + COL_GAP) // (NODE_W + COL_GAP))
     return max(1, min(WRAP, fits))
-
-
-def layout_columns(node_ids: Sequence[str],
-                   edges: Sequence[Tuple[str, str]],
-                   wrap: Optional[int] = None) -> Dict[str, Tuple[int, int]]:
-    """自動排版：``node_id -> (欄, 列)``。
-
-    欄 = 拓撲深度（最長前置路徑長度），列 = 同欄內依 ``node_ids`` 的原順序。
-    沒有任何連線時每個節點各自深度 0 —— 那會全部疊在第一欄，所以退化情況下
-    改成「一個接一個往右排」，讓空 recipe 加卡片時看起來仍然是一條鏈。
-
-    但那條鏈**會換行**（``WRAP``，F7-9）。一份九張卡、還沒拉線的 recipe 排成
-    一列會超過 2500px；``fit()`` 為了塞進畫面得縮到看不出字，而它又有下限
-    （縮成小方塊比留捲軸更糟），結果是「一排讀不出來的小方塊 + 一條捲軸」。
-    換行之後同樣九張卡是 3×3，每一張都讀得到字。閱讀順序仍然是左到右、
-    上到下 —— 跟文字一樣，不需要額外學。
-    """
-    wrap = WRAP if wrap is None else max(1, int(wrap))
-    ids = [str(n) for n in node_ids]
-    idx = {n: i for i, n in enumerate(ids)}
-    preds: Dict[str, List[str]] = {n: [] for n in ids}
-    for a, b in edges:
-        if a in idx and b in idx:
-            preds[b].append(a)
-
-    if not any(preds[n] for n in ids):
-        return {n: (i % wrap, i // wrap) for i, n in enumerate(ids)}
-
-    depth: Dict[str, int] = {}
-    for n in ids:                       # ids 已是拓撲順序，一遍就夠
-        depth[n] = max((depth.get(p, 0) + 1 for p in preds[n]), default=0)
-
-    # 一「帶」= 換行之前的 ``wrap`` 個深度。帶高取「最擠的那個深度有幾個節點」，
-    # 這樣換行之後上下兩帶不會疊在一起。
-    per_depth: Dict[int, int] = {}
-    for n in ids:
-        per_depth[depth[n]] = per_depth.get(depth[n], 0) + 1
-    band_h = max(per_depth.values(), default=1)
-
-    # 同欄內的列序用 **barycenter**（上游都排在第幾列，我就往那個平均靠）。
-    # 以前照 node_order 排：上游在第 0 列、下游被排到第 2 列，線就斜跨整欄，
-    # 而三條斜線交叉起來「亂」的觀感比任何配色問題都大。跟上游對齊之後，
-    # 大部分的線接近水平 —— 交叉不是被畫得更好看，是**根本不發生**。
-    # 平手（沒有上游、或平均相同）退回原順序，既有測試鎖的就是這個順序。
-    rows_of: Dict[str, int] = {}
-    out: Dict[str, Tuple[int, int]] = {}
-    for d in sorted(set(depth.values())):
-        members = [n for n in ids if depth[n] == d]
-
-        def _bary(n: str) -> float:
-            prs = [rows_of[p] for p in preds[n] if p in rows_of]
-            return (sum(prs) / float(len(prs))) if prs else float(idx[n])
-
-        members.sort(key=lambda n: (_bary(n), idx[n]))
-        band, col = divmod(d, wrap)
-        for r, n in enumerate(members):
-            rows_of[n] = r
-            out[n] = (col, band * band_h + r)
-    return out
 
 
 def _draw_elided(p: QPainter, rect: QRectF, text: str,
@@ -434,6 +384,22 @@ def _diamond(centre: QPointF, r: float) -> QPainterPath:
     return path
 
 
+def _rounded_path(pts: Sequence[QPointF], r: float) -> QPainterPath:
+    """一串折點 → 轉角圓掉的路徑（繞行的線用，F123 期 4）。"""
+    p = QPainterPath(pts[0])
+    for prev, cur, nxt in zip(pts, pts[1:], pts[2:]):
+        d1, d2 = cur - prev, nxt - cur
+        l1 = (d1.x() ** 2 + d1.y() ** 2) ** 0.5
+        l2 = (d2.x() ** 2 + d2.y() ** 2) ** 0.5
+        if l1 < 1e-6 or l2 < 1e-6:
+            continue
+        rr = min(r, l1 / 2.0, l2 / 2.0)
+        p.lineTo(cur - d1 * (rr / l1))
+        p.quadTo(cur, cur + d2 * (rr / l2))
+    p.lineTo(pts[-1])
+    return p
+
+
 def _port_label_text(spec: Dict[str, Any]) -> str:
     """一顆輸入埠旁邊寫什麼字（F68）。
 
@@ -449,7 +415,7 @@ def _port_label_text(spec: Dict[str, Any]) -> str:
 
 
 def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
-               role: str = "", lit: bool = False) -> None:
+               role: str = "", lit: bool = False, quiet: bool = False) -> None:
     """畫一顆埠。影像是圓、區域是菱形；輸入空心、輸出實心。
 
     ``role``（F68）：``"reference"`` 的埠畫**虛線邊**。理由是量出來的 ——
@@ -460,8 +426,19 @@ def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
     虛線是**跟區域線同一個語彙**（那條線也是虛的），不是新發明的記號。
 
     ``lit``（F68）：拖線拖到一半時，接得上的埠會亮起來、放大一點。
+
+    ``quiet``（F124）：原樣送出、沒有線接出去的輸出埠 —— 小一點、淡一點。它照樣
+    拖得出線（命中範圍不變），只是不再跟這張卡真的產出的東西搶眼睛。
     """
-    col = region_color() if kind == "region" else QColor(TOKENS["canvas_edge"])
+    if quiet and not lit:
+        col = QColor(theme.mix_hex(TOKENS["canvas_edge"], TOKENS["canvas_bg"], 0.45))
+        p.setPen(QPen(col, 1.0))
+        p.setBrush(QBrush(col))
+        p.drawEllipse(anchor, 3.0, 3.0)
+        return
+    data = kind in DATA_PORTS               # 數字／結果（F123 期 2）：方埠
+    col = (region_color() if kind == "region" else
+           QColor(TOKENS["seg_adc"]) if data else QColor(TOKENS["canvas_edge"]))
     if lit:
         col = QColor(TOKENS["canvas_edge_active"])
     pen = QPen(col, 2.0 if lit else 1.2)
@@ -472,6 +449,12 @@ def _draw_port(p: QPainter, anchor: QPointF, kind: str, filled: bool,
     if kind == "region":
         p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
         p.drawPath(_diamond(anchor, _REGION_PORT_R + grow))
+        return
+    if data:
+        r = _PORT_R + grow
+        p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
+        p.drawRoundedRect(QRectF(anchor.x() - r, anchor.y() - r, 2 * r, 2 * r),
+                          1.5, 1.5)
         return
     p.setBrush(QBrush(col if filled else QColor(TOKENS["bg_surface"])))
     p.drawEllipse(anchor, _PORT_R + grow, _PORT_R + grow)
@@ -770,7 +753,7 @@ class _NodeItem(QGraphicsItem):
         except Exception:  # 畫圖用，壞了就不亮
             return set()
         return {str(sp.get("name") or "") for sp in self.in_specs()
-                if str(sp.get("kind") or "image") == str(kind)}
+                if _accepts(sp, str(kind))}
 
     def in_anchors_local(self) -> List[QPointF]:
         """每個輸入埠在本地座標的位置（由上而下均分節點左緣）。
@@ -826,7 +809,7 @@ class _NodeItem(QGraphicsItem):
                 best, best_d2 = i, d2
         return best
 
-    def in_param_at(self, pos: QPointF) -> str:
+    def in_param_at(self, pos: QPointF, kind: str = "") -> str:
         """``pos`` 落在哪一個輸入**參數**上（``a`` / ``b`` / ``streams``…）。
 
         放開滑鼠的地方不一定準準地在埠上 —— 使用者多半是往卡片上一丟。
@@ -836,10 +819,16 @@ class _NodeItem(QGraphicsItem):
         specs = self.in_specs()
         if not specs:
             return ""
+        # ``kind``（F123 期 2）：拖的是數字線就落在收數字的那顆 —— 一張卡上有
+        # 影像埠也有資料埠時，「最近的那一顆」會把數字線丟進影像埠。都不收就
+        # 照舊取最近的（接不上由 `edit_plan` 講出為什麼）。
+        ok = [i for i, sp in enumerate(specs) if kind and _accepts(sp, kind)]
+        if len(ok) == 1:
+            return str(specs[ok[0]].get("name", ""))
         idx = self.in_port_at(pos)
         if idx is None:
             anchors = self.in_anchors_local()
-            idx = min(range(len(anchors)),
+            idx = min(ok or range(len(anchors)),
                       key=lambda i: (pos - anchors[i]).y() ** 2)
         return str(specs[min(idx, len(specs) - 1)].get("name", ""))
 
@@ -859,6 +848,12 @@ class _NodeItem(QGraphicsItem):
         以前這裡的 ``or [""]`` 保證每張卡至少有一顆埠，所以「前後都是空的」
         這件事在畫布上表達不出來。
         """
+        return [str(d["name"]) for d in self.out_specs()
+                if d["kind"] not in DATA_PORTS]
+
+    def port_names(self) -> List[str]:
+        """**每一顆**輸出埠的名字，含資料埠（F123 期 2）—— 埠的位置、線從哪一顆
+        出去、拖出來的是哪一條都照這一份數。:meth:`out_names` 只講流與區域。"""
         return [str(d["name"]) for d in self.out_specs()]
 
     def out_specs(self) -> List[Dict[str, str]]:
@@ -873,6 +868,9 @@ class _NodeItem(QGraphicsItem):
         outs += [{"name": str(r), "kind": "region"}
                  for r in (self.info.get("regions_out") or [])
                  if str(r)][:_MAX_REGION_PORTS]
+        data = str(self.info.get("data_out") or "")   # 數字／結果（F123 期 2）
+        if data:
+            outs.append({"name": data, "kind": data})
         return outs
 
     def out_kinds(self) -> List[str]:
@@ -895,7 +893,7 @@ class _NodeItem(QGraphicsItem):
         沒有輸出流就**一顆埠都沒有**（F10）—— 拉不出線，因為真的沒有東西
         可以拉。
         """
-        n = len(self.out_names())
+        n = len(self.port_names())
         if n == 0:
             return []
         h = self.body_height()
@@ -1097,6 +1095,11 @@ class _NodeItem(QGraphicsItem):
 
         # 連接埠（**本地座標** —— 見 out_anchors_local 的說明）。
         # 輸入是空心圈、輸出是實心點：一眼看得出線該從哪邊拉到哪邊。
+        # 埠名一律小一號字（F124）：放得下 `Ref image`、`Right picture`。
+        p.save()
+        f = p.font()
+        f.setPixelSize(theme.font_px("font_tiny"))
+        p.setFont(f)
         ins = self.in_specs()
         in_anchors = self.in_anchors_local()
         lit_names = self._ports_to_light()
@@ -1127,21 +1130,29 @@ class _NodeItem(QGraphicsItem):
                                    anchor.y() - 7, _PORT_LABEL_W, 14),
                          text, align=Qt.AlignRight, mode=Qt.ElideMiddle)
 
+        quiet = set(self.info.get("quiet_out") or ())
         for spec, anchor in zip(self.out_specs(), self.out_anchors_local()):
             name, kind = spec["name"], spec["kind"]
-            _draw_port(p, anchor, kind, filled=True)
+            hush = name in quiet and kind not in DATA_PORTS
+            _draw_port(p, anchor, kind, filled=True, quiet=hush)
             if terse or not name:
                 continue
             # 每個輸出埠都標上它吐的名字（F7-9；F12 起也含具名區域）。以前
             # 只有多埠才標，於是「這張卡到底做在哪一條流上」在畫布上是看不到
             # 的 —— 而 Enhance 卡的 target / also apply 講的正是這些名字。
-            p.setPen(QColor(region_color().name() if kind == "region"
-                            else TOKENS["text_secondary"]))
+            col = QColor(region_color().name() if kind == "region"
+                         else TOKENS["text_secondary"])
+            if hush:
+                col = QColor(theme.mix_hex(col.name(), TOKENS["canvas_bg"], 0.45))
+            p.setPen(col)
             # 同左邊那一側：放不下要看得出來被切了（`layout_label` 以前畫成
-            # `layout_`，讀起來像一條真的叫那個名字的流）。
+            # `layout_`，讀起來像一條真的叫那個名字的流）。資料埠寫畫面上的字
+            # （`measured` / `classified`，`wording.port_word`），不是 recipe 的鍵。
             _draw_elided(p, QRectF(anchor.x() + 4, anchor.y() - 7,
-                                   _PORT_LABEL_W - 10, 14), name,
+                                   _PORT_LABEL_W, 14),
+                         wording.port_word(name) if kind in DATA_PORTS else name,
                          mode=Qt.ElideMiddle)
+        p.restore()
 
     def _paint_lot_strip(self, p: QPainter, body: QRectF,
                          col: QColor, enabled: bool) -> None:
@@ -1315,6 +1326,7 @@ class _NodeItem(QGraphicsItem):
             return self._snapped(value)
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.canvas.refresh_edges()
+            self.canvas.follow_decision(self)
         return super().itemChange(change, value)
 
     def _snapped(self, pos: QPointF) -> QPointF:
@@ -1418,7 +1430,7 @@ class _EdgeItem(QGraphicsItem):
         # 滑鼠移上來要出現「斷開」的 ×（F7-22）。
         self.setAcceptHoverEvents(True)
         what = ("region “%s”" % self.out_name() if self.kind() == "region"
-                else "image")
+                else self.kind() if self.kind() in DATA_PORTS else "image")
         self.setToolTip("%s → %s  (%s; click the × to disconnect)"
                         % (src.node_id, dst.node_id, what))
 
@@ -1445,11 +1457,17 @@ class _EdgeItem(QGraphicsItem):
         「藍色 = 被選中的線」這第二層意思，而調濃只是把原本就在那裡的線索
         講大聲一點。
         """
-        base = QColor(TOKENS["canvas_edge"])
-        gid = str(self.src.info.get("group", "") or "")
-        if not gid:
-            return base
-        return QColor(theme.mix_hex(theme.group_hex(gid),
+        # **F123 期 4 起照資料種類，不照來源階段**（使用者：「線的顏色偏亂」→
+        # 選了「照資料種類」）：影像一個中性色、數字／結果 ADC 紫，區域線不走
+        # 這一支（它是那個區域自己的顏色，見 `line_pen`）。整張畫布因此最多三種
+        # 意思，每一種講一件事；「這條從哪裡來」改由滑鼠停上去時整條路徑亮起來
+        # 回答（`PipelineCanvas.set_hover_path`）。``strength`` 的意思不變。
+        if self.kind() in DATA_PORTS:
+            # 紫要**認得出來**：混一半的話跟影像線的灰只差一點點（實測
+            # #7c779c 對 #6c7582），一眼分不出兩種線 —— 那正是換顏色的目的。
+            return QColor(theme.mix_hex(TOKENS["seg_adc"], TOKENS["canvas_edge"],
+                                        max(float(strength), 0.85)))
+        return QColor(theme.mix_hex(TOKENS["text_secondary"],
                                     TOKENS["canvas_edge"], float(strength)))
 
     # ---- 選中一張卡時，它的線要跟著講話（F78）-----------------------------
@@ -1463,6 +1481,10 @@ class _EdgeItem(QGraphicsItem):
         的理由通常正是「它接了誰」—— 那個問題在畫面上要用眼睛沿著線走才答
         得出來，一張擠了十條線的畫布上根本走不完。
         """
+        path = self.canvas.hover_path()
+        if path:
+            # 滑鼠停在一條線上：它與它**上游整條路徑**亮、其他淡（F123 期 4）。
+            return "near" if self in path else "far"
         if not self.canvas.has_node_selection():
             return "flat"
         return "near" if (self.src.isSelected() or self.dst.isSelected()) else "far"
@@ -1482,6 +1504,7 @@ class _EdgeItem(QGraphicsItem):
 
     def hoverEnterEvent(self, e) -> None:  # Qt hook
         self._hover = True
+        self.canvas.set_hover_path(self)
         # 提到節點之上（節點是 0）。滑鼠已經在這條線上了，這時候它就是使用者
         # 正在瞄的東西 —— 而它平常畫在卡片底下，中點只要被任何一張卡蓋到，
         # 那顆 × 就既看不見也按不到。抬起來之後「看得到的」與「按得到的」
@@ -1492,6 +1515,7 @@ class _EdgeItem(QGraphicsItem):
 
     def hoverLeaveEvent(self, e) -> None:  # Qt hook
         self._hover = False
+        self.canvas.set_hover_path(None)
         self.setZValue(_Z_EDGE)
         self.update()
         super().hoverLeaveEvent(e)
@@ -1517,11 +1541,15 @@ class _EdgeItem(QGraphicsItem):
 
     def out_name(self) -> str:
         """這條線從來源的哪一顆輸出埠出發（埠索引換算成流名）。"""
-        outs = self.src.out_names()
+        outs = self.src.port_names()
         return str(outs[self.port]) if 0 <= self.port < len(outs) else ""
 
-    #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。
+    #: 往回走的線，控制點往外推多遠（固定值，**不隨距離長大**）。它同時是「這條線
+    #: 算不算往回走」的門檻（``dx < 2 × BACK_REACH``）—— 相鄰兩欄的線 dx 是欄距。
     BACK_REACH = 46.0
+    #: 繞行的線（換行、繞過卡）**垂直那一段離卡多遠**（F124 期 3）：落在埠名
+    #: （``_PORT_LABEL_W``）外面，線才不會從 `Left picture` 那幾個字上劃過去。
+    SIDE = _PORT_LABEL_W + 8.0
 
     def path(self) -> QPainterPath:
         """左→右的三次貝茲；**往回走的線走另一個形狀**。
@@ -1546,13 +1574,26 @@ class _EdgeItem(QGraphicsItem):
             # 之後只剩 28px）曲線就退化成斜的直線，n8n 那種「從埠水平流出、
             # 水平流入」的秩序感整個不見 —— 看起來像線亂穿，其實是切線不夠平。
             h = max(COL_GAP * 0.67, dx * 0.5)
+            # 中間隔著一張卡就繞過去（F124 期 3，`edge_route` 的說明）。
+            pts = edge_route.forward_detour(a, b, h, self.canvas.card_bodies(
+                skip=(self.src, self.dst)), self.SIDE, ROW_GAP,
+                edge_route.lane(self.SIDE, self.dst_port))
+            if pts:
+                return _rounded_path(pts, 12.0)
             p.cubicTo(a + QPointF(h, 0), b - QPointF(h, 0), b)
             return p
-        h = self.BACK_REACH
-        v = max(30.0, abs(b.y() - a.y()) * 0.5)
-        sign = 1.0 if b.y() >= a.y() else -1.0
-        p.cubicTo(a + QPointF(h, sign * v), b - QPointF(h, sign * v), b)
-        return p
+        # **繞行**（F123 期 4）：從來源右邊出來、走到目標那一列旁邊的空隙、沿
+        # 空隙水平走、再進目標左邊的埠。以前是一條從右上直接彎到左下的曲線，
+        # 中段斜穿過夾在中間的卡（截圖上結果線穿過 Write charts）。水平那一段
+        # 落在列與列之間，所以不壓任何卡；兩端仍只超出 ``BACK_REACH``。
+        h = self.SIDE
+        h_in = edge_route.lane(h, self.dst_port)    # 一顆埠一條道（F124 期 3）
+        top = self.dst.scenePos().y()
+        gy = (top - ROW_GAP / 2.0 if b.y() >= a.y()
+              else top + self.dst.height() + ROW_GAP / 2.0)
+        return _rounded_path([a, QPointF(a.x() + h, a.y()),
+                              QPointF(a.x() + h, gy), QPointF(b.x() - h_in, gy),
+                              QPointF(b.x() - h_in, b.y()), b], 12.0)
 
     def boundingRect(self) -> QRectF:
         # ``_CUT_R + 2`` 是那顆 × 的半徑。**boundingRect 必須涵蓋所有畫得出去的
@@ -1718,12 +1759,6 @@ class PipelineCanvas(QGraphicsView):
     #: 「在自己的視窗打開畫布」（F8-UI D 案）。畫布在主視窗只佔中上一塊
     #: （它會 zoom，不需要常駐大面積），要看全貌就彈出去。
     popout_requested = Signal()
-    #: 點了判定區的入口小卡（F24 ②）——「跳到判定的編輯」。
-    #: 入口卡永遠恰好一個、不能刪，所以這裡沒有 id 要帶。
-    decision_clicked = Signal()
-    #: 使用者按了判定區右上角那顆 ✕（2026-08-25）。畫布只**請**，
-    #: 要不要真的拿掉由 Studio 決定（底下掛著一整棵樹，要問過）。
-    decision_remove_requested = Signal()
     #: 點了畫布上的分流徽章（F25-B）—— 去編 route_by。
     prefilter_clicked = Signal()
     #: 點了判定樹的一個菱形／托盤（F24 ③）—— 帶的是**路徑**（"" = 根、
@@ -1912,8 +1947,10 @@ class PipelineCanvas(QGraphicsView):
         # （使用者在拉線／刪卡的時候看到的那一串 traceback）。
         # 空表回答得出「沒有東西被選中」，而那句話在這個瞬間剛好是真的。
         self._items, self._edges = {}, []
+        self._hover_path = set()           # 同理：停著的那條線要被銷毀了
         self._hover_node = None            # 舊的圖元剛被 clear() 銷毀
         self._ghost_items, self._ghost_cards = [], []   # 同理：別留著殘骸
+        self._tree_items, self._tree_at = [], None       # 同理（`follow_decision`）
         self._scene.clear()
         self._order = [str(n.get("node_id", "")) for n in nodes]
         # ``edges`` 收兩種形狀：``(來源, 目的)`` 與 ``(來源, 目的, 來源埠)``。
@@ -1957,9 +1994,18 @@ class PipelineCanvas(QGraphicsView):
         # 畫，而在一張由左往右讀的畫布上，那讀起來是「它先跑」。
         # `docs/PITFALLS.md` 上「Region 卡排在量測卡右邊」那一條記的是同一種
         # 誤讀造成的真 bug。
+        #
+        # **本來就沒有入口的卡是起點**（F124 期 3）：Input、Pair source、
+        # layout(GDS)。替它補一個「route 前一張」的依賴，它就被排到前一張的右邊
+        # —— characterization 的 Pair source 因此排在 Input 右邊，讀起來像
+        # Input 餵給它。起點跟 Input 疊在第一欄。
         wired = {b for _a, b in self._pairs}
+        starts = {str(info.get("node_id")) for info in nodes
+                  if not (info.get("inputs") or info.get("region_inputs")
+                          or info.get("reads"))}
         self._implicit = [pair for pair in zip(self._order, self._order[1:])
-                          if pair not in set(self._pairs) and pair[1] not in wired]
+                          if pair not in set(self._pairs) and pair[1] not in wired
+                          and pair[1] not in starts]
 
         self._laid_wrap = self.wrap()
         pos = layout_columns(self._order, self._pairs + self._implicit,
@@ -1984,7 +2030,7 @@ class PipelineCanvas(QGraphicsView):
             if a not in self._items or b not in self._items:
                 continue
             src, dst = self._items[a], self._items[b]
-            outs = src.out_names()
+            outs = src.port_names()
             in_names = [str(d.get("name", "")) for d in dst.in_specs()]
             named = [(o, i) for (x, y, o, i) in self._lines
                      if (x, y) == (a, b) and o]
@@ -2048,58 +2094,52 @@ class PipelineCanvas(QGraphicsView):
                 self._scene.removeItem(it)
             except Exception:  # clear() 先銷毀過就算了
                 swallowed("canvas._rebuild_decision")
-        self._tree_items = []
+        self._tree_items, self._tree_at = [], None
         info = getattr(self, "_decision_info", None)
-        if not info:
+        if not info or self.tree_collapsed():
             return
-        # 判定區放在所有卡片的右邊（mockup 定稿：畫布右側一塊淡紫區），
-        # 再加上使用者自己拖出來的位移（2026-08-25）。
-        #
-        # **位移是 session 狀態，不進 recipe** —— 跟卡片的位置一模一樣的待遇
-        # （見模組 docstring）。所以拖它不會讓檔案變髒，也不必進復原堆疊，
-        # 而 `tidy()` 會把它跟卡片一起排回去。
-        right = 0.0
-        top = 0.0
-        for item in self._items.values():
-            right = max(right, item.pos().x() + NODE_W)
-            top = min(top, item.pos().y())
-        off = getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0)
-        origin = QPointF(right + COL_GAP * 1.8 + off.x(), top + off.y())
-        self._tree_items = tree_scene.build_zone(
-            self._scene, self, info, origin,
-            collapsed=bool(getattr(self, "_tree_collapsed", TREE_COLLAPSED_DEFAULT)),
+        # **樹掛在 Decision 卡底下**（F123 期 1）：根對齊那張卡、排在所有卡片
+        # 的下面（往右是 yes、往下是 no，所以不會壓到任何一張卡），一條線從卡
+        # 的下緣接到根。沒有那張卡（手寫的 recipe、只餵 info 的測試）就站在
+        # 所有卡片的右邊，跟以前一樣。位置不進 recipe（見模組說明）。
+        card = self._items.get(str(info.get("node") or ""))
+        anchor = None
+        if card is not None:
+            bottom = max(it.pos().y() + it.height() for it in self._items.values())
+            origin = QPointF(card.pos().x() + (NODE_W - tree_scene._DIA_W) / 2.0,
+                             bottom + ROW_GAP * 2.0)
+            anchor = card.pos() + QPointF(NODE_W / 2.0, card.height())
+            self._tree_at = QPointF(card.pos())
+        else:
+            right = max([it.pos().x() + NODE_W for it in self._items.values()]
+                        or [0.0])
+            top = min([it.pos().y() for it in self._items.values()] or [0.0])
+            origin = QPointF(right + COL_GAP * 1.8, top)
+        self._tree_items = tree_scene.build_tree(
+            self._scene, self, info, origin, anchor=anchor,
             selected_path=getattr(self, "_tree_selected", None),
             highlight_path=getattr(self, "_tree_highlight", None))
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self._scene.setSceneRect(self._scene.sceneRect().united(rect))
 
     def decision_items(self) -> List[Any]:
-        """判定區現在的圖元（測試與外部檢查用）。"""
+        """判定樹現在的圖元（測試與外部檢查用；收著就是空的）。"""
         return list(getattr(self, "_tree_items", []) or [])
 
-    # ---- 拖整個判定區（2026-08-25）----------------------------------------
-    def move_decision_by(self, dx: float, dy: float) -> None:
-        """把整個判定區平移 ``(dx, dy)``。
+    def follow_decision(self, card: Any) -> None:
+        """Decision 卡動了，樹跟著它走（F123 期 1）。
 
-        **就地搬每一個圖元，不重建**：重建會把滑鼠從把手上搶走（拖到一半突然
-        失去控制比慢一點更難用 —— F26 在拖門檻時學到同一條）。累積的位移記在
-        `_tree_offset`，下一次真的重建時 `_rebuild_decision` 會把它加回去。
+        **就地搬，不重建** —— 拖曳的每一個 frame 都會走到這裡，而每 frame 銷毀
+        重建一批圖元就是 F50 那個殘影（見 :meth:`refresh_edges`）。
         """
-        off = getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0)
-        self._tree_offset = QPointF(off.x() + float(dx), off.y() + float(dy))
+        info = getattr(self, "_decision_info", None) or {}
+        at = getattr(self, "_tree_at", None)
+        if at is None or card.node_id != str(info.get("node") or ""):
+            return
+        d = card.pos() - at
+        self._tree_at = QPointF(card.pos())
         for it in getattr(self, "_tree_items", []) or []:
-            it.moveBy(float(dx), float(dy))
-        rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
-        self._scene.setSceneRect(self._scene.sceneRect().united(rect))
-
-    def decision_offset(self) -> QPointF:
-        """使用者把判定區拖了多遠（測試用）。"""
-        return QPointF(getattr(self, "_tree_offset", None) or QPointF(0.0, 0.0))
-
-    def reset_decision_offset(self) -> None:
-        """把判定區排回自動的位置（`tidy()` 會叫它）。"""
-        self._tree_offset = QPointF(0.0, 0.0)
-        self._rebuild_decision()
+            it.moveBy(d.x(), d.y())
 
     # ---- 分流徽章（F25-B）-------------------------------------------------
     def set_prefilter(self, info: Optional[Dict[str, Any]]) -> None:
@@ -2152,11 +2192,14 @@ class PipelineCanvas(QGraphicsView):
         return getattr(self, "_tree_selected", None)
 
     def toggle_tree_collapsed(self) -> None:
-        """雙擊入口卡＝收合／展開整棵樹（F24 §4）。
+        """雙擊 Decision 卡＝收合／展開整棵樹（F24 §4）。
 
         收合是**這一份畫布的檢視狀態**，不進 recipe —— 跟縮放平移同一類。
         """
-        self._tree_collapsed = not self.tree_collapsed()
+        self.set_tree_collapsed(not self.tree_collapsed())
+
+    def set_tree_collapsed(self, on: bool) -> None:
+        self._tree_collapsed = bool(on)
         self._rebuild_decision()
 
     def tree_collapsed(self) -> bool:
@@ -2314,7 +2357,7 @@ class PipelineCanvas(QGraphicsView):
 
         兩端沒有共用的流（或下游沒宣告 reads）→ 退回單一條線。
         """
-        outs = src.out_names()
+        outs = src.port_names()
         wanted = set(dst.in_names())
         ports = [i for i, name in enumerate(outs) if name in wanted]
         return ports or [0]
@@ -2347,6 +2390,35 @@ class PipelineCanvas(QGraphicsView):
             item.update()
 
     # ---- 選中一張卡 → 它的線跟著講話（F78）--------------------------------
+    def hover_path(self) -> set:
+        """滑鼠停著的那條線與它上游的每一條線（沒有停在線上就是空的）。"""
+        return getattr(self, "_hover_path", None) or set()
+
+    def set_hover_path(self, edge: Any) -> None:
+        """滑鼠停在 ``edge`` 上：它與它**上游整條路徑**亮起來（F123 期 4）。
+
+        線不再用來源的顏色講「從哪裡來」（照資料種類上色之後同一種線同一色），
+        所以這個問題改成一個手勢：停上去，路徑自己亮。``None`` = 移開。
+        """
+        path: set = set()
+        if edge is not None:
+            path.add(edge)
+            todo, seen = [edge.src.node_id], set()
+            while todo:
+                nid = todo.pop()
+                if nid in seen:
+                    continue
+                seen.add(nid)
+                for e in self._edges:
+                    if e.dst.node_id == nid:
+                        path.add(e)
+                        todo.append(e.src.node_id)
+        if path == self.hover_path():
+            return
+        self._hover_path = path
+        for e in self._edges:
+            e.update()
+
     def has_node_selection(self) -> bool:
         """現在有沒有選中任何一張卡（`_EdgeItem.focus_state` 問的就是這個）。
 
@@ -2653,9 +2725,7 @@ class PipelineCanvas(QGraphicsView):
             moves[nid] = (item.pos(),
                           QPointF(col * (NODE_W + COL_GAP), row * pitch))
             item.setPos(moves[nid][1])
-        # 判定區也是「拖得動的東西」，所以 Tidy up 也要把它排回去 ——
-        # 只排一半的整理，下一次還是得自己搬。
-        self._tree_offset = QPointF(0.0, 0.0)
+        # 樹掛在 Decision 卡底下，卡排回去了它也要（F123 期 1）。
         self._rebuild_decision()
         self.refresh_edges()
         rect = self._scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
@@ -2703,6 +2773,11 @@ class PipelineCanvas(QGraphicsView):
         step(0.0)
         anim.start(QAbstractAnimation.DeleteWhenStopped)
 
+    def card_bodies(self, skip: Sequence[Any] = ()) -> List[QRectF]:
+        """每一張卡佔的矩形（場景座標，含腳帶）—— 線要繞開的東西。"""
+        return [QRectF(c.scenePos().x(), c.scenePos().y(), NODE_W, c.height())
+                for c in self._items.values() if c not in skip]
+
     def refresh_edges(self) -> None:
         for e in self._edges:
             e.prepareGeometryChange()
@@ -2747,23 +2822,26 @@ class PipelineCanvas(QGraphicsView):
             self._link_line = None
         if src is None:
             return
-        for item in self._scene.items(scene_pos):
-            if isinstance(item, _NodeItem) and item is not src:
-                self.edge_added.emit(
-                    src.node_id, item.node_id, self.stream_of(src, port),
-                    item.in_param_at(item.mapFromScene(scene_pos)))
-                return
-        # 落在空白處：講出來，讓 Studio 開一張「接得上的卡」的選單。
         specs = src.out_specs()
         kind = (str(specs[port].get("kind") or "image")
                 if 0 <= port < len(specs) else "image")
+        for item in self._scene.items(scene_pos):
+            if isinstance(item, _NodeItem) and item is not src:
+                # 丟在卡上就好（F124 期 4）：接哪一格由 `link_drop` 決定，
+                # 兩格以上會問；取消＝不接。
+                stream = self.stream_of(src, port)
+                param = link_drop.drop_param(self, item, kind, stream, scene_pos)
+                if param is not None:
+                    self.edge_added.emit(src.node_id, item.node_id, stream, param)
+                return
+        # 落在空白處：講出來，讓 Studio 開一張「接得上的卡」的選單。
         self.link_dropped.emit(src.node_id, kind, self.stream_of(src, port),
                                float(scene_pos.x()), float(scene_pos.y()))
 
     @staticmethod
     def stream_of(src: "_NodeItem", port: int) -> str:
         """``src`` 的第 ``port`` 個輸出埠吐的影像流名（沒有名字回空字串）。"""
-        names = src.out_names()
+        names = src.port_names()
         if 0 <= port < len(names):
             return str(names[port] or "")
         return ""

@@ -38,6 +38,12 @@ def _no_modal_dialogs_in_tests():
     lang = sys.modules.get("d4t.ui.language")
     if lang is not None:
         lang.ASK = False
+    # F124 期 4：線丟在有兩格以上接得上的卡上時跳的小選單。關掉＝退回「最近的
+    # 那一格」；要驗選單的測試用 `link_drop.CHOOSE` 換掉使用者的選擇。
+    drop = sys.modules.get("d4t.ui.link_drop")
+    if drop is not None:
+        drop.ASK = False
+        drop.CHOOSE = None
     yield
 
 
@@ -153,4 +159,26 @@ def first_source(window, step: str = "load_patch") -> str:
     """
     if not window.model.node_order:
         window._on_add_requested(str(step))   # 卡片庫按下去走的正是這一條
+    return window.model.node_order[0]
+
+
+def add_single_input(model) -> str:
+    """一張**名字表只有一列**（``1:single``）的 Input 卡，回它的 id。
+
+    F121 期 2 之前這是 `model.add_step("load_single")`（「SEM image」，一顆一張、
+    吐一條 `single`）。那張卡併回 Input 了，而等價的寫法是名字表一列 ——
+    像素與特徵逐一相同（`tests/test_f11_split_load_cards.py` 守著）。
+    """
+    nid = model.add_step("load_patch")
+    model.set_param(nid, "channel_map", "1:single")
+    return nid
+
+
+def first_single_source(window) -> str:
+    """:func:`first_source` 的一顆一張版：畫布是空的就補一張 ``1:single`` 的
+    Input 卡（F121 期 2 之前是 `first_source(window, "load_single")`）。"""
+    if not window.model.node_order:
+        window._on_add_requested("load_patch")
+        window.model.set_param(window.model.node_order[0], "channel_map",
+                               "1:single")
     return window.model.node_order[0]

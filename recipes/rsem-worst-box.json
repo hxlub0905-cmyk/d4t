@@ -1,6 +1,6 @@
 {
   "recipe_id": "rsem_worst_box",
-  "version": 5,
+  "version": 8,
   "app_version": "0.1.0.dev0",
   "author": "d4t",
   "description": "RSEM lot, one image per defect and no reference image: tile the whole picture with boxes, then let GLV pick the box whose gray level is furthest from all the other boxes. Three ROI cards lay the boxes down - on the pattern where the stripes cross, and in the gap between the columns and between the rows - and all three wire into the one GLV card, so every part of the image is covered. That matters: a dark defect lands in the gap, and boxes drawn only on the pattern step right over it. The decision asks two questions in order: is the worst box far enough out to be anything at all, and is more than one box out - one dirty box and a whole area that has drifted need opposite treatment. Nothing has to be set up by hand; the report folder is the one thing you will want to change.",
@@ -11,14 +11,15 @@
       "roi_between_columns",
       "roi_between_rows",
       "glv",
+      "decision",
       "report"
     ]
   },
   "nodes": {
     "load": {
-      "step": "load_single",
+      "step": "load_patch",
       "params": {
-        "out": "single",
+        "channel_map": "1:single",
         "nm_per_px": 0.0,
         "carry": "XREL,YREL"
       },
@@ -101,6 +102,11 @@
         "jpeg_quality": 80
       },
       "enabled": true
+    },
+    "decision": {
+      "step": "decision",
+      "params": {},
+      "enabled": true
     }
   },
   "edges": [
@@ -145,6 +151,18 @@
       "single",
       "glv",
       "source"
+    ],
+    [
+      "glv",
+      "numbers",
+      "decision",
+      "numbers"
+    ],
+    [
+      "decision",
+      "results",
+      "report",
+      "results"
     ]
   ],
   "score": {

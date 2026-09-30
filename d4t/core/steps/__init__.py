@@ -6,10 +6,11 @@
 ``d4t.core.pipeline.step.REGISTRY`` / ``list_steps()`` 取卡。
 
 已註冊的 key（影像段 → 算法段）：
-  load_patch, load_single, load_sidecar, normalize, denoise, tone, flatten,
+  load_patch, load_sidecar, normalize, denoise, tone, flatten,
   align, subtract, align_to, pair_source,
   roi_reference,
   glv_stats, cd_measure, focus_quality,
+  decision,
   output_report, output_klarf, output_char, output_uniformity
 
 **2026-09-02：``roi_mask``（Mask from regions）刪掉了。** 使用者：「請幫我拿掉
@@ -81,7 +82,7 @@ route 只剩「直接量單張影像」，而那條路量過是 12/24（＝猜�
 from __future__ import annotations
 
 from . import _util          # 共用小工具（非卡片）
-from . import load           # load_patch / load_single
+from . import load           # load_patch（Input；F121 起一張，load_single 併進來了）
 from . import load_sidecar  # load_sidecar（GLAS 的 label map）
 from . import normalize      # normalize（percentile / glv_band / match / local）
 from . import denoise        # denoise
@@ -105,10 +106,12 @@ from . import roi_reference  # roi_reference（三種找法 → 具名區域）
 from . import glv_stats      # glv_stats（GLV：stats / compare）
 from . import cd             # cd_measure（CD）
 from . import quality        # focus_quality（Focus index）
+from . import decision       # decision（ADC：判定樹是一張卡，F123）
 from . import output         # Output 段（report / klarf / comparison / charts）
 
 __all__ = [
     "load", "load_sidecar", "normalize", "denoise", "tone", "flatten", "align", "arith", "combine",
     "quality", "glv_stats",
+    "decision",
     "output",
 ]

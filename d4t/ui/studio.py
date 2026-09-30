@@ -79,16 +79,13 @@ import json
 import math
 import os
 import sys
-import copy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QStatusBar,
     QWidget,
@@ -100,8 +97,10 @@ from d4t.core.pipeline.cellrois import region_names
 from d4t.core.pipeline import sampling
 from d4t.core.pipeline.step import SCALE_DEFECT, SCALE_LOT
 from d4t.core.pipeline.recipe import (
-    describe_migration, version_skew,
+    ScoreSpec, describe_migration, route_for, version_skew,
 )
+from d4t.core.pipeline.recipe_schema import legacy_decision
+from d4t.core.steps.decision import DecisionStep
 from d4t.core.pipeline.verdict_trace import verdict_trace
 
 from . import autosave
@@ -114,6 +113,7 @@ from . import open_dialogs
 from . import baseline
 from . import fit_screen
 from .canvas import NODE_H, NODE_W, SUMMARY_SEP, PipelineCanvas, run_status_from
+from .tree_scene import score_summary_text
 from .gauge_panel import GaugePanel
 from .preview_overlays import PreviewOverlays
 from . import studio_layout
@@ -150,8 +150,7 @@ from .scope import (
 )
 from .numbers import format_feature_value
 from .viewmodel import (GLV_INTENTS, RecipeModel,
-                        is_a_constant_expression, accuracy_at, histogram,
-                        rebin)
+                        is_a_constant_expression, histogram)
 from .theme import DEFAULT_THEME, THEMES, apply_theme, current_theme
 from .workbench import MODES as LAYOUT_MODE_NAMES
 from .welcome import (
@@ -171,23 +170,6 @@ from .workers import (
 __all__ = ["StudioWindow", "ThumbWorker", "TEMPLATE_RECIPE", "DEFAULT_CACHE_DIR",
            "THUMB_CHANNEL_PRIORITY", "TAB_PREVIEW", "TAB_GALLERY",
            "DEMO_DIR", "DEMO_DEFECTS", "DEMO_SEED", "generate_demo_lot"]
-
-#: 卡片庫「ADC 判定」段固定顯示的 Score / Bin 項目。它不是 registry 裡的
-#: step（每條 pipeline 天生就有一張 ScoreSpec），但三段式的心智模型要完整 ——
-#: 使用者要能在庫裡看到「影像 → 算法 → ADC 判定」三段都有東西。點它 = 去編輯分數。
-_SCORE_LIBRARY_KEY = "__score__"
-_SCORE_LIBRARY_ENTRY = {
-    "key": _SCORE_LIBRARY_KEY,
-    "label": "Score / Bin",
-    "category": "adc",
-    "group": "adc",
-    "help": "Combine the measured features into a score and split into bins by a threshold — every pipeline has exactly one; click to edit it.",
-    "requires_ref": False,
-    "params": [],
-    "reads": [],
-    "writes": [],
-    "features_out": ["score"],
-}
 
 #: 「載入範本」讀的檔案。
 #:
@@ -463,15 +445,14 @@ class StudioWindow(QMainWindow):
 
         # F7-1：卡片庫只列目前輸入型別用得到的卡（見 d4t/ui/scope.py）
         self.library.set_steps(
-            visible_steps([s.describe() for s in list_steps()])
-            + [_SCORE_LIBRARY_ENTRY])
+            visible_steps([s.describe() for s in list_steps()]))
         self._refresh_all()
         self.pipeline.fit_later()
         if self.model.node_order:
             # 起手卡直接選起來：右欄一開窗就是「可以動的東西」，
             # 而不是一句「請先從卡片庫挑一張卡」。
             self.select_node(self.model.node_order[0])
-        self._status("Ready — press “Help” for a guided start, or “Open KLARF…” "
+        self._status("Ready — press “Help” for a guided start, or “Open data…” "
                      "to load your data.")
 
         # **開窗要寬到工具列放得下**（F48，2026-08-28）。
@@ -673,11 +654,8 @@ class StudioWindow(QMainWindow):
         view.move_requested.connect(self._on_move_requested)
         view.remove_requested.connect(self._on_remove_requested)
         view.score_clicked.connect(self.show_score_page)
-        # 判定區的入口小卡（F24 ②）：點了＝跳到判定的編輯（同 score 那條路）。
-        view.decision_clicked.connect(self.show_score_page)
         # 分流徽章（F25-B）：點了去編 route_by（它就在判定欄的最上面）。
         view.prefilter_clicked.connect(self.show_score_page)
-        view.decision_remove_requested.connect(self.remove_decision)
         # 判定樹的菱形／托盤（F24 ③）：右欄變成那一步／那一類的編輯面板。
         view.tree_step_clicked.connect(self._on_tree_step_clicked)
         view.tree_leaf_clicked.connect(self._on_tree_step_clicked)
@@ -730,8 +708,6 @@ class StudioWindow(QMainWindow):
                 self.image_view_b, self.image_view, s, o))
 
         self.results.shown_feature_changed.connect(self._on_spread_feature_changed)
-        self.histogram.threshold_changed.connect(self._on_threshold_changed)
-        self.histogram.threshold_committed.connect(self._on_threshold_committed)
         self.histogram.bar_clicked.connect(self.gallery_ctl._on_bar_clicked)
 
         self.gallery.thumbs_requested.connect(
@@ -991,7 +967,7 @@ class StudioWindow(QMainWindow):
         # 分流（F23 期2）：route 清單與編輯區塊跟著 model 走。
         self._refresh_route_switcher()
         self.route_box.refresh()
-        self._sync_threshold_line()
+        self._sync_score_histogram()
         self._update_action_states()
         self._refresh_library_badges()
         region_check.refresh_region_button(self)
@@ -1002,7 +978,7 @@ class StudioWindow(QMainWindow):
         self._sync_score_widgets()
         self._sync_verdict_block()      # F76 刀 5：有判定才畫 Verdict 那一塊
         self._refresh_feature_combo()
-        self._sync_threshold_line()
+        self._sync_score_histogram()
         self._update_action_states()
         self._refresh_library_badges()
 
@@ -1058,7 +1034,7 @@ class StudioWindow(QMainWindow):
         elif not n_items and not has_steps:
             run_why = "Load a KLARF and add at least one card first."
         elif not n_items:
-            run_why = "No dataset loaded yet — use “Open KLARF…” first."
+            run_why = "No dataset loaded yet — use “Open data…” first."
         else:
             run_why = "The pipeline is empty — add a card from the library first."
 
@@ -1130,6 +1106,8 @@ class StudioWindow(QMainWindow):
         那張 Load 卡只說得出「load · test ref」。入口搬到卡片上之後，
         畫布也要跟著說得出來，否則搬家只搬了一半。
         """
+        if node.step == DecisionStep.key:
+            return [score_summary_text(self.model.decide)]   # 它的設定就是那棵樹
         parts = self._node_summary_parts(
             node, shown=(list(reads) + list(writes) + list(regions_out)
                          + [d["stream"] for d in region_inputs]))
@@ -1256,12 +1234,20 @@ class StudioWindow(QMainWindow):
         out: Dict[str, Any] = {}
         if issues is None:
             try:
-                issues = self.model.validate()
+                issues = self.model.validate(self.dataset)
             except Exception:  # 顯示用，壞了就沒標記
                 return out
+        from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
+
         rank = {"error": 0, "warning": 1, "info": 2}
+        decision = self.model.decision_node()
         for issue in issues:
             nid = getattr(issue, "node_id", None)
+            # 判定的 lint 沒有節點（它講的是 ``decide``）—— 掛到 Decision 卡上
+            # （F123 期 1；以前掛在入口小卡，F50）。⚠ 判準是那張表，不是「沒有
+            # 節點」：沒有節點的還有講分流、講整張圖的，不准讓這張卡背鍋。
+            if not nid and str(getattr(issue, "code", "")) in DECISION_ISSUE_CODES:
+                nid = decision
             if not nid:
                 continue
             prev = out.get(nid)
@@ -1277,7 +1263,7 @@ class StudioWindow(QMainWindow):
         # ⚠ **lint 只跑一次**，畫布的警示點與 Problems 列吃同一份（U2）。
         # 各算一次的那天，畫面上會有一張卡是紅的而清單說沒有問題。
         try:
-            issues: Sequence[Any] = self.model.validate()
+            issues: Sequence[Any] = self.model.validate(self.dataset)
         except Exception:  # 顯示用
             issues = []
         self.problems.set_issues(issues, self.model)
@@ -1413,6 +1399,8 @@ class StudioWindow(QMainWindow):
                 "problem": problems.get(nid, ("", ""))[0],
                 "problem_level": problems.get(nid, ("", "error"))[1],
             })
+            canvas_edges.data_ports(nodes[-1], self.model, nid, step_cls,
+                                    bool(missing))    # 數字線與結果線（F123）
         if self.selected_node not in self.model.nodes:
             self.selected_node = None
         self._sync_params_pane()
@@ -1435,58 +1423,7 @@ class StudioWindow(QMainWindow):
             # 「這一批分兩條路跑」，而不是只有工具列一個下拉。
             view.set_prefilter(prefilter)
             view.set_selected(self.selected_node)
-            view.set_score_summary(self._score_summary_text())
-
-    def _score_summary_text(self) -> str:
-        """判定段現在在做什麼，一句話。
-
-        三種樣子各講各的：判定樹講「幾個問題」、規則清單講「幾條規則」、
-        什麼都沒有就講沒有。（二元門檻那一句 F25 之後不會再出現 ——
-        開起來的 recipe 一律是樹。）
-        """
-        from .tree_scene import display_tree, layout_cells
-
-        d = getattr(self.model, "decide", None)
-        if d is None:
-            return "no decision yet"
-        if getattr(d, "tree", None) is not None:
-            steps = sum(1 for c in layout_cells(display_tree(d), d)
-                        if c["kind"] == "step")
-            return "decision tree · %d question%s" % (steps,
-                                                      "" if steps == 1 else "s")
-        return "decision · %d rule%s" % (len(d.rules),
-                                         "" if len(d.rules) == 1 else "s")
-
-    def _decision_problem(self) -> tuple:
-        """判定段的 lint（最嚴重的那一條）→ ``(訊息, 級別)``；沒有就 ``("","")``。
-
-        **這一支存在的理由是一個真的洞**（F50）：`Issue.node_id` 是「哪一張
-        卡」，而判定不是一張卡 —— 它的 issue 一律 `node_id=None`，而
-        `_node_problems()` 第一件事就是把沒有節點的丟掉。於是同樣是「指到一個
-        沒人算得出來的數字」，卡片那邊一改就看得到徽章，判定那邊只在**跑完
-        之後**的狀態列尾巴出現一次 —— 而跑一次是好幾分鐘。
-
-        ⚠ **判準是那張表，不是「node_id 是 None」**（`DECISION_ISSUE_CODES`）：
-        沒有節點的 lint 裡還有三條講分流、一條講整張圖，掛上來就是讓入口卡
-        替別人的問題背鍋。
-        """
-        from d4t.core.pipeline.recipe import DECISION_ISSUE_CODES
-
-        try:
-            issues = self.model.validate()
-        except Exception:  # 顯示用
-            return ("", "")
-        rank = {"error": 0, "warning": 1, "info": 2}
-        best = None
-        for issue in issues:
-            if getattr(issue, "node_id", None):
-                continue
-            if str(getattr(issue, "code", "")) not in DECISION_ISSUE_CODES:
-                continue
-            lvl = str(issue.level)
-            if best is None or rank.get(lvl, 1) < rank.get(best[1], 1):
-                best = (wording.issue_line(issue, self.model), lvl)
-        return best or ("", "")
+            view.set_score_summary(score_summary_text(self.model.decide))
 
     def _prefilter_info(self) -> Optional[Dict[str, Any]]:
         """畫布上的分流徽章要畫的東西（F25-B）；沒有 route_by 回 None。
@@ -1531,9 +1468,8 @@ class StudioWindow(QMainWindow):
         if info is not None:
             # 幽靈線（F24 ④）：菱形上的數字 → 產出它的卡。宣告層的答案。
             info["feat_owner"] = self.model.feature_owners()
-            # 判定的 lint 掛到入口卡上（F50）—— 見 `_decision_problem`。
-            why, level = self._decision_problem()
-            info["problem"], info["problem_level"] = why, level
+            # 樹掛在哪一張卡底下（F123 期 1）。
+            info["node"] = self.model.decision_node()
         return info
 
     def _sync_score_widgets(self) -> None:
@@ -1550,20 +1486,16 @@ class StudioWindow(QMainWindow):
         self.decide_panel.set_tree_collapsed(
             getattr(getattr(self, "pipeline", None), "tree_collapsed",
                     bool)())
-        self.pipeline.set_score_summary(self._score_summary_text())
+        self.pipeline.set_score_summary(score_summary_text(self.model.decide))
 
     def _on_decide_mode(self, on: bool) -> None:
-        """切了「分成好幾類」—— 門檻線只對二元那一種有意義。
-
-        ⚠ 這裡以前自己判一次（``None if on else …``），而 `_refresh_spread`
-        每跑一次就把它蓋回去。判斷現在只有一份（`_uses_a_threshold`）。
-        """
-        self._sync_threshold_line()
+        """切了「分成好幾類」—— 分數的直方圖與判定那一塊跟著重畫。"""
+        self._sync_score_histogram()
         self._sync_score_widgets()
 
     def _refresh_feature_combo(self) -> None:
         """判定面板的「插入數字 ▾」清單（F21-B）。"""
-        self.decide_panel.set_features(self.model.labelled_features())
+        self.decide_panel.set_features(self.model.decision_numbers())
 
     # ---- Spread（F18 第 2 步：它從量測卡的儀表搬來這裡）--------------------
     def _features_in_results(self, results: Sequence[Dict[str, Any]]) -> List[str]:
@@ -1667,7 +1599,7 @@ class StudioWindow(QMainWindow):
                 "(Score distribution appears after a trial run)")
             edges, counts = histogram(self.trial_scores)
             self.histogram.set_data(edges, counts)
-            self._sync_threshold_line()
+            self._sync_score_histogram()
             self.results.set_spread_hint("")
             return
 
@@ -1782,27 +1714,15 @@ class StudioWindow(QMainWindow):
         self.results.set_filter({"mode": "ids", "ids": list(row.get("ids") or ()),
                                  "label": "%s only" % name})
 
-    def _uses_a_threshold(self) -> bool:
-        """**這份 recipe 真的有一條門檻在決定事情嗎。**
+    def _sync_score_histogram(self) -> None:
+        """分數的直方圖**沒有門檻線**（F122 期 3：舊門檻那條路整條退役）。
 
-        R1（2026-08-24）修的那個 bug 的形狀是：這個判斷散在四個地方，而其中
-        三個沒有做 —— 於是「關掉門檻線」與「無條件把門檻線設回去」在同一次
-        重新整理裡互相蓋，最後贏的是錯的那一個。畫面上的下場是每一張縮圖說
-        `bin 3`、150px 底下的圖例說 `bin 1=24`，還附一行用那條門檻算出來的
-        準確率。同一批 24 顆，兩個答案。
-
-        所以判斷收成這一支，四個呼叫端都問它。F25 之後幾乎永遠是 False
-        （每一份 recipe 一打開就是一棵樹），但二元那條老路仍然走得到。
+        以前這裡問「這份 recipe 有沒有一條門檻在決定事情」，有的話畫一條拖得動的
+        線、底下一行重算的 bin 數與準確率。F25 之後每一份舊檔案一打開就是一棵樹，
+        剩下走得到那條線的只有**還沒有判定**的 recipe —— 而那時候拖一條線什麼都
+        不決定（F122 期 1：沒有判定＝沒有 bin）。判定的門檻現在在樹的每一步上
+        （`tree_panel` 的直方圖），這裡只剩「分數長什麼樣」。
         """
-        return getattr(self.model, "decide", None) is None
-
-    def _sync_threshold_line(self) -> None:
-        """門檻線與它底下那行字 —— **有門檻才畫**（見 `_uses_a_threshold`）。"""
-        if self._uses_a_threshold():
-            self.histogram.set_interactive(True)
-            self.histogram.set_threshold(self.model.threshold)
-            self._refresh_bin_summary(self.model.threshold)
-            return
         self.histogram.set_interactive(False)
         self.histogram.set_threshold(None)
         # 樹判出來的顆數是**真的那一份**，不是重算的，而它在判定段上已經有
@@ -1810,40 +1730,17 @@ class StudioWindow(QMainWindow):
         self._refresh_decide_counts()
         self.histogram.set_bin_summary(None)
 
-    def _refresh_bin_summary(self, threshold: float) -> None:
-        self._refresh_decide_counts()
-        if not self.trial_scores:
-            self.histogram.set_bin_summary(None)
-            return
-        self.histogram.set_bin_summary(
-            rebin(self.trial_scores, float(threshold), self.model.bins),
-            extra=self._accuracy_text(float(threshold)))
-
-    def _accuracy_text(self, threshold: float) -> str:
-        """有 ground truth 時，這個門檻下的正確率／抓漏／誤殺（一行字）。
-
-        沒有 ground truth 就回空字串 —— **不要放一行「N/A」**：那會佔掉版面
-        而且每次都在提醒使用者少了一個他可能根本沒有的東西。
-        """
-        g = accuracy_at(self.trial_results, threshold, self.model.bins,
-                        self.ground_truth)
-        if not g or not g.get("n_evaluated"):
-            return ""
-        return ("accuracy %.0f%%  missed %d  false alarms %d"
-                % (100.0 * float(g.get("accuracy") or 0.0),
-                   int(g.get("fn") or 0), int(g.get("fp") or 0)))
-
-    def _publish_run_snapshot(self, threshold: Optional[float] = None) -> None:
+    def _publish_run_snapshot(self) -> None:
         """把這一批壓成一塊交給 Results 的 baseline 條（X1）。
 
-        **門檻拖到哪就用哪一個**：使用者拖著那條線看的正是「這樣調準不準」，
-        而 baseline 那一行答的是「比上一次好還是壞」—— 兩者不同步的話，
-        畫面上會有兩個算法不同、看起來都像現在這一批的正確率。
+        「判成真的」看判定上每一類標的好消息／壞消息（F122 期 3），跟 Results
+        表上紅著的格子同一條規矩。（以前這裡還跟著分數直方圖上的門檻線走 ——
+        那條線 F122 期 3 退役了。）
         """
         try:
             snap = baseline.snapshot(
-                self.trial_results, self.ground_truth, self.model.bins,
-                threshold=threshold)
+                self.trial_results, self.ground_truth,
+                decide=getattr(self.model, "decide", None))
         except Exception:  # 顯示用，壞了就不講
             swallowed("studio._publish_run_snapshot")
             return
@@ -1907,7 +1804,7 @@ class StudioWindow(QMainWindow):
         # 講同一件事而不一樣）。
         self._refresh_verdict()
         self._refresh_spread()
-        self._publish_run_snapshot(None)
+        self._publish_run_snapshot()
         if wrote:
             self._status(truth_marks.summary_text(
                 merged, len(self.trial_results or []), wrote))
@@ -1916,10 +1813,9 @@ class StudioWindow(QMainWindow):
     # 卡片庫 / 流程
     # ==================================================================== #
     def _on_add_requested(self, step_key: str) -> None:
-        if str(step_key) == _SCORE_LIBRARY_KEY:
-            # 「Decision」不是可增刪的卡片 —— 每條 pipeline 固定有一棵判定樹，
-            # 點它就是**把它放上畫布並開始編第一步**（F25，使用者定調：
-            # 「加 ADC card 是要直接顯示在畫布上，而不是要勾選才顯示」）。
+        if str(step_key) == DecisionStep.key:
+            # Decision 是一張卡（F123 期 1），但一份 recipe 判一次：加它＝放上
+            # 畫布（已經有就選那一張）並開始編第一題（F25）。
             self.add_decision()
             return
         # 選著一張卡的時候，新的卡排在它後面 —— 但**線不會自己出現**
@@ -2104,7 +2000,13 @@ class StudioWindow(QMainWindow):
         for view in self._canvases():
             view.select_card(node_id)
         self._fill_param_form(node_id)
-        self.stack.setCurrentWidget(self.param_form)
+        # Decision 卡沒有參數，它的設定就是判定（F123 期 1）。
+        deciding = node_id == self.model.decision_node()
+        if deciding:
+            self._refresh_feature_combo()
+            self._sync_score_widgets()
+        self.stack.setCurrentWidget(self.score_pane if deciding
+                                    else self.param_form)
         self.gauge_note.setText("")              # 儀表又是這張卡的了（P1-7）
         self.bottom_stack.setEnabled(True)
         self._sync_params_pane()
@@ -2172,9 +2074,9 @@ class StudioWindow(QMainWindow):
     #: 不取代目前的資料集。
     _PAIR_CARDS = ("pair_source",)
 
-    #: 資料那幾張卡（`load_patch` / `load_single`）的鈕上寫什麼。
-    #: **它不是某一種 source 的名字** —— 一份 KLARF 是 patch 還是一顆一張由檔案
-    #: 決定，所以這顆鈕開的是一張選單（`scope.INPUT_SOURCES` 那三條路）。
+    #: 資料那張卡（Input，`load_patch`）的鈕上寫什麼 —— 跟空白畫面上那一顆
+    #: 同一個字（F121 期 4 起入口只有一顆，`scope.INPUT_SOURCES[0].title`；
+    #: `tests/test_ui_one_open.py` 守著兩邊一樣）。
     DATA_SOURCE_LABEL = "Open data…"
 
     def _source_action_for(self, node: Any) -> Tuple[str, str, str]:
@@ -2331,10 +2233,10 @@ class StudioWindow(QMainWindow):
             view.reveal_cards(srcs)
 
     def _on_source_requested(self) -> None:
-        """入口卡上那顆鈕：附加檔直接開，資料那幾張開一張選單。
+        """入口卡上那顆鈕：附加檔、第二份 lot、主資料各自開自己的對話框。
 
-        **選單的每一列都是 `scope.INPUT_SOURCES` 的一列** —— 那張表仍然是入口
-        的唯一定義（F11 Input-5），這一輪只是換了它長在哪裡。
+        主資料那一顆以前開一張選單（`scope.INPUT_SOURCES` 一列一項）；F121 期 4
+        起入口只有一顆，**按下去就是那一顆**，不先問「你要開哪一種」。
         """
         nid = self.selected_node
         node = self.model.nodes.get(nid) if nid else None
@@ -2351,20 +2253,7 @@ class StudioWindow(QMainWindow):
         if node.step in self._PAIR_CARDS:
             self.attach_ctl._on_open_pair_source(nid)
             return
-        menu = QMenu(self)
-        for src in scope.INPUT_SOURCES:
-            act = QAction(src.title, menu)
-            tip = src.what
-            if not src.has_klarf:
-                tip += ("  There is no KLARF here, and no KLARF means no "
-                        "coordinates and no write-back - CSV and Excel "
-                        "reports still work.")
-            act.setToolTip(tip)
-            act.triggered.connect(
-                partial(open_dialogs.open_source, self, src.key))
-            menu.addAction(act)
-        btn = self.param_form.source_button()
-        menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
+        open_dialogs.open_source(self, scope.INPUT_SOURCES[0].key)
 
     # ---- 核心大小畫在影像上（F11 Enhance-UI-A）-----------------------------
     def _kernel_extent(self) -> Tuple[Optional[float], str]:
@@ -2426,9 +2315,12 @@ class StudioWindow(QMainWindow):
         self.layout_modes.on_selection(self.selected_node is not None)
 
     def _on_node_activated(self, node_id: str) -> None:
-        """雙擊一張卡：選它 + 把設定攤開。"""
+        """雙擊一張卡：選它 + 把設定攤開。Decision 卡另外收合／展開它的樹。"""
         if self.select_node(str(node_id)):
             self.set_params_open(True)
+            if str(node_id) == self.model.decision_node():
+                self.pipeline.toggle_tree_collapsed()
+                self._sync_score_widgets()
 
     def _on_card_dropped(self, step_key: str, x: float, y: float) -> None:
         """從卡片庫拖一張卡丟到畫布上（F7-22）。
@@ -2565,8 +2457,7 @@ class StudioWindow(QMainWindow):
     def _repaint_for_theme(self) -> None:
         """把在建構式裡吃過 token 的元件重建/重畫一次。"""
         self.library.set_steps(
-            visible_steps([s.describe() for s in list_steps()])
-            + [_SCORE_LIBRARY_ENTRY])
+            visible_steps([s.describe() for s in list_steps()]))
         self.library.refresh_colors()
         self._refresh_pipeline()
         self.gallery.refresh_styles()
@@ -2575,34 +2466,12 @@ class StudioWindow(QMainWindow):
             w.update()
 
     def remove_decision(self) -> bool:
-        """把整個判定拿掉（畫布上判定區右上角那顆 ✕，2026-08-25）。
-
-        使用者：「ADC 也要能在原畫布上拖曳 移除」。
-
-        **先問過**：底下掛著使用者自己畫的整棵樹，而一顆 ✕ 的重量看起來跟
-        刪一張卡一樣 —— `_remove_step` 對「yes 邊掛著一整個子樹」講過同一句話。
-        復原回得來（`use_decide` 自己會 `_push_undo`），但「一個 ✕ 把三層樹
-        默默吃掉」不是一顆按鈕該有的重量。
-        """
-        m = self.model
-        if getattr(m, "decide", None) is None:
+        """把整個判定拿掉＝刪掉那張 Decision 卡（F123 期 1；會先問）。"""
+        nid = self.model.decision_node()
+        if not nid:
             return False
-        from .tree_scene import display_tree, layout_cells
-
-        n_class = sum(1 for c in layout_cells(display_tree(m.decide), m.decide)
-                      if c.get("kind") == "leaf")
-        answer = QMessageBox.question(
-            self, "Remove the decision?",
-            "This takes the whole decision off the canvas - %d class%s and "
-            "every question that sorts into them.\n\nUndo brings it back."
-            % (n_class, "" if n_class == 1 else "es"),
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        if answer != QMessageBox.Yes:
-            return False
-        m.use_decide(False)
-        self.show_param_page()
-        self._status("Decision removed. Undo brings it back.")
-        return True
+        canvas_edges.remove_card(self, nid)
+        return nid not in self.model.nodes
 
     def show_score_page(self) -> None:
         """切到分數編輯頁（順便刷新特徵下拉）。"""
@@ -2734,11 +2603,9 @@ class StudioWindow(QMainWindow):
         說謊 —— 所以正確的行為就是照畫面存。想留住舊檔就 `Ctrl+Shift+S`
         另存一份（那也是每個編輯器的慣例）。
 
-        ⚠ 一個誠實的落差：`use_decide` 產出的規則是 ``expr >= threshold``，
-        而老路是 ``score < threshold`` 判 below —— 兩者在**分數是 NaN** 的
-        時候會分到不同的 bin（老路進 above、新的進 otherwise）。留 ``>=``
-        是因為它讀起來才是正著的（「大於就是這一類」）；NaN 的分數本來就是
-        一份算壞了的 recipe。
+        **轉出來的樹跟引擎跑的是同一棵**（F122 期 3）：`recipe_schema.legacy_decision`
+        —— 引擎對沒開過 Studio 的舊檔案也是這樣換的，所以畫面上那一題（``score
+        >= 門檻``）就是 CLI 跑的那一題，逐項同一個 bin。
         """
         m = self.model
         if getattr(m, "decide", None) is not None:
@@ -2749,8 +2616,10 @@ class StudioWindow(QMainWindow):
         # 正是不要發生這件事。見 `viewmodel.is_a_constant_expression`。
         if is_a_constant_expression(getattr(m, "expr", "")):
             return False
-        m.use_decide(True)
-        m.ensure_tree()
+        m.decide = legacy_decision(ScoreSpec(m.expr, m.threshold, m.bins))
+        m.expr = ""              # 並存是 error（`ambiguous-decision`）
+        m.add_step(DecisionStep.key)   # 判定是一張卡（F123；有了就不再加）
+        m._changed()             # 畫布與面板跟上（卡已經在時上一行不會通知）
         m.dirty = False          # 使用者什麼都還沒做，關窗不要問他要不要存
         m.clear_history()        # 「復原」不該把他退回一個看不到編輯器的狀態
         return True
@@ -2769,6 +2638,7 @@ class StudioWindow(QMainWindow):
         with m.compound("add decision"):
             if getattr(m, "decide", None) is None:
                 m.use_decide(True)      # 現有門檻 → 第一條規則（不丟東西）
+            m.add_step(DecisionStep.key)   # 內容在、卡不在（手寫的）也補上
             m.ensure_tree()             # 規則清單 → 等價的樹
             if isinstance(m.tree_node(""), TreeLeaf):
                 # 整棵樹只有一片葉子（這份 recipe 還沒有任何判定）——
@@ -2781,9 +2651,11 @@ class StudioWindow(QMainWindow):
             # 空的或常數的它才填。
             self.tree_pane.set_rows(self.trial_results or [])
             self.tree_pane.suggest_question("")
+        for view in self._canvases():
+            view.set_tree_collapsed(False)   # 選到的是第一題，不是那張卡
         self._on_tree_step_clicked("")
-        # **看得到才算在畫布上**：判定區長在所有卡片的右邊，而畫布這時多半
-        # 停在左半邊 —— 不 fit 的話使用者按了 ADC 卡，畫面上什麼都沒發生。
+        # **看得到才算在畫布上**：樹長在所有卡片的下面，而畫布這時多半停在
+        # 別處 —— 不 fit 的話使用者按了 Decision，畫面上什麼都沒發生。
         for view in self._canvases():
             view.fit()
         self._status("Decision: the tree is on the canvas - edit this step "
@@ -2800,7 +2672,7 @@ class StudioWindow(QMainWindow):
             return
         self.model.ensure_tree()
         info = self._decision_info()
-        self.tree_pane.set_features(self.model.labelled_features())
+        self.tree_pane.set_features(self.model.decision_numbers())
         self.tree_pane.set_counts(None if not info else info.get("counts"))
         # 導引式問題的滑桿範圍與「幾顆說 yes」吃這一批的結果（F25）。
         self.tree_pane.set_rows(self.trial_results or [])
@@ -2912,21 +2784,6 @@ class StudioWindow(QMainWindow):
     # 分數編輯
     # ==================================================================== #
 
-    # ---- 直方圖門檻線 -----------------------------------------------------
-    def _on_threshold_changed(self, value: float) -> None:
-        """拖曳中：**只**重算 bin 數（秒回），絕不寫 model、不重跑。"""
-        self._refresh_bin_summary(float(value))
-        self._status("Threshold %.3g (applied when you release the mouse)" % float(value))
-
-    def _on_threshold_committed(self, value: float) -> None:
-        """放開滑鼠：這時才寫回 model（會觸發刷新與預覽）。"""
-        self.model.set_threshold(float(value))
-        # baseline 那一行也跟著這個門檻（X1）。**在放開的時候，不是拖曳中**：
-        # 拖曳中那條路是「秒回」的（只重算 bin 數），而算一次 baseline 是一趟
-        # 完整的 `summarize` —— 直方圖底下那行正確率已經在跟著動了，
-        # 這一行慢半拍不會少講任何事。
-        self._publish_run_snapshot(float(value))
-        self._status("Threshold set to %.3g" % float(value))
 
     # ==================================================================== #
     # 資料集
@@ -2954,15 +2811,11 @@ class StudioWindow(QMainWindow):
         self._status("Loading: %s" % os.path.basename(path))
         return True
 
-    def load_folder_path(self, folder: Any, sync: bool = False,
-                         doe: bool = False) -> bool:
-        """載入一個**資料夾的單張影像**（F11 Input-3），或 DOE 的一疊 condition。
+    def load_folder_path(self, folder: Any, sync: bool = False) -> bool:
+        """載入一個**資料夾的單張影像**（F11 Input-3）。
 
-        沒有 KLARF、沒有座標。``doe=False``：每個影像檔一顆 defect，多頁 TIFF
-        在這條路上只讀得到第一頁（ingest 會為此發一句警告並指向 ``Open stack…``）。
-        ``doe=True``（F110）：**一個子目錄一顆、裡面每個檔案一個 imaging
-        condition** —— 正好相反，所以它是第五種 kind 而不是這裡的一個開關；
-        這一格只決定呼叫哪一支 ingest。
+        沒有 KLARF、沒有座標。每個影像檔一顆 defect，多頁 TIFF 在這條路上只讀得到
+        第一頁（ingest 會為此發一句警告）。
         """
         d = str(folder)
         if not os.path.isdir(d):
@@ -2971,13 +2824,13 @@ class StudioWindow(QMainWindow):
         self._pending_dataset_name = os.path.basename(d.rstrip("/\\"))
         if sync:
             try:
-                ds = DatasetLoadWorker.run_sync_folder(d, doe)
+                ds = DatasetLoadWorker.run_sync_folder(d)
             except Exception as e:  # UI 邊界，一律回報
                 self._status("Could not load folder: %s"
                              % wording.failure("studio.load_folder", e), "error")
                 return False
             return self._on_dataset_loaded(ds)
-        if not self.dataset_worker.start_folder(d, doe):
+        if not self.dataset_worker.start_folder(d):
             self._status("A dataset is already loading — please wait.")
             return False
         self._progress_busy("Loading %s…" % os.path.basename(d.rstrip("/\\")))
@@ -3063,36 +2916,35 @@ class StudioWindow(QMainWindow):
 
         warn = list(getattr(dataset, "warnings", []) or [])
 
-        # route 型別跟著資料走 —— **但只在使用者還沒動過 pipeline 的時候**
-        # （F11 Input-3）。以前這裡的條件是「畫布是空的」，而 F7-9 之後開窗就有
-        # 一張起手卡，所以那個條件**永遠是 False** —— 在只支援一種輸入的時候看
-        # 不出來，四種輸入之後就會：載一份 rsem 資料，pipeline 還留在 ebi_patch
-        # 那條 route 上，於是 lint 以為有 `ref`（kind-aware 宣告）而執行期才發現
-        # 沒有。判準改成 `dirty`（`RecipeModel.starter()` 特意把它設 False）。
+        # route 鍵跟著資料走 —— **只在畫布是空的時候**（F121 期 1）。
+        #
+        # 以前的條件是「使用者還沒動過」（`not dirty`），而一份**剛開的 recipe**
+        # 也是沒動過 —— 於是先開 recipe 再開資料，它那條 route 會被**默默改名**
+        # 成資料的型別，`Ctrl+S` 就改寫了原檔。現在 route 鍵只是標籤
+        # （`route_for`：只有一條就跑那一條），所以畫布上有卡的時候一個字都
+        # 不動；空白畫布才順手把鍵名改成資料的型別（存出去的 JSON 讀起來對）。
         ds_kind = str(getattr(dataset, "kind", self.model.kind))
         if ds_kind != self.model.kind:
-            if not self.model.dirty or not self.model.node_order:
+            if not self.model.node_order:
                 self.model.kind = ds_kind
                 self.model.dirty = False      # 換 route 不算「使用者改過」
-                # ⚠ **換 kind 必須重畫**。`model.kind` 是直接設的屬性，不會通知
-                # listener，而畫布的輸出埠是照 kind 算的（`resolve_writes_for_kind`）
-                # —— 少了這一行，載一份 rsem 資料之後畫布上還是 patch 的
-                # `test` / `ref` 兩顆埠，而資料只有一條 `single`。
-                # 使用者回報的「畫布跟實際對不起來」第一層就是這個。
+                # ⚠ **換 kind 必須重畫**：`model.kind` 是直接設的屬性，不會
+                # 通知 listener（「畫布跟實際對不起來」的第一層就是少了這一行）。
                 self._refresh_all()
-            else:
-                # 使用者已經蓋了一條 pipeline，那是他的東西 —— 不要偷偷改掉它，
-                # 但要講出這個組合跑不起來。
+            elif (getattr(self.model, "route_by", None) is None
+                  and route_for(self.model.to_recipe(), ds_kind) is None):
+                # 只剩手寫的多型別 recipe 走得到這裡：它的每一條都綁著一種資料，
+                # 而這一種沒有。
                 warn.insert(0, (
-                    "this pipeline is written for %s data and you just opened "
-                    "%s data; open a recipe for %s, or start a new pipeline."
-                    % (self.model.kind, ds_kind, ds_kind)))
-        added = self._adopt_source_for(ds_kind)
+                    "this recipe has a separate pipeline for each kind of data "
+                    "(%s) and none for %s data; open a recipe for it, or start "
+                    "a new pipeline."
+                    % (", ".join(self.model.route_keys()), ds_kind)))
+        added = self._adopt_source_for()
 
-        # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11）。
-        # 那是資料的事實，所以在這裡講一次，不是每次選卡片時重新猜。
-        self.param_form.set_image_count(
-            len(getattr(items[0], "images", {}) or {}) if items else 0)
+        # `channel_map` 的表格要照「這批資料一顆有幾張圖」排列數（F11），並露出
+        # 「照這份資料填」（F121 期 3）—— 資料的事實，在這裡講一次。
+        self.param_form.set_data_item(items[0] if items else None)
 
         self._update_defect_label()
         self._update_action_states()
@@ -3123,29 +2975,20 @@ class StudioWindow(QMainWindow):
             self.refresh_preview(force=False)
         return True
 
-    def _adopt_source_for(self, kind: str) -> str:
-        """畫布是空的 → 補上**這種資料該用的那一張**載入卡（回它的顯示名）。
+    def _adopt_source_for(self) -> str:
+        """畫布是空的 → 補上 Input 卡，名字表照資料填（回它的顯示名）。
 
-        為什麼開窗時不放、載資料時才放（F11 Enhance-4）
-        ----------------------------------------------
-        使用者：「一開始進去 GUI 畫面時，Load image 卡片改成預設沒有（user 可以
-        選擇要 Load images or Load one image），add 才會出現。」他要的是**開窗時
-        不要替他決定** —— 因為 Input-4 之後有兩張載入卡，而預先放一張就是替他決定
-        了他還沒決定的事（而猜錯的那一半在畫布上看起來完全正常）。
-
-        但**載入資料的那一刻，「哪一張」已經不是猜的**：`ingest` 判別出來的 kind
-        就是答案（`ebi_patch`/`tiff_stack` → Load images；`rsem`/`folder` →
-        Load one image）。那時候不放才是把一個已知的答案丟給使用者自己拼。
-        所以規則是：**空白畫布才補，而且把補了什麼講出來**（狀態列）。
-
-        只在**完全空白且沒動過**的時候補：使用者已經蓋了一條 pipeline 的話，
-        那是他的東西 —— 這一段一個字都不准動它。
+        開窗時不放（F11 Enhance-4，使用者：「Load image 卡片改成預設沒有……add
+        才會出現」），**載入資料的那一刻才放** —— 那時候一顆有幾張、叫什麼已經
+        不是猜的，是資料說的（`RecipeModel.add_starter_input`，F121 期 2）。
+        規則：**空白畫布才補，而且把補了什麼講出來**（狀態列）；使用者已經蓋了
+        一條 pipeline 的話，那是他的東西，這一段一個字都不准動它。
         """
         if self.model.node_order or self.model.dirty:
             return ""
-        want = RecipeModel.starter_step_for(str(kind or ""))
+        items = self._items()
         try:
-            nid = self.model.add_step(want)
+            nid = self.model.add_starter_input(items[0] if items else None)
         except KeyError:                 # pragma: no cover — 卡片庫壞了才會發生
             return ""
         # 補上來的那張卡不算「使用者做過的一步」：Ctrl+Z 不該把它退掉，關窗也
@@ -3153,10 +2996,7 @@ class StudioWindow(QMainWindow):
         self.model.dirty = False
         self.model.clear_history()
         self.select_node(nid)
-        try:
-            return str(get_step(want).label)
-        except KeyError:                 # pragma: no cover
-            return want
+        return str(get_step(RecipeModel.STARTER_STEP).label)
 
     def _items(self) -> List[Any]:
         """目前資料集的 defect 清單（沒有資料集就是空的）。"""
@@ -3208,7 +3048,7 @@ class StudioWindow(QMainWindow):
         """跳到第 ``index`` 顆 defect（超出範圍會夾住）。"""
         items = list(getattr(self.dataset, "items", []) or []) if self.dataset else []
         if not items:
-            self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+            self._status("No dataset loaded yet — use “Open data…” first.", "error")
             return False
         i = max(0, min(int(index), len(items) - 1))
         self.defect_index = i
@@ -3252,10 +3092,9 @@ class StudioWindow(QMainWindow):
         # 而使用者只會看到「這跟我上次存的不一樣」。讀原始 JSON 再比一次是為了
         # 拿到 `Recipe.load` 已經丟掉的那一半（版本號與原本的線）。
         upgraded = self._describe_upgrade(path, recipe)
-        kind = None
         ds_kind = str(getattr(self.dataset, "kind", "")) if self.dataset else ""
-        if ds_kind and ds_kind in recipe.routes:
-            kind = ds_kind
+        # 編哪一條：資料會跑的那一條（`route_for`，F121 期 1）；挑不到退回第一條。
+        kind = route_for(recipe, ds_kind) if ds_kind else None
         self._apply_model(RecipeModel.from_recipe(recipe, kind=kind))
         converted = self._adopt_threshold_as_a_tree()
         self.recipe_path = path
@@ -3289,7 +3128,7 @@ class StudioWindow(QMainWindow):
                          % (self.model.recipe_id, n, self.model.kind))
         # route_by 存在時 route 鍵是任意字串、覆蓋 kind 選路（F23 §4.2）——
         # 「沒有這個 kind 的 route」對它不是問題，別嚇人。
-        if ds_kind and ds_kind not in recipe.routes \
+        if ds_kind and route_for(recipe, ds_kind) is None \
                 and getattr(recipe, "route_by", None) is None:
             self._status("Loaded recipe “%s”, but it has no '%s' route — "
                          "preview and trial runs will fail."
@@ -3430,21 +3269,18 @@ class StudioWindow(QMainWindow):
         item = self._current_item()
         if item is None:
             if force:
-                self._status("No dataset loaded yet — use “Open KLARF…” first.", "error")
+                self._status("No dataset loaded yet — use “Open data…” first.", "error")
             return False
 
         recipe = self.model.to_recipe()
         upto = self.selected_node if self.selected_node in self.model.nodes else None
         if self._preview_whole_route():
             upto = None                  # Output 卡／判定樹：跑到底，連判定
-        # 分流（F23 期2）：`kind` 是**資料的身分**（load 卡讀
-        # `meta["_dataset_kind"]`），route 由 `run_defect` 逐顆自己解。
-        # route_by 存在時 model.kind 是一個 route 鍵（"particle_route"），
-        # 把它當 kind 傳會讓 load 卡把資料認成不存在的型別。
-        kind = self.model.kind
-        if getattr(self.model, "route_by", None) is not None \
-                and self.dataset is not None:
-            kind = str(getattr(self.dataset, "kind", "") or kind)
+        # `kind` 是**資料的身分**（load 卡讀 `meta["_dataset_kind"]`），route 由
+        # `run_defect` 自己解（有 `route_by` 逐顆看欄位，沒有就 `route_for`）——
+        # 所以一律傳資料的型別，不傳正在編的 route 鍵（F23 期2；F121 期 1 起
+        # 沒有 `route_by` 的也一樣：鍵名只剩標籤，跟整批跑的是同一條）。
+        kind = str(getattr(self.dataset, "kind", "") or self.model.kind)
         if sync:
             try:
                 result = PreviewWorker.run_sync(recipe, item, kind,
@@ -3535,6 +3371,8 @@ class StudioWindow(QMainWindow):
         node = self.model.nodes.get(nid) if nid else None
         if node is None:
             return False
+        if nid == self.model.decision_node():
+            return True             # 判定在整條跑完之後才算（F123 期 1）
         try:
             return get_step(node.step).scale == SCALE_LOT
         except KeyError:
@@ -3773,8 +3611,8 @@ class StudioWindow(QMainWindow):
         """這張卡接的那一條流，在這一顆上長什麼樣（給對話框疊 cell 用）。
 
         **問的是卡片自己的 `source`**，不是一組寫死的名字：單張影像那條路的流
-        可能叫 `single`、`test` 或使用者自己取的任何名字（`load_single` 的
-        `out` 是他填的），而寫死 `ref`/`test` 的話那條路永遠拿不到圖。
+        可能叫 `single`、`test` 或使用者自己取的任何名字（Input 卡的名字表是
+        他填的），而寫死 `ref`/`test` 的話那條路永遠拿不到圖。
         """
         res = getattr(self, "_last_result", None)
         images = dict(getattr(res, "images", None) or {}) if res is not None else {}
@@ -3862,17 +3700,9 @@ class StudioWindow(QMainWindow):
         results = list(results or [])
         self._progress_done()
         self.trial_results = results
-        # **這一批的底稿**（2026-09-09）：Re-run 從這裡重判、Write outputs 看
-        # 它是不是被停掉的部分結果。`sig` 是量測那一段的簽章 —— 量測卡改了
-        # 就不能拿這批數字重判。`limit` 讓「整批重跑」跑一樣多顆。
-        from d4t.core.pipeline.batch import measurement_signature
-
-        self._last_run = {
-            "rows": copy.deepcopy(results),
-            "sig": measurement_signature(self.model.to_recipe()),
-            "partial": bool(self.trial_worker.is_aborted()),
-            "limit": len(results),
-        }
+        # **這一批的底稿**：Re-run 從這裡重判、Write outputs 拿它對「結果還是不是
+        # 畫面上這份 recipe 的」（`RunController.snapshot`，F122 搬過去）。
+        self._last_run = self.run_ctl.snapshot(results)
         self._refresh_results_button()
         # 每張卡在這一批跑得怎樣，標在卡片上（F99 P1-5）。
         self.pipeline.set_run_status(run_status_from(results))
@@ -3961,7 +3791,7 @@ class StudioWindow(QMainWindow):
         # X1：baseline 那一行吃的是**引擎判出來的 bin**（不是某個門檻重算的），
         # 因為使用者剛剛看到的就是它。拖門檻線時 `_refresh_bin_summary` 會用
         # 那個門檻再餵一次。
-        self._publish_run_snapshot(None)
+        self._publish_run_snapshot()
         self.results.set_run_all_enabled(bool(results),
                                          self.run_ctl._enabled_output_cards())
         # ⚠ **狀態列只講工具列沒講的那一半**（R4，2026-08-24）。
@@ -4000,7 +3830,8 @@ class StudioWindow(QMainWindow):
             dlg = WelcomeDialog(self)
             dlg.demo_requested.connect(self._on_demo_requested)
             dlg.open_klarf_requested.connect(
-                partial(open_dialogs.open_source, self, "klarf"))
+                partial(open_dialogs.open_source, self,
+                        scope.INPUT_SOURCES[0].key))
             dlg.library_requested.connect(self.open_recipe_library)
             self.welcome_dialog = dlg
         dlg.show()
@@ -4077,7 +3908,7 @@ class StudioWindow(QMainWindow):
         self._status(
             "Sample run finished — the histogram below is the score "
             "distribution (drag the threshold line), and the wall of thumbnails "
-            "is on the right. Next, use “Open KLARF…” to switch to your own data.")
+            "is on the right. Next, use “Open data…” to switch to your own data.")
         return True
 
     # ==================================================================== #

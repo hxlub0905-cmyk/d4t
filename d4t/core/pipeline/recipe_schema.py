@@ -13,7 +13,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type
+from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set,
+                    Tuple, Type)
 
 from d4t.core.log import swallowed
 
@@ -245,17 +246,63 @@ def rules_to_tree(spec: "DecideSpec") -> Any:
     """把平面規則清單翻成**等價的鏈狀樹**（F24 §3）。
 
     「由上往下第一個成立的贏」就是一條每步 yes → 葉子、no → 下一步的鏈，
-    所以這個轉換**無損**：同一組特徵值走 rules 與走轉出來的樹，bin 與 label
-    逐項相同（`tests/test_decide_tree.py` 用值網格驗）。空清單＝直接是
+    所以這個轉換**無損**：同一組特徵值走 rules 與走轉出來的樹，bin、label 與
+    outcome 逐項相同（`tests/test_decide_tree.py` 用值網格驗）。空清單＝直接是
     otherwise 那片葉子。
     """
     node: Any = TreeLeaf(bin=int(spec.otherwise_bin),
-                         label=str(spec.otherwise_label))
+                         label=str(spec.otherwise_label),
+                         outcome=str(getattr(spec, "otherwise_outcome", "")
+                                     or ""))
+    # ⚠ **好消息／壞消息要跟著過去**（F122）。以前這裡只帶 bin 與 label，
+    # 而 Studio 第一次點一份手寫的規則 recipe 就把它轉成樹（`ensure_tree`）——
+    # 每一條規則的 outcome 在那一刻安靜地消失，存檔就寫回磁碟。
     for rule in reversed(list(spec.rules)):
         node = TreeStep(when=rule.when,
-                        yes=TreeLeaf(bin=int(rule.bin), label=rule.label),
+                        yes=TreeLeaf(bin=int(rule.bin), label=rule.label,
+                                     outcome=str(getattr(rule, "outcome", "")
+                                                 or "")),
                         no=node)
     return node
+
+
+def legacy_decision(score: "ScoreSpec") -> Optional["DecideSpec"]:
+    """舊的「一條分數公式＋門檻＋兩個 bin」→ **一模一樣的一題判定樹**（F122 期 3）。
+
+    使用者（2026-09-29）：舊門檻那條路**整條退役**，舊檔案自動轉成樹。檔案格式
+    照舊讀得進來（磁碟上那個 ``score`` 區塊永遠要認得），但**判定只剩一種算法**：
+    引擎、CLI 的 rescore、Studio 開檔都叫這一支，而不是各有一份門檻的比法
+    （`store.rescore` 以前真的自己寫了一份，而它漂過一次）。
+
+    樹問的是 ``score >= 門檻``，分數表達式就是原本那一條 —— 分數在判定之前算
+    （F122 期 1），所以這一題問得到它；而它是一個**單純的比較**，Studio 的導引式
+    編輯器（挑數字 ▾／比什麼 ▾／多少）認得它。結果跟老路逐項相同：老路是
+    ``score < 門檻 → below``，這裡是 ``score >= 門檻 → above``，兩者互為補集
+    （表達式頂層的 NaN 早就是 0，見 `expression.py`）。多出來的只有判定樹本來
+    就寫的 ``decide_unanswered``（永遠 0：分數算不出來那一顆是失敗，不是問不出來）。
+
+    沒有分數表達式 → ``None``（沒有判定）。
+    """
+    expr = str(getattr(score, "expr", "") or "").strip()
+    if not expr:
+        return None
+    bins = dict(getattr(score, "bins", None) or {})
+    thr = float(getattr(score, "threshold", 0.0) or 0.0)
+    return DecideSpec(
+        tree=TreeStep(when="score >= %s" % _fmt_number(thr),
+                      yes=TreeLeaf(bin=int(bins.get("above", 1)),
+                                   label="score at or above %s"
+                                   % _fmt_number(thr)),
+                      no=TreeLeaf(bin=int(bins.get("below", 0)),
+                                  label="score below %s" % _fmt_number(thr))),
+        score=expr)
+
+
+def _fmt_number(x: float) -> str:
+    """門檻寫進題目裡的樣子：``50.0`` → ``50``、``5.4`` → ``5.4``（``repr`` 的精度，
+    一個位元都不丟 —— 題目比的就是這個數）。"""
+    x = float(x)
+    return str(int(x)) if x.is_integer() and abs(x) < 1e15 else repr(x)
 
 
 def let_names_written(decide: Optional["DecideSpec"],
@@ -402,7 +449,8 @@ class DecideSpec:
     otherwise_label: str = ""
     #: 一條都沒對上的那一類是好消息還是壞消息（F119）。見 :data:`OUTCOMES`。
     otherwise_outcome: str = ""
-    #: 這一顆的分數（KLARF 的 DSIZE／Top-N 排序要一個數字）。空字串 = 0.0。
+    #: 這一顆的分數（Top-N 排序、「Worst first」、KLARF 的 ADCSCORE 要一個數字）。
+    #: 空字串 = **沒有分數**（``None``，不是 0.0 —— 見 `engine._eval_decision`）。
     score: str = ""
     #: 判定樹（F24）。有它就走樹、忽略 ``rules``/``otherwise`` —— 但**兩個都
     #: 寫**是 `ambiguous-decision` 的 error（同 `score` vs `decide`：同一件事
@@ -528,7 +576,7 @@ class RouteBy:
 
 
 def _route_by_from_json(raw: Any) -> Optional["RouteBy"]:
-    """讀 ``route_by`` 區塊。**沒有就回 None** —— 那份 recipe 照舊用 kind 選路。
+    """讀 ``route_by`` 區塊。**沒有就回 None** —— 那份 recipe 照舊由 `route_for` 選路。
 
     格式錯**當場講**而不是安靜地退回老路（同 `_decide_from_json` 的理由）：
     安靜退回的話，一份打錯字的分流 recipe 會整批走同一條路 —— 跑得完、有數字、
@@ -555,14 +603,44 @@ def _route_by_from_json(raw: Any) -> Optional["RouteBy"]:
     )
 
 
+def route_for(recipe: "Recipe", kind: str) -> Optional[str]:
+    """**沒有 ``route_by`` 時**，一批 ``kind`` 資料走哪一條 route（F121 期 1）。
+
+    * recipe **只有一條** route → 就是那一條，**不管資料是哪一種**。鍵名只剩
+      標籤：一條 pipeline 能不能吃這份資料，是 Input 卡看資料回答的事
+      （「一顆幾張」「有沒有 KLARF」），不是鍵名跟 ``dataset.kind`` 字面上
+      對不對得上。
+    * 好幾條（只有手寫 JSON 做得出來的舊式多型別 recipe，例：
+      `tests/fixtures/recipes/dual_route_basic.json`）→ 照舊挑跟 ``kind``
+      同名的那一條；沒有就回 ``None``。
+    * 沒有 route → ``None``。
+
+    為什麼（使用者回報 2026-09-24）：一份 `ebi_patch` 的 recipe 開在一個影像
+    資料夾（`folder`）上，**每一顆**都在第一步報 ``unknown input-type route
+    'folder'``。鍵名是一個使用者看不到的屬性，而它擋掉的是一件本來可能跑得
+    動的事（`rsem` 與 `folder` 在卡片這一層一模一樣）。
+
+    ⚠ **型別跟鍵名對得上時，選到的 route 跟以前逐字相同** —— 所以黃金值與
+    快取簽章（簽章裡帶的是 route 鍵）一個位元都不動。
+    ⚠ **一個判準一個家**：引擎（:func:`resolve_route`）、整批那一層
+    （`batch.run_batch`）、lint（`validate`）、CLI、Studio 都叫這一支。
+    """
+    routes = getattr(recipe, "routes", None) or {}
+    if len(routes) == 1:
+        return next(iter(routes))
+    k = str(kind or "")
+    return k if k in routes else None
+
+
 def resolve_route(recipe: "Recipe", item: Any, kind: str
                   ) -> Tuple[Optional[str], str, str]:
     """這一顆走哪條 route：``(route 鍵, 欄位值, 決定的來源)``。
 
-    來源三種：``"kind"``（沒有 ``route_by``，維持舊語意 —— route 鍵就是
-    dataset kind）、``"map"``（值對上了對照表）、``"default"``（沒對上、走
-    預設路）。對不上而且 ``default`` 留空時 route 鍵是 **None** ——
-    呼叫端把那一顆判失敗（訊息用 :func:`route_miss_message`）。
+    來源三種：``"kind"``（沒有 ``route_by``：由 :func:`route_for` 決定 ——
+    只有一條就是那一條，好幾條就挑跟 dataset kind 同名的）、``"map"``（值對上
+    了對照表）、``"default"``（沒對上、走預設路）。對不上而且 ``default`` 留空
+    時 route 鍵是 **None** —— 呼叫端把那一顆判失敗（訊息用
+    :func:`route_miss_message`）。
 
     欄位值從 ``item.fields`` 讀（`ingest.dataset.fill_fields` 填的那一份，
     大寫欄名）—— **這一支不碰 KLARF**，跟卡片同一條規矩（鐵則：讀檔在 ingest
@@ -570,7 +648,9 @@ def resolve_route(recipe: "Recipe", item: Any, kind: str
     """
     rb = getattr(recipe, "route_by", None)
     if rb is None:
-        return kind, "", "kind"
+        # 挑不到（舊式多型別 recipe、沒有這種資料的那一條）時照舊回 ``kind``：
+        # `execution_order` 會用它原本那一句 unknown-route 講出來。
+        return route_for(recipe, kind) or kind, "", "kind"
     fields = getattr(item, "fields", None) or {}
     raw = fields.get(str(rb.column).strip().upper())
     value = str(raw).strip() if raw is not None else ""
@@ -680,6 +760,45 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
             return spec.type in REGION_TYPES
     return False
 
+
+def is_data_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
+                 registry: Optional[Dict[str, Type[Step]]] = None) -> bool:
+    """這條線是**數字線／結果線**嗎（F123 期 2）——「``dst_in`` 是不是下游那張卡
+    的資料入埠」（`Step.data_inputs`：Decision 的 ``numbers``、Output 的
+    ``results``）。
+
+    跟 :func:`is_region_edge` 同一個形狀，理由也一樣：**全 repo 只准用這一支
+    判斷**（畫布、排版、引擎、健檢都要分得出三種線），而判準住在下游那張卡上
+    —— 那一顆埠收什麼是它宣告的。來源那一頭（``src_out`` 是 ``numbers`` 還是
+    ``results``、它真的吐那一種嗎）由 lint 講（``data-port-mismatch``）。
+    """
+    if registry is None:
+        registry = REGISTRY
+    if not edge.dst_in:
+        return False
+    node = nodes.get(edge.dst)
+    step_cls = registry.get(node.step) if node is not None else None
+    return step_cls is not None and edge.dst_in in step_cls.data_inputs
+
+
+def upstream_of(node_id: str, edges: Sequence["Edge"]) -> Set[str]:
+    """沿**所有**線（影像、區域、數字、結果）往回走得到的卡，不含自己（F123 期 2）。
+
+    「判定問得到哪幾張卡的數字」、「Output 有沒有類別」、「用到的數字有沒有
+    流進來」都問這一支（F124）—— 問同一支，才不會一個說得到、一個說不到。
+    """
+    parents: Dict[str, Set[str]] = {}
+    for e in edges:
+        parents.setdefault(e.dst, set()).add(e.src)
+    seen: Set[str] = set()
+    stack = [str(node_id)]
+    while stack:
+        for p in parents.get(stack.pop(), ()):
+            if p not in seen and p != node_id:
+                seen.add(p)
+                stack.append(p)
+    return seen
+
 #: 目前這一版 recipe 的形狀（F42 B3，2026-08-27）。
 #:
 #: 1 = 區域依賴存在**參數**裡（F12 §3）；
@@ -696,13 +815,23 @@ def is_region_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
 #:     `absolute` 那一道跟第 4 版同一個理由只能靠版本號 —— 它有預設值，
 #:     舊檔案多半沒寫它。
 #:
+#: 6 = **判定是一張卡**（F123 期 1）：有判定（``decide`` 或舊的分數門檻）的
+#:     recipe 在 ``nodes`` 裡有一張 ``decision``。只能靠版本號判斷：第 6 版起
+#:     「有判定就有那張卡」是存檔就成立的事，「卡不在」不是舊檔案的記號。
+#: 7 = **數字線與結果線**（F123 期 2）：判定問到的卡接一條 ``numbers`` 進
+#:     Decision、Output 卡的東西從接進來的線來。第 7 版起線是使用者拉的，
+#:     「線不在」不是舊檔案的記號。
+#: 8 = **送去判定的埠只長在量測卡上**（F124）：第 7 版的檔案可能有從 Input／
+#:     Normalize 拉進 Decision 的數字線，那幾條拿掉、改接它下游的量測卡；判定
+#:     問得到的是流進它的（上游）每一張卡的數字（`_migrate_measured_lines`）。
+#:
 #: 新建的 recipe 就是「這一版寫的」，所以 :class:`Recipe` 的預設值是它 ——
 #: 那不是裝飾：遷移以 ``version < RECIPE_VERSION`` 為判準，而一份記憶體裡組出來
 #: 的 recipe（Studio 的 ``to_recipe()``）也會走
 #: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
 #: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
 #: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
-RECIPE_VERSION = 5
+RECIPE_VERSION = 8
 
 
 def _cycles_with(edges: List["Edge"], extra: "Edge",

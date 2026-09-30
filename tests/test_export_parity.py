@@ -39,7 +39,9 @@ from d4t.core.export import (  # noqa: E402
 from d4t.core.export.report import _SHEET_SUMMARY  # noqa: E402
 from d4t.core.ingest.dataset import load_dataset  # noqa: E402
 from d4t.core.pipeline import run_batch, run_batch_steps, run_defect  # noqa: E402
-from d4t.core.pipeline.recipe import Recipe, RecipeNode, ScoreSpec  # noqa: E402
+from d4t.core.pipeline.recipe import (  # noqa: E402
+    Edge, Recipe, RecipeNode, ScoreSpec,
+)
 
 KIND = "ebi_patch"
 N = 6
@@ -53,14 +55,20 @@ def lot(tmp_path_factory):
 
 def _recipe(step: str, params: dict) -> Recipe:
     """Load → Gray level → 一張 Output 卡。"""
+    # 線都畫出來（F123 期 2）：Output 寫的是**線**上游的東西 —— 精靈那條路寫
+    # 整張表，所以卡片這一邊要讓每一張寫數字的卡都在上游。
     return Recipe(
-        recipe_id="parity", routes={KIND: ["load", "glv", "out"]},
+        recipe_id="parity", routes={KIND: ["load", "glv", "dec", "out"]},
         nodes={
             "load": RecipeNode("load", "load_patch", {}),
             "glv": RecipeNode("glv", "glv_stats",
                               {"source": "test", "metrics": "glv_max,glv_mean"}),
+            "dec": RecipeNode("dec", "decision", {}),
             "out": RecipeNode("out", step, params),
         },
+        edges=[Edge("load", "glv", "test", "source"),
+               Edge("glv", "dec", "numbers", "numbers"),
+               Edge("dec", "out", "results", "results")],
         score=ScoreSpec(expr="glv_max", threshold=1.0,
                         bins={"below": 0, "above": 1}))
 

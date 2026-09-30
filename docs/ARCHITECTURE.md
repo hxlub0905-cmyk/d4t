@@ -67,6 +67,15 @@ cycle 錯誤，現在照線跑。
 
 `routes` 因此退化成「**這條 route 有哪些卡**」＋ 一個穩定的排序依據。
 
+**鍵名也退化了**（F121 期 1，2026-09-24）：沒有 `route_by` 時由
+`recipe_schema.route_for` 挑 —— **只有一條 route 就跑那一條，不管資料是哪一種**；
+好幾條（只有手寫 JSON 做得出來的舊式多型別 recipe）才照舊挑跟 `dataset.kind` 同名
+的那一條。引擎、整批那一層、`validate`、CLI、Studio 都叫這一支。起因是一份
+`ebi_patch` 的 recipe 開在影像資料夾（`folder`）上，每一顆都在第一步報
+`unknown input-type route`，而開跑前的健檢拿畫布的鍵去比所以沒擋下。
+「這條 pipeline 吃不吃得下這份資料」要由 Input 卡看資料回答（一顆幾張、有沒有
+KLARF），見 [`docs/plans/F121-simple-input.md`](plans/F121-simple-input.md)。
+
 ⚠ 順序有**兩份**（`step.py` 的 `GROUP_ORDER` 與 `ui/widgets.py` 的
 `LibraryPanel.GROUPS`，後者多帶標題與副標），`tests/test_ui_f16_stages.py`
 把它們綁在一起。
@@ -301,6 +310,7 @@ d4t/
 │   │   ├── recipe.py         #   Recipe(DAG) ＋ 執行順序；對外唯一入口（其餘三支從這裡轉出口）
 │   │   ├── recipe_schema.py  #   節點／線／判定樹／分流的資料模型與 JSON 形狀（2026-09-24 拆出）
 │   │   ├── recipe_migrations.py # 每一道版本遷移（呼叫順序在 `Recipe.from_json_dict`）
+│   │   ├── data_lines.py     #   送去判定／寫出的線（F123、F124）：lint、`feeder`、Output 寫整張表
 │   │   ├── recipe_validate.py #  lint 式 validate
 │   │   ├── expression.py     #   score 表達式引擎（自寫 parser，**不用 eval**）
 │   │   ├── decide_tree.py    #   判定樹怎麼走 —— 引擎與 UI 共用同一支
@@ -323,7 +333,7 @@ d4t/
 │   │                         #     的時候沒有資料）
 │   ├── steps/                # 步驟卡片 —— **註冊 20 張，卡片庫可見 20 張**（`HIDDEN_STEPS` 空著）
 │   │                         #   ⚠ 卡片庫由上而下的順序 ＝ `__init__.py` 的 import 順序
-│   │   ├── load.py           #   load_patch／load_single（**一種 source 一張卡**）
+│   │   ├── load.py           #   load_patch「Input」（F121 起一張；名字表照資料填）
 │   │   ├── load_sidecar.py pair_source.py               #   別的程式產的圖／另一份 lot 的那一顆
 │   │   ├── normalize.py tone.py denoise.py flatten.py   #   Enhance 段
 │   │   ├── align.py arith.py combine.py align_to.py    #   Compare 段（align 整數平移裁重疊區、
@@ -331,6 +341,7 @@ d4t/
 │   │   ├── roi_reference.py   #   Region 段（**只有這一張**，畫面上叫「ROI」）：三種找法 → 具名區域
 │   │   ├── roi_cross.py roi_template.py  #   ⚠ **不是卡片**：折進 `roi_reference` 的兩個 method（F30）
 │   │   ├── glv_stats.py cd.py quality.py #   Measure 段：GLV → CD → Focus index（**順序有意義**）
+│   │   ├── decision.py       #   Decision（F123）：判定樹在畫布上的那一張卡；內容住 `recipe.decide`
 │   │   ├── output.py         #   Output 段四張：output_report／output_klarf／output_char／output_uniformity
 │   │   └── _util.py          #   卡片共用小工具（不註冊任何 step）
 │   ├── export/               # 寫出去
@@ -373,8 +384,11 @@ d4t/
     │                         #     / `run_controller` / `canvas_edges`
     │                         #     留下的是 `model → UI`、signal 接線、狀態列、門面
     ├── canvas.py             #   節點畫布（n8n 式；純 UI，引擎零改動）
+    ├── edge_route.py         #   往前走的線碰到夾在中間的卡就繞過去；一顆輸入埠一條道（F124）
+    ├── layout.py             #   自動排版（純函式）：欄＝深度、起點不串接、最後只剩終點不換行（F124）
+    ├── link_drop.py          #   線丟在卡上接到哪一格：一格直接接、兩格以上跳選單問（F124）
     ├── cell_canvas.py        #   一格 cell 鋪成一片，區域的框畫在上面、拖得動
-    ├── tree_scene.py tree_panel.py     #   判定樹住在畫布上／點一步就編輯那一步（F24）
+    ├── tree_scene.py tree_panel.py     #   判定樹掛在 Decision 卡底下／點一步就編輯那一步（F24、F123）
     ├── decide_panel.py route_panel.py route_badge.py  #   判定段編輯器／`route_by` 編輯器與徽章
     ├── number_picker.py      #   「插入數字 ▾」：一張卡一組、每項帶說明，三個地方同一支（2026-09-09）
     ├── verdict_band.py       #   判定段的橫幅（一列一類）
@@ -437,7 +451,7 @@ d4t/
     │                         #     （「加一張卡，UI 零修改」的執行機構）
     ├── chips.py              #   設定區的膠囊：統計量、`chip_choice` 那一排
     ├── library.py            #   三段式卡片庫
-    ├── histogram.py          #   分數分佈 ＋ 可拖曳的門檻線（秒回是它的立身條件）
+    ├── histogram.py          #   分數／數字的分佈（點長條篩 Gallery）；門檻線那一半 F122 期 3 起沒人用
     ├── feature_text.py       #   特徵名怎麼變成人看得懂的字 ＋ VerdictChip
     ├── wiring_slot.py        #   設定區的一格接線：符號＋現在接的是什麼＋一顆「換」
     │                         #     （F68；挑了走的是跟畫布拉線同一條路）
@@ -492,7 +506,7 @@ d4t/
     ├── card_menu.py          #   空白處右鍵、拖線到空白處的「加一張卡」選單（F99 P1-1）
     │                         #     —— 分組與相容性住這裡，畫布只發訊號
     ├── clipboard.py          #   Ctrl+C／V／D 的內容（F99 P1-8）：設定帶走、接線不帶
-    ├── open_dialogs.py       #   三顆 Open 的檔案對話框與「按下去要做什麼」的分岔（F110／F114-2），
+    ├── open_dialogs.py       #   那一顆 `Open data…` 的對話框與挑完的分岔（F110／F114-2／F121 期 4），
     │                         #     加上 recipe 的開／存（F116 第 4 步 —— 同一個「只問路徑」的契約）
     ├── raw_dialog.py         #   `.raw` 的寬／高／檔頭／位元深度一張表單填完，即時比對檔案大小＋縮圖預覽（2026-09-24）
     ├── canvas_edges.py       #   **畫布上拉一條線／剪一條線，在 model 上是什麼意思**

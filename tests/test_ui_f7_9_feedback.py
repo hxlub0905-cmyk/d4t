@@ -238,6 +238,10 @@ def test_a_warning_does_not_block_the_run_but_is_reported_afterwards(window):
     assert window.load_recipe_path(str(EXAMPLE), sync=True) is True
     dup = window.model.add_step("glv_stats")          # 跟範例裡的 glv 撞名
     window.model.set_param(dup, "source", "diff")
+    # 撞名之後 `glv_max` 的值來自這一張，而判定問的就是它 —— 它沒接進 Decision
+    # 的話那是一條 error（F123 期 2：數字線必要），不是這一題要的 warning。
+    window.model.add_edge(dup, window.model.decision_node(),
+                          src_out="numbers", dst_in="numbers")
 
     assert window.run_trial(6, workers=1, sync=True) is True
     assert "Run finished" in window.status_text()

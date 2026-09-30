@@ -6,8 +6,11 @@ import**：`recipe.py` 在最後才轉出口這一支，模組層互相 import �
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type
+from typing import (
+    TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple, Type,
+)
 
 from .expression import ExpressionError, parse_expression
 from .recipe_schema import (
@@ -21,6 +24,7 @@ from .recipe_schema import (
     _tree_whens,
     is_region_edge,
     let_names_written,
+    route_for,
     version_skew,
 )
 from .step import (
@@ -56,6 +60,7 @@ DECISION_ISSUE_CODES = frozenset({
     "ambiguous-decision", "bad-bins", "bad-let", "bad-rule",
     "deep-tree", "no-rules", "score-expr", "unknown-feature",
     "conflicting-outcome", "unknown-outcome",                  # F119
+    "decide-without-card",                                     # F123
 })
 
 #: 沒有節點、但**不是**判定的那幾條（見上）。兩張表合起來要蓋滿。
@@ -270,7 +275,7 @@ def _outcome_issues(decide: "DecideSpec") -> List["Issue"]:
 
 
 def _decide_unknown(decide: "DecideSpec", feats: Set[str],
-                    kind: str) -> List["Issue"]:
+                    kind: str, data: Any = None) -> List["Issue"]:
     """判定段的表達式指到**沒有人算得出來的數字**時講一句（F21-D 漏掉的那一半）。
 
     為什麼這一段一定要有
@@ -290,21 +295,30 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
     ------------------------------------------
     跟 `engine._eval_decision` 逐項對齊：
 
-    * 卡片算出來的特徵（``feats``）；
-    * ``score`` —— 判定段自己寫進 ``ctx.features`` 的那一個；
+    * 卡片算出來的特徵（``feats``；呼叫端已經加上 ``route_taken``，有分流時）；
     * ``let`` 的名字，而且**是累加的**：第 n 行看得到前 n−1 行，看不到自己
       後面的（引擎就是照順序算的）；
     * 有 ``fill`` 的 let 會多寫一個 ``<名字>_missing``（F24 ⑤），
       有 ``scale`` 的會多留一個 ``<名字>_raw``（F23 期3）——
-      判定樹的第一步常常問的就是 ``_missing``。
+      判定樹的第一步常常問的就是 ``_missing``；
+    * ``score`` —— **只有樹／規則看得到，而且只在真的有分數表達式時**
+      （引擎在 let 之後、判定之前算它，F122）。以前這裡無條件放行，於是一份
+      沒有分數的 recipe 在樹上問 ``score`` 是綠燈，跑起來那一題永遠答「否」。
+
+    用字分兩種（F122）：**let 與分數**缺一個數字＝那一顆失敗（有 ``fill`` 的
+    let 除外）；**樹上的題目**缺一個數字＝那一題答「否」（或進「問不出來」的
+    那一格），**不是**失敗 —— 以前兩種都講「every defect will fail」，而後者
+    真正的後果（安靜地全部走「否」）反而沒講。
 
     ⚠ **級別是 warning 不是 error**，跟舊的那一條一致：一份 recipe 可以在
     「還沒接上那張量測卡」的中間狀態被打開，那時候擋住編輯比講一句更煩。
     """
     out: List[Issue] = []
-    seen = set(feats) | {"score"}
+    seen = set(feats)
+    ub = getattr(decide, "unanswered_bin", None)
 
-    def check(where: str, text: str, fill: str = "", name: str = "") -> None:
+    def check(where: str, text: str, fill: str = "", name: str = "",
+              question: bool = False) -> None:
         try:
             e = parse_expression(str(text))
         except ExpressionError:
@@ -322,9 +336,16 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
                     "use %s”, so a defect without that number gets %s and "
                     "“%s_missing = 1”. Add the card that measures it if you "
                     "did mean to measure it." % (fill, fill, name or "it"))
+        elif question:
+            tail = ("Check the spelling, or add the card that measures it - "
+                    "until then this question cannot be asked, so every "
+                    "defect is answered 'no' here%s."
+                    % (" and goes to bin %d (the recipe's 'could not be "
+                       "decided' bin)" % int(ub) if ub is not None else ""))
         else:
             tail = ("Check the spelling, or add the card that measures it - "
                     "every defect will fail on this line at run time.")
+        tail = _where_it_would_come_from(unknown, data, tail)
         out.append(Issue(
             code="unknown-feature", level="warning", node_id=None,
             title="The decision uses a number nobody produces",
@@ -344,16 +365,100 @@ def _decide_unknown(decide: "DecideSpec", feats: Set[str],
         # 第 i 行看得到前 i 行寫的（`let_names_written` 是唯一的家）。
         seen |= set(let_names_written(decide, upto=i + 1))
 
-    if decide.tree is not None:
-        for when in _tree_whens(decide.tree):
-            check("the question \"%s\"" % when, when)
-    else:
-        for i, rule in enumerate(decide.rules):
-            check("rule %d (\"%s\")" % (i + 1, rule.when), rule.when)
-
+    # 分數在 let 之後、判定之前（`engine._eval_decision` 的順序）。
     if str(decide.score or "").strip():
         check("the score", decide.score)
+        seen.add("score")
+
+    if decide.tree is not None:
+        for when in _tree_whens(decide.tree):
+            check("the question \"%s\"" % when, when, question=True)
+    else:
+        for i, rule in enumerate(decide.rules):
+            check("rule %d (\"%s\")" % (i + 1, rule.when), rule.when,
+                  question=True)
     return out
+
+
+def _output_collisions(recipe: "Recipe", route: str,
+                       clean_params: Dict[str, Dict[str, Any]],
+                       registry: Dict[str, Type[Step]]) -> List["Issue"]:
+    """兩張 Output 卡寫**同一個檔** → error（F122）。
+
+    Write report 與 Write comparison 寫同名的 ``report.html`` / ``defects.csv``；
+    兩張卡指到同一個資料夾（或都空著 —— 那以前是 error，F122 之後空著有預設），
+    後寫的那一張**安靜地蓋掉**前一張。出貨的均勻度 recipe 刻意讓兩張卡共用
+    一個資料夾，而它們寫的檔名不重疊 —— 所以比的是**檔名**，不是資料夾。
+
+    路徑用使用者寫的那個字串比（相對路徑接在同一份資料旁邊，所以同字串＝同
+    位置）；「Write to」空著用那張卡的預設。
+    """
+    out: List[Issue] = []
+    seen: Dict[Tuple[str, str], str] = {}
+    for nid in recipe.routes.get(route, []):
+        node = recipe.nodes.get(nid)
+        cls = registry.get(node.step) if node is not None else None
+        if node is None or cls is None or not node.enabled \
+                or getattr(cls, "scale", "") != SCALE_LOT:
+            continue
+        p = clean_params.get(nid, dict(node.params))
+        path_key = str(getattr(cls, "PATH", "") or "")
+        where = str(p.get(path_key, "") or "").strip()
+        planned = getattr(cls, "planned_files", None)
+        if planned is not None:
+            where = where or str(getattr(cls, "DEFAULT", "") or "")
+            names = [str(f.get("name", "")) for f in planned(p)]
+        else:
+            # 寫一個檔案的卡（Write KLARF）：那個檔就是它；空著＝跟著模式的預設。
+            where = where or "<default %s>" % str(p.get("mode", ""))
+            names = [""]
+        folder = os.path.normpath(where) if where else ""
+        for name in names:
+            key = (folder, name)
+            first = seen.get(key)
+            if first is None:
+                seen[key] = nid
+                continue
+            shown = os.path.join(where, name) if name else where
+            advice = ("Give one of them its own folder in “Write to” - "
+                      "the one that runs second overwrites the first.")
+            out.append(Issue(
+                code="output-collision", level="error", node_id=nid,
+                title="Two output cards write the same file",
+                detail="“%s” and “%s” both write %s. %s"
+                       % (card_name(recipe.nodes, first),
+                          card_name(recipe.nodes, nid), shown, advice),
+                route=str(route), advice=advice))
+            break
+    return out
+
+
+def _where_it_would_come_from(unknown: Sequence[str], data: Any,
+                              tail: str) -> str:
+    """缺的名字**是 KLARF 的欄**的時候，多講一句它從哪裡來（F122）。
+
+    KLARF 的欄只從 Input 卡的「Carry these columns」進判定（`load.py`），所以
+    「拼錯了嗎、加一張量測卡」對它是錯的建議。只在**知道資料**的時候講：
+    資料有 KLARF、而那一欄在裡面 → 叫他去勾；資料沒有 KLARF 而名字長得像欄名
+    （全大寫）→ 講「這份資料沒有 KLARF」。
+    """
+    if data is None:
+        return tail
+    columns = set(getattr(data, "columns", ()) or ())
+    carried = [n for n in unknown if n in columns]
+    if carried:
+        return ("%s %s a column of this data's KLARF - add it to “Carry these "
+                "columns” on the Input card and the decision can use it."
+                % (", ".join(carried),
+                   "is" if len(carried) == 1 else "are"))
+    if not getattr(data, "has_klarf", True):
+        caps = [n for n in unknown if n.isupper()]
+        if caps:
+            return ("%s If %s %s a KLARF column: this data has no KLARF, so "
+                    "it cannot be asked here at all." % (
+                        tail, ", ".join(caps),
+                        "is" if len(caps) == 1 else "are"))
+    return tail
 
 
 def referenced_features(recipe: "Recipe") -> Set[str]:
@@ -583,6 +688,10 @@ class Issue:
     #: 在產地做又對又便宜；畫面留著的是**它才答得出來**的那兩件
     #: （幾條 route、列到第幾個）。
     advice: str = ""
+    #: 「接上這幾張卡就好」（F124）：一顆「Connect」鈕要從哪幾張卡（node id）
+    #: 拉一條線進 ``node_id``。空的＝沒有一鍵的解法。鈕是使用者按的，線走跟手拉
+    #: 同一條路（鐵則 10）——這裡只說**接誰**，不接。
+    connect: Tuple[str, ...] = ()
 
 
 #: 使用者面的名字在句子裡一律**加彎引號**。一個沒有引號的名字在一串英文中間
@@ -1082,8 +1191,27 @@ def _how_they_differ(a: str, ha: List[Any], b: str, hb: List[Any],
     return ("'%s' and '%s' were treated differently upstream" % (a, b))
 
 
+def _relayed(nid: str, route: str,
+             found: Sequence[Tuple[str, str, str, str]]) -> List[Issue]:
+    """卡片自己判的發現 ``(code, level, title, detail)`` → `Issue`。
+
+    **全 repo 唯一的轉手點**（`tests/test_ui_wording.py` 數著它是一個）：
+    `Step.kind_issues`（PR-2：只在某種資料型別上成立）與 `Step.data_issues`
+    （F121 期 3：對著開著的那份資料）都從這裡過。轉手的 code 是卡片寫的、
+    原始碼的名冊數不到 —— 所以轉手的地方要數得出**有幾個**，多一個就少一批。
+
+    句子是卡片寫的（它才知道 patch 與一張大圖、一顆幾張差在哪），這裡只補
+    **畫面自己答得出來的那一件**：route（單 route 的畫面不講它，見 `wording`）。
+    """
+    return [Issue(code=str(code), level=str(level), node_id=nid,
+                  title=str(title), detail="route '%s': %s" % (route, detail),
+                  route=str(route), advice=str(detail))
+            for code, level, title, detail in found]
+
+
 def validate(recipe: Recipe, kind: Optional[str] = None,
-             registry: Optional[Dict[str, Type[Step]]] = None) -> List[Issue]:
+             registry: Optional[Dict[str, Type[Step]]] = None,
+             data: Any = None) -> List[Issue]:
     """lint 式驗證：收集**所有**問題後一次回傳（不會 raise）。
 
     檢查項（code）：unknown-step / bad-param / not-configured（error）/
@@ -1099,10 +1227,16 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     port-not-produced（warning），加上各卡
     `Step.kind_issues` 宣告的 kind 條件項（PR-2；GLV 的
     center-on-big-image（warning）/ each-box-on-patch（info））。
+
+    ``data``（`ingest.dataset.DataProfile`，F121 期 3）＝**現在開著的那份資料**：
+    給了就多問各卡 `Step.data_issues`（Input 卡的「名字表要的張數比資料多」
+    「沒有 KLARF 卻要帶欄位」…），而 ``kind`` 沒給時用它的型別。
     """
     from .recipe import execution_order  # 延遲：見檔頭
     if registry is None:
         registry = REGISTRY
+    if kind is None and data is not None:
+        kind = str(getattr(data, "kind", "") or "") or None
     issues: List[Issue] = []
 
     # ---- 判定段（F21-D）：兩種寫法只能有一種 ----
@@ -1139,11 +1273,18 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     # （``particle_route``），dataset kind 本來就不該在 routes 裡 —— 對它報
     # `unknown-route` 等於「recipe 是對的，但健檢說它壞了」。所以這時一律檢查
     # **全部** route（每一條都可能被某個 class 走到）。
+    #
+    # 沒有 ``route_by`` 時由 `route_for` 挑（F121 期 1）：只有一條 route 就是那一條，
+    # 不管 ``kind`` 是什麼 —— 跟引擎同一支，所以健檢說「會跑哪一條」跟真的跑
+    # 的那一條不可能不一樣。挑不到的只剩手寫的多型別 recipe。
     if route_by is not None:
         kinds = list(recipe.routes)
     elif kind is not None:
-        if kind not in recipe.routes:
-            advice = ("This recipe only defines %s."
+        picked = route_for(recipe, kind)
+        if picked is None:
+            advice = ("This recipe has a separate pipeline for each kind of "
+                      "data, and none of them is for this one. It only "
+                      "defines %s."
                       % (", ".join("'%s'" % r for r in sorted(recipe.routes))
                          or "no routes at all"))
             issues.append(Issue(
@@ -1153,9 +1294,15 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 suggest=closest(kind, recipe.routes), advice=advice))
             kinds: List[str] = []
         else:
-            kinds = [kind]
+            kinds = [picked]
     else:
         kinds = list(recipe.routes)
+
+    def data_kind(route_key: str) -> str:
+        """「這一條 route 上跑的是哪一種資料」—— kind 相依的宣告與 lint 要問的
+        是**資料**，不是 route 的鍵名（F121 期 1：鍵名只剩標籤）。呼叫端沒給
+        ``kind``（例：`d4t validate` 不帶 ``--kind``）時才退回鍵名。"""
+        return str(kind) if kind is not None else str(route_key)
 
     # ---- 每個節點：step 存在？參數合法？----
     # 認不得的參數 / 認不得的卡片，最常見的原因是**這台的程式比較舊**。
@@ -1312,7 +1459,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             # 寧可漏報一條，也不要對一份在別條 route 上完全正確的線報錯。
             produced = set(src_cls.resolve_reads(sp))       # 原樣送出的
             for k in kinds:
-                produced |= set(src_cls.resolve_writes_for_kind(sp, k))
+                produced |= set(src_cls.resolve_writes_for_kind(
+                    sp, data_kind(k)))
             if not kinds:
                 produced |= set(src_cls.resolve_writes(sp))
             what, a_what, port = "image stream", "an image stream", "dot"
@@ -1383,8 +1531,11 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
     # 就分了岔），所以它連解析都不該解析：一份走多類別的 recipe 的 score.expr
     # 是空字串，而空字串解析不出來 —— 對它報一條 error 等於「recipe 是對的，
     # 但健檢說它壞了」，而使用者只會相信健檢。
+    #
+    # **空的也不解析**（F122）：沒有 decide、score 也空著＝「還沒有判定」，
+    # 引擎給每一顆「量完、沒分類」（`engine._eval_score`），不是錯。
     expr = None
-    if decide is None:
+    if decide is None and str(recipe.score.expr or "").strip():
         try:
             expr = parse_expression(recipe.score.expr)
         except ExpressionError as e:
@@ -1461,13 +1612,19 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             if step_cls is None:
                 continue  # 已記 unknown-step
             p = clean_params.get(nid, {})
+            # 對著**開著的那份資料**才看得出來的（F121 期 3，`Step.data_issues`）
+            # —— 一顆幾張、有沒有 KLARF。要排在入口卡的 `continue` 前面：
+            # 最常對不上資料的正是入口卡。沒開資料就沒有東西可以對。
+            if data is not None:
+                issues.extend(_relayed(nid, k, step_cls.data_issues(p, data)))
             if step_cls.is_source():
                 # **入口卡**（沒有輸入埠 —— 見 Step.is_source）：reads /
                 # requires_ref 不檢查，因為它的資料不是從別張卡來的。
                 # 一份 recipe 可以有好幾張，每一張都拿 kind-aware 的 writes
                 # 宣告（load 卡依資料型別決定會有哪些流）。
-                avail |= set(step_cls.resolve_writes_for_kind(p, k))
-                from_input |= set(step_cls.resolve_writes_for_kind(p, k))
+                wrote = set(step_cls.resolve_writes_for_kind(p, data_kind(k)))
+                avail |= wrote
+                from_input |= wrote
                 # **撞名檢查對入口卡也要跑**（F11 Input-0）。以前這一段沒有它，
                 # 因為「入口」只有一張所以撞不起來 —— 現在兩張 load 卡都寫
                 # n_channels，後面那張會安靜地蓋掉前面那張。
@@ -1602,14 +1759,8 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             # （`Step.kind_issues`）：`configuration_issues` 看不到 kind，
             # 而「這組設定對不對」有時取決於一顆 defect 拿到的是置中的
             # patch 還是一張大圖。
-            for code, level, title, detail in step_cls.kind_issues(p, str(k)):
-                # 句子是卡片寫的（它才知道 patch 與一張大圖差在哪），所以這裡
-                # 只補**畫面自己答得出來的那一件**：單 route 就不要講 route。
-                issues.append(Issue(
-                    code=str(code), level=str(level), node_id=nid,
-                    title=str(title),
-                    detail="route '%s': %s" % (k, detail),
-                    route=str(k), advice=str(detail)))
+            issues.extend(_relayed(nid, k, step_cls.kind_issues(
+                p, data_kind(k))))
 
             # 吃**特徵**的卡（F16，Algo 段）：指到一個沒人算出來的數字，在跑
             # 之前就講。沒有這一段的話它要等**每一顆 defect 都失敗**才看得出來
@@ -1641,6 +1792,24 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                            % (k, ", ".join(stale), advice,
                               ", ".join(sorted(known)) or "none"),
                     names=tuple(stale), suggest=closest(stale[0], known),
+                    route=str(k), advice=advice))
+
+            # 同一件事、影像流那一半（F122）：沒有埠的卡用**名字**指一條流
+            # （`Step.optional_streams_in`），打錯了照樣跑、那一格圖是空的。
+            gone = [x for x in step_cls.optional_streams_in(p)
+                    if x not in avail]
+            if gone:
+                advice = ("No card before it in this route writes an image "
+                          "stream by that name, so that picture will be "
+                          "empty. Check the spelling.")
+                issues.append(Issue(
+                    code="stale-stream-ref", level="warning", node_id=nid,
+                    title=("“%s” points at a picture nobody produces"
+                           % card_name(recipe.nodes, nid)),
+                    detail="route '%s': it asks for %s. %s Available: %s."
+                           % (k, ", ".join(gone), advice,
+                              ", ".join(sorted(avail)) or "none"),
+                    names=tuple(gone), suggest=closest(gone[0], avail),
                     route=str(k), advice=advice))
 
             missing_feat = [x for x in step_cls.resolve_features_in(p)
@@ -1714,6 +1883,21 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
             feats |= set(step_cls.resolve_features(p))
             regions |= set(step_cls.resolve_regions_out(p))
 
+        issues.extend(_output_collisions(recipe, k, clean_params, registry))
+        cards = [nid for nid in route if nid in recipe.nodes
+                 and recipe.nodes[nid].step == "decision"]
+        if len(cards) > 1:
+            advice = ("A recipe decides once - remove the extra Decision "
+                      "card (its tree is the same one).")
+            issues.append(Issue(
+                code="duplicate-decision", level="error", node_id=cards[1],
+                title="Two Decision cards", route=str(k), advice=advice,
+                detail="route '%s' has %d Decision cards. %s"
+                       % (k, len(cards), advice)))
+        # 送去判定／寫出的線（F123 期 2、F124）：流得進來嗎、接錯了沒。
+        from .data_lines import data_line_issues
+        issues.extend(data_line_issues(recipe, k, order, registry))
+
         # score 變數 ⊆ 此 route 會產出的特徵 ∪ {"score"}（僅警告）
         # ⚠ 有 `decide` 的時候 `score.expr` **根本不會跑**，對它報一條警告等於
         # 叫使用者去修一個不影響結果的地方 —— 但**判定段自己的表達式要檢查**，
@@ -1735,7 +1919,14 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                     route=str(k), advice=advice))
         decide = getattr(recipe, "decide", None)
         if decide is not None:
-            issues.extend(_decide_unknown(decide, feats, k))
+            # 分流時引擎寫 `route_taken`（`engine._note_route`）—— 宣告層
+            # （`verdict_features.bound_specs`）一直有它，這裡以前沒有，
+            # 於是問它的那一題在每一條 route 上都被說成「沒有人算」。
+            # ``feats`` 從 ``{"score"}`` 起算（給舊的 score.expr 與出圖卡的
+            # `rank_by`）；判定段自己決定分數什麼時候看得到，所以先拿掉。
+            seen_here = (feats - {"score"}) | (
+                {"route_taken"} if route_by is not None else set())
+            issues.extend(_decide_unknown(decide, seen_here, k, data=data))
 
     # ---- 分流的 route 之間有沒有漂（F23 §5 選項 A 的配套）----
     # 只在 route_by 存在時看：多 route 在此之前的意思是「一種 kind 一條路」

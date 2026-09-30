@@ -157,9 +157,9 @@ def _ui_modules_needing_qt():
 def test_core_tests_that_reach_into_qt_ui_modules_skip_without_qt():
     """**函式裡 import 一支會拉進 Qt 的 `d4t.ui` 模組，也要守門**（2026-09-24）。
 
-    上面那兩條只看得到「直接寫 PySide6」。`test_doe_folder.py` 在函式裡
-    ``from d4t.ui import open_dialogs`` —— 那一支在模組層 import PySide6 ——
-    於是沒有 `libEGL` 的機器上核心批紅一條，而兩條守門都沒叫。
+    上面那兩條只看得到「直接寫 PySide6」。`test_doe_folder.py`（F121 期 0 隨 DOE
+    一起刪了）在函式裡 ``from d4t.ui import open_dialogs`` —— 那一支在模組層
+    import PySide6 —— 於是沒有 `libEGL` 的機器上核心批紅一條，而兩條守門都沒叫。
 
     規則：非 `test_ui_*` 的檔案裡，import 一支需要 Qt 的 `d4t.ui` 模組的那個
     函式（或整個檔案的模組層）要有

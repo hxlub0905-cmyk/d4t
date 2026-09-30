@@ -1,16 +1,17 @@
 # d4t UI — authored 2026-09-18 (F110).
-"""三顆 Open 鈕各自的**檔案對話框**。
+"""Open 鈕各自的**檔案對話框**。
 
 為什麼自己一個模組（`CLAUDE.md` §4：新的面板一律開新模組，`studio.py` 留給
 接線）：這幾支裡面有**內容**，不是接線 —— 副檔名過濾字串、「一顆幾張」那個
-問句與它的預設值、DOE 那顆按鈕問的是目錄不是檔案。`studio.py` 那一格天花板
-**只准往下**，而 F110 要加第五顆（`Open conditions…`）；照規矩要先從它手上
-搬走等量的東西，於是這一族整個搬過來，`studio.py` 只留一行轉呼叫。
+問句與它的預設值。`studio.py` 那一格天花板**只准往下**，而 F110 要加第五顆
+（DOE 的 `Open conditions…`，F121 期 0 又拿掉了）；照規矩要先從它手上搬走等量
+的東西，於是這一族整個搬過來，`studio.py` 只留一行轉呼叫。
 
-**2026-09-18（F114-2）：五顆併成三顆**（見 :data:`OPENABLE` 的說明）。
-`Open images…` 這一顆吃「一個資料夾**或**一個檔案」，而**是哪一種由那條路徑
-自己回答** —— 那個判斷跟 CLI 的 `d4t.__main__._open_input` 是同一套規則，
-`tests/test_ui_input_kinds.py` 有一條釘住兩邊不准漂。
+**2026-09-18（F114-2）：五顆併成三顆**（見 :data:`OPENABLE` 的說明）；
+**2026-09-24（F121 期 0）：三顆剩兩顆**（DOE 那顆拿掉）；
+**2026-09-29（F121 期 4）：兩顆剩一顆**「Open data…」。它吃「一個檔案**或**一個
+資料夾」，而**是哪一種由那條路徑自己回答** —— 判斷住在 core
+（`ingest.dataset.plan_open`），CLI 的 `d4t.__main__._open_input` 叫同一支。
 
 ⚠ **每一支都回「使用者選了什麼」，不自己去載。** 載入是 `StudioWindow` 的事
 （它要管 `_pending_dataset_name`、進度列、worker 忙不忙）—— 這裡只問問題。
@@ -34,6 +35,9 @@ IMAGE_FILTER = ("Images (*.png *.tif *.tiff *.I01 *.jpg *.jpeg *.bmp);;"
                 "All files (*)")
 KLARF_FILTER = "KLARF (*.001 *.klarf *.txt);;All files (*)"
 RAW_FILTER = "Raw images (*.raw)"
+#: 「Open data…」的第一條過濾：上面三種的聯集（一顆鈕吃得下的每一種）。
+DATA_FILTER = ("Data - KLARF, images, raw (*.001 *.klarf *.txt *.png *.tif "
+               "*.tiff *.I01 *.jpg *.jpeg *.bmp *.raw)")
 
 #: 「以上都不是，我自己填」那一項的字。
 OTHER_LAYOUT = "Something else - let me type it in"
@@ -42,55 +46,38 @@ OTHER_LAYOUT = "Something else - let me type it in"
 #: 在這裡**，不然那顆鈕按下去只會講一句「還沒有辦法開」——
 #: `tests/test_ui_input_kinds.py` 兩個方向都守。
 #: **2026-09-18（F114-2）：五顆併成三顆。** 使用者：「目前的 input 入口搞得我
-#: 很亂（user 可能會被嚇掉）… 可否整合?」→「入口整合成 3 顆」。
-#: 併掉的是 ``folder`` / ``image`` / ``raw`` —— 它們**本來就是同一種 kind**
-#: （``folder``），只差在「一個檔還是一疊檔」與「byte 要怎麼變成像素」，
-#: 而那兩件事**看一眼那條路徑就知道**（CLI 的 `_open_input` 早就是這樣做的）。
-#: 沒併的兩顆是因為它們**看不出來**：KLARF 的形狀由 KLARF 自己講，而
-#: 「資料夾裡還有資料夾」與「一個資料夾的圖」選錯會安靜地得到一批看起來
-#: 正常的錯資料。
-OPENABLE = ("klarf", "images", "doe_folder")
+#: 很亂（user 可能會被嚇掉）… 可否整合?」→「入口整合成 3 顆」。併掉的是
+#: ``folder`` / ``image`` / ``raw`` —— 那幾件事**看一眼那條路徑就知道**。
+#: **2026-09-24（F121 期 0）**：DOE 的 `Open conditions…` 拿掉（設計錯了）。
+#: **2026-09-29（F121 期 4）**：`Open KLARF…` 與 `Open images…` 併成一顆
+#: ``data``（使用者：「我想把入口簡單化」）。F114-2 那時 KLARF 沒併的理由是
+#: 「看不出來」—— 而那是錯的：一個檔案是不是 KLARF 讀檔頭就知道
+#: （`ingest.dataset.looks_like_klarf`），是 patch 還是一顆一張由 KLARF 自己講。
+OPENABLE = ("data",)
 
 
-def ask_klarf(parent: Any) -> Optional[str]:
-    """`Open KLARF…` —— patch 與 RSEM 都走這一顆（ingest 自動判別）。"""
-    path, _ = QFileDialog.getOpenFileName(parent, "Open KLARF", "",
-                                          KLARF_FILTER)
-    return path or None
+def ask_data(parent: Any) -> Optional[str]:
+    """「Open data…」—— **一個檔案（KLARF 或一張影像）或一個資料夾**。
 
-
-def ask_images(parent: Any) -> Optional[str]:
-    """`Open images…` —— **一個資料夾，或單獨一個影像檔**。
-
-    這一顆是 F114-2 把三顆併起來的那一顆（`folder` / `image` / `raw`）。
-    對話框用的是 ``FileMode.Directory`` **加上 `ShowDirsOnly` 關掉** ——
-    那組合底下檔案看得到也選得到，所以「選一個資料夾」與「選一個檔案」
-    **同一顆鈕就夠了**，而回來的是一條路徑。要分哪一種，交給
-    :func:`open_source` 看那條路徑（`.raw`？目錄？），使用者不必先回答
-    一個他還沒看到資料就答不出來的問題。
+    對話框用的是 ``FileMode.Directory`` **加上 `ShowDirsOnly` 關掉** —— 那組合
+    底下檔案看得到也選得到，所以「選一個資料夾」與「選一個檔案」**同一顆鈕就
+    夠了**，而回來的是一條路徑。要分哪一種交給 :func:`open_path`（→
+    `plan_open`），使用者不必先回答一個他還沒看到資料就答不出來的問題。
 
     ⚠ **非原生對話框**（`DontUseNativeDialog`）：原生的目錄選擇器在每個平台上
     都只給目錄，那正是這一顆要擺脫的限制。
     """
-    d = QFileDialog(parent, "Open images - a folder, or one image file")
+    d = QFileDialog(parent, "Open data - a KLARF, a folder of images, or "
+                            "one image")
     d.setOption(QFileDialog.Option.DontUseNativeDialog, True)
     d.setFileMode(QFileDialog.FileMode.Directory)
     d.setOption(QFileDialog.Option.ShowDirsOnly, False)
-    d.setNameFilters([IMAGE_FILTER.split(";;")[0], RAW_FILTER, "All files (*)"])
+    d.setNameFilters([DATA_FILTER, KLARF_FILTER.split(";;")[0],
+                      IMAGE_FILTER.split(";;")[0], RAW_FILTER, "All files (*)"])
     if not d.exec():
         return None
     got = d.selectedFiles()
     return got[0] if got else None
-
-
-def ask_conditions_folder(parent: Any) -> Optional[str]:
-    """`Open conditions…` —— DOE：一個**子目錄**一顆，裡面每個檔案一個 condition。
-
-    ⚠ 標題要講得出跟上面那一顆的差別，因為兩顆都是「選一個目錄」，而選錯的
-    下場是一批看起來正常的資料（`folder` 會把每個 condition 當成一顆 defect）。
-    """
-    return QFileDialog.getExistingDirectory(
-        parent, "Open a folder of per-defect folders", "") or None
 
 
 def ask_raw_layout(parent: Any, probe: str) -> Optional[Any]:
@@ -137,7 +124,7 @@ def ask_raw_layout(parent: Any, probe: str) -> Optional[Any]:
 
 
 def open_source(window: Any, key: str) -> None:
-    """`INPUT_SOURCES` 裡那一顆按鈕按下去 —— **五種入口共用這一支**（F110）。
+    """`INPUT_SOURCES` 裡那一顆按鈕按下去 —— **入口共用這一支**（F110）。
 
     以前一種入口一支 ``StudioWindow._on_open_<key>``，而 `CLAUDE.md` §5 那句
     「**加／改一個入口＝改 `INPUT_SOURCES`，不要動 UI**」其實做不到：加一列就得
@@ -150,82 +137,51 @@ def open_source(window: Any, key: str) -> None:
     ⚠ 認不得的 key **不當機**：那是產品範圍的旋鈕，不是輸入驗證的地方
     （同 `scope.use_profile` 的理由）。講一句話就好。
     """
-    if key == "klarf":
-        path = ask_klarf(window)
+    if key == "data":
+        path = ask_data(window)
         if path:
-            window.load_dataset_path(path)
-    elif key == "images":
-        path = ask_images(window)
-        if path:
-            _open_picked(window, path)
-    elif key == "doe_folder":
-        d = ask_conditions_folder(window)
-        if d:
-            window.load_folder_path(d, doe=True)
+            open_path(window, path)
     else:
         window._status("No way to open \u201c%s\u201d yet." % key, "error")
 
 
-def raw_folder_for(path: str) -> Optional[str]:
-    """這條路徑是不是 `.raw` 那條路？是的話回**要當成一個 lot 的資料夾**。
+def open_path(window: Any, path: str) -> None:
+    """選完之後：**看那條路徑決定走哪一條 ingest**（F121 期 4：一顆 Open）。
 
-    **這就是「一顆鈕吃兩種形狀」的全部邏輯**，而它跟 CLI 的
-    `d4t.__main__._open_input` 是同一條規則：`.raw` 解不開，所以
-    ``dataset._IMAGE_EXTS`` 裡沒有它 —— 兩邊都得自己問一次。
-
-    * 指到一個 `.raw` **檔** → 它所在的**資料夾**（`.raw` 的位元位移是**整批
-      共用**的，見 `ingest/rawfile.py`；一個檔案的資料夾就是一顆的 lot）。
-    * 指到一個**資料夾**且裡面有 `.raw` → 那個資料夾。
-    * 其他 → ``None``（不是 raw 那條路）。
+    使用者不必先回答「這是 KLARF、一疊影像、一張、還是 raw」—— 那幾件事從路徑
+    上看得出來（`ingest.dataset.plan_open`，CLI 也叫它），而**看得出來的事就不該
+    拿去問人**（推廣鐵則）。只有 `.raw` 要多問一句版面：它的檔案裡沒有任何一個
+    byte 在講寬高。
     """
     import os
 
-    p = str(path)
-    if os.path.isfile(p):
-        return (os.path.dirname(p) or ".") if _is_raw(p) else None
-    if os.path.isdir(p):
-        return p if any(_is_raw(n) for n in os.listdir(p)) else None
-    return None
-
-
-def _is_raw(name: str) -> bool:
-    import os
-
+    from d4t.core.ingest.dataset import plan_open
     from d4t.core.ingest.rawfile import RAW_EXTS
 
-    return os.path.splitext(str(name))[1].lower() in RAW_EXTS
-
-
-def _open_picked(window: Any, path: str) -> None:
-    """`Open images…` 選完之後：**看那條路徑決定走哪一條 ingest**。
-
-    使用者不必先回答「這是一個檔還是一疊檔、是不是 raw」—— 那三件事從路徑上
-    看得出來，而**看得出來的事就不該拿去問人**（推廣鐵則）。
-    """
-    import os
-
-    raw_dir = raw_folder_for(path)
-    if raw_dir is not None:
+    plan = plan_open(path)
+    if plan.what == "raw":
         probe = path if os.path.isfile(path) else None
         if probe is None:
-            names = sorted(n for n in os.listdir(raw_dir) if _is_raw(n))
-            probe = os.path.join(raw_dir, names[0])
+            names = sorted(n for n in os.listdir(plan.path)
+                           if os.path.splitext(n)[1].lower() in RAW_EXTS)
+            probe = os.path.join(plan.path, names[0])
         spec = ask_raw_layout(window, probe)
         if spec is not None:
-            _load_raw(window, raw_dir, spec)
-        return
-    if os.path.isdir(path):
-        window.load_folder_path(path, doe=False)
+            _load_raw(window, plan.path, spec)
+    elif plan.what == "folder":
+        window.load_folder_path(plan.path)
+    elif plan.what == "image":
+        window.load_image_path(plan.path)
     else:
-        window.load_image_path(path)
+        window.load_dataset_path(plan.path)
 
 
 def _load_raw(window: Any, folder: str, spec: Any) -> bool:
     """讀一個資料夾的 `.raw` 並交給視窗。
 
     ⚠ **住在這裡而不是 `StudioWindow` 上**：`studio.py` 的三格天花板只准往下
-    （`CLAUDE.md` §4），而這一段本來就是「那顆鈕按下去要做什麼」—— 跟隔壁四顆
-    同一族。視窗要的只有最後那一個 `Dataset`。
+    （`CLAUDE.md` §4），而這一段本來就是「那顆鈕按下去要做什麼」。視窗要的只有
+    最後那一個 `Dataset`。
     """
     import os
 

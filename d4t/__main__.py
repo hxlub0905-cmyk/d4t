@@ -120,74 +120,55 @@ def _open_raw_folder(folder: str, raw: Any):
 
 
 def _open_input(path: str, tiff_path: Any = None, raw: Any = None):
-    """CLI 的輸入 —— **四種都認**（F85），照 `scope.INPUT_SOURCES` 那張表。
+    """CLI 的輸入 —— **跟 Studio 那一顆「Open data…」同一個判斷**（F121 期 4）。
 
     以前這裡只呼叫 `load_dataset`，也就是只認 KLARF；給它一個資料夾的下場是
-    ``IsADirectoryError``，而那句話對使用者沒有任何意義。Studio 早就吃四種
-    輸入了（F11 Input-3），CLI 沒有跟上 —— 於是 `folder` 那條 route 的
-    recipe（`recipes/one-image-uniformity.json` 就是一份）在命令列上**根本
-    跑不起來**，而畫布上它是好的。
+    ``IsADirectoryError``，而那句話對使用者沒有任何意義（F85 補上了資料夾與單張）。
+    判斷本身住在 `ingest.dataset.plan_open`（一個家，Studio 也叫它）：KLARF 檔、
+    影像資料夾、單張影像、只有一份 KLARF 的資料夾、``.raw``。這裡只負責**照著開**
+    —— 與 `.raw` 的版面：由 `--raw` 給，或從檔案大小推；推不出唯一解就當場說清楚，
+    不挑一個「最像的」（猜錯的話每一個像素都錯，而且不會報錯）。
 
-    判準只看路徑本身，不看副檔名以外的東西：
-
-    * **資料夾**（裡面是影像檔）→ `load_folder`（每個影像檔一顆）
-    * **資料夾**（裡面是資料夾）→ `load_doe_folder`（每個子目錄一顆，
-      裡面每個檔案是一個 imaging condition；F110 的 DOE）
-    * **影像檔** → `load_image_file`（那一張就是唯一的一顆）
-    * 其餘 → `load_dataset`（KLARF，含 `--tiff`）
-
-    ⚠ **DOE 那一種由內容判斷，不是多一個旗標**：一個目錄裡裝的是影像檔還是
-    資料夾，是**看得出來的事實**，而使用者在命令列上要重打一次那個事實是沒有
-    道理的（推廣鐵則）。兩種混在一起時以**影像檔**為準（跟 Studio 的
-    `Open images…` 一致），而 DOE 那條路對那種目錄本來就會說一句話。
-
-    ⚠ 多頁 TIFF 走的是**第四條**（KLARF 那一支會自己講不出話），而
-    `Open stack…` 那條路 CLI 仍然沒有 —— 它需要「一顆幾張」那個數字，
-    而那是一格參數不是一條路徑。這裡不假裝有。
+    ⚠ F110 在這裡多過一條「資料夾裡只有資料夾 → DOE（一個子目錄一顆）」，
+    2026-09-24（F121 期 0）拿掉了：使用者說那個設計錯了，DOE 的資料就是一個
+    資料夾的單張影像。
     """
-    from d4t.core.ingest import dataset as dataset_mod
     from d4t.core.ingest.dataset import (
-        load_dataset, load_doe_folder, load_folder, load_image_file,
+        load_dataset, load_folder, load_image_file, plan_open,
     )
 
-    p = str(path)
-    if os.path.isdir(p):
-        names = sorted(os.listdir(p))
-        # `.raw` **不進 `_IMAGE_EXTS`**（它解不開），所以這一條要自己問一次。
-        # 版面由 `--raw` 給，或從檔案大小推 —— 推不出唯一解就當場說清楚，
-        # 不挑一個「最像的」（猜錯的話每一個像素都錯，而且不會報錯）。
-        from d4t.core.ingest.rawfile import RAW_EXTS as _RAW_EXTS
-        if any(os.path.splitext(n)[1].lower() in _RAW_EXTS for n in names):
-            return _open_raw_folder(p, raw)
-        loose = any(os.path.splitext(n)[1].lower() in dataset_mod._IMAGE_EXTS
-                    and os.path.isfile(os.path.join(p, n)) for n in names)
-        if not loose and any(os.path.isdir(os.path.join(p, n)) for n in names):
-            return load_doe_folder(p)
-        return load_folder(p)
-    if os.path.splitext(p)[1].lower() in dataset_mod._IMAGE_EXTS:
-        return load_image_file(p)
-    return load_dataset(p, tiff_path=tiff_path)
+    plan = plan_open(path)
+    if plan.what == "raw":
+        return _open_raw_folder(plan.path, raw)
+    if plan.what == "folder":
+        return load_folder(plan.path)
+    if plan.what == "image":
+        return load_image_file(plan.path)
+    return load_dataset(plan.path, tiff_path=tiff_path)
 
 
-def _cmd_run(args: argparse.Namespace) -> int:
-    import time
+def _open_data(args: argparse.Namespace, recipe: Any):
+    """開 recipe 要跑的資料 —— `run` 與 `export` **同一段**（F122 期 4）。
 
-    import d4t.core.steps  # noqa: F401
+    ``args.klarf`` 是資料的路徑（KLARF、資料夾、單張影像、``.raw``），加上
+    ``--tiff`` / ``--raw`` / ``--gds`` / ``--source``。回 ``(dataset, 0)``；開不起來
+    （或一顆都沒有）回 ``(None, exit code)``，那句話已經印了。
+    """
     from d4t.core.ingest.dataset import load_dataset
-    from d4t.core.pipeline import run_batch, validate
 
-    recipe = _load_recipe(args.recipe)
-    if recipe is None:
-        return 2
-    if getattr(args, "log", None):
-        from d4t.core.log import attach_file
-        attach_file(args.log)
-        print(f"紀錄：{args.log}")
-
-    ds = _open_input(args.klarf, args.tiff, getattr(args, "raw", None))
+    ds = _open_input(args.klarf, getattr(args, "tiff", None),
+                     getattr(args, "raw", None))
     print(f"資料集：kind={ds.kind}，{len(ds.items)} 顆 defect")
     for w in ds.warnings:
         print(f"  △ {w}")
+    if not ds.items:
+        # **一顆都沒有就停**（F122）。以前照樣往下跑：量測一顆都沒跑，Output
+        # 卡卻照樣寫 —— 而沒有任何一顆影像可以當錨點，相對的「Write to」就落在
+        # 「現在站在哪」（在 repo 根目錄跑一次就多一個 `uniformity_charts/`）。
+        # 上面那幾行已經講了為什麼是 0 顆（例：影像都在子資料夾裡）。
+        print("[錯誤] 這份資料裡一顆 defect 都沒有 —— 沒有東西可以跑，也沒有東西"
+              "可以寫。", file=sys.stderr)
+        return None, 2
     # Load 卡上 `carry` 點名的 KLARF 欄位（F16）。**只帶點名的那幾欄** ——
     # 一份 raw data 幾十萬顆 ×24 欄字串是幾百 MB，而且要 pickle 進每個 worker。
     # 一格都沒勾就一欄都不帶，所以既有的 recipe 一個位元組都沒多帶。
@@ -199,7 +180,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             rep = glas_export.attach(ds, args.gds)
         except glas_export.GlasExportError as e:
             print(f"[錯誤] --gds：{e}", file=sys.stderr)
-            return 2
+            return None, 2
         print(f"GDS 匯出：{rep.summary()}")
         for w in rep.warnings:
             print(f"  △ {w}")
@@ -209,7 +190,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if not sid or not path:
             print("[錯誤] --source 要寫成 `代號=路徑`（收到：%s）" % spec,
                   file=sys.stderr)
-            return 2
+            return None, 2
         from d4t.core.ingest import pair_source as pair_ingest
 
         from d4t.core.steps.pair_source import columns_for_source
@@ -222,7 +203,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             rep = pair_ingest.attach(ds, second, sid, columns=want)
         except Exception as e:  # CLI 邊界，一律回報
             print("[錯誤] --source %s：%s" % (spec, e), file=sys.stderr)
-            return 2
+            return None, 2
         # **打錯一個欄名要在這裡就停**，不是讓每一顆都失敗一次：整批跑完才發現
         # 「那一欄根本不存在」是最貴的一種發現方式，而這裡手上還有 KlarfDoc。
         missing = pair_ingest.missing_columns(second, want)
@@ -230,10 +211,30 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print("[錯誤] --source %s：這一份沒有 %s 這幾欄（它有：%s）"
                   % (sid, ", ".join(missing),
                      ", ".join(pair_ingest.columns_of(second))), file=sys.stderr)
-            return 2
+            return None, 2
         print("第二份 source：%s" % rep.summary())
         for w in second.warnings:
             print("  △ %s" % w)
+    return ds, 0
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    import time
+
+    import d4t.core.steps  # noqa: F401
+    from d4t.core.pipeline import route_for, run_batch, validate
+
+    recipe = _load_recipe(args.recipe)
+    if recipe is None:
+        return 2
+    if getattr(args, "log", None):
+        from d4t.core.log import attach_file
+        attach_file(args.log)
+        print(f"紀錄：{args.log}")
+
+    ds, code = _open_data(args, recipe)
+    if ds is None:
+        return code
 
     # ---- 分流（F23）：route_by 存在時它覆蓋 kind 選路 ----
     # 欄位在不在**這裡**查（手上有 KlarfDoc，答得出「那它有哪些欄」）——
@@ -253,12 +254,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
         tail = ("；其他走 %s" % rb.default.strip()) if rb.default.strip() \
             else "；對不上＝那一顆失敗"
         print(f"分流：{rb.column}（{mapping}{tail}）")
-    elif ds.kind not in recipe.routes:
-        print(f"[錯誤] recipe 沒有 '{ds.kind}' 的 route（有：{sorted(recipe.routes)}）", file=sys.stderr)
+    elif route_for(recipe, ds.kind) is None:
+        # 只有一條 route 的 recipe 不看鍵名（F121 期 1）—— 走得到這裡的只剩
+        # 手寫的多型別 recipe 沒有這種資料的那一條。
+        print(f"[錯誤] recipe 有好幾條 route，沒有一條給 '{ds.kind}'（有：{sorted(recipe.routes)}）", file=sys.stderr)
         return 2
 
     print(f"\nRecipe 健檢（{ds.kind}）：")
-    if _print_issues(validate(recipe, kind=ds.kind)):
+    # 對著**這份資料**檢查（F121 期 3）：Input 卡的名字表要幾張、要不要 KLARF ——
+    # 對不上的話在這裡擋一次，而不是跑下去每一顆報一次。
+    from d4t.core.ingest.dataset import data_profile
+    if _print_issues(validate(recipe, kind=ds.kind, data=data_profile(ds))):
         print("[錯誤] recipe 有 error 等級問題，請先修正。", file=sys.stderr)
         return 1
 
@@ -330,8 +336,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if gt:
         from d4t.core.export import summarize
         from d4t.core.export.report import UNBINNED_KEY
+        from d4t.core.pipeline.decide_tree import positive_bins
 
-        summary = summarize(payload, ground_truth=gt)
+        # 「判成真的」看每一類標的好消息／壞消息（F122 期 3）——跟 Studio 同一條。
+        summary = summarize(payload, ground_truth=gt,
+                            positive_bins=positive_bins(recipe.decide, payload))
         g = (summary.get("ground_truth") or {})
         print(f"\n對照 ground truth（{gt_path}）：")
         if g.get("n_evaluated"):
@@ -406,6 +415,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # 像素，而那一趟的影像段跟剛才那一批是同一份 —— 手上有 `--cache` 卻不傳，
     # 等於整批再跑一次。
     bctx = run_batch_steps(recipe, ds, payload, cache_dir=args.cache)
+    return _report_batch(bctx)
+
+
+def _report_batch(bctx: Any) -> int:
+    """Output 卡寫完了 —— `run` 與 `export` 講同一段話（F122 期 4）。"""
     for w in bctx.warnings:
         print(f"  △ {w}")
     for path in bctx.outputs:
@@ -417,6 +431,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"[錯誤] 輸出卡 '{nid}'：{msg}", file=sys.stderr)
         return 1
     return 0
+
+
+def _positive_bins_of_run(run, results):
+    """存下來那一輪的 recipe 說哪幾個 bin 是「判成真的」（F122 期 3）。
+    讀不出來就 ``None``（`summarize` 的預設 ``bin != 0``）。"""
+    from d4t.core.pipeline.decide_tree import positive_bins
+    from d4t.core.pipeline.recipe import Recipe
+
+    try:
+        recipe = Recipe.from_json_dict(json.loads(run.get("recipe_json") or ""))
+    except Exception:  # CLI 邊界：舊的 run 可能沒有存 recipe
+        from d4t.core.log import swallowed
+        swallowed("__main__._positive_bins_of_run")
+        return None
+    return positive_bins(recipe.decide, results)
 
 
 def _cmd_runs(args: argparse.Namespace) -> int:
@@ -523,7 +552,8 @@ def _cmd_export(args: argparse.Namespace) -> int:
     if args.ground_truth:
         with open(args.ground_truth, encoding="utf-8") as f:
             gt = json.load(f)
-    s = summarize(results, ground_truth=gt)
+    s = summarize(results, ground_truth=gt,
+                  positive_bins=_positive_bins_of_run(run, results))
     print(f"成功 {s.get('n_ok')} / 失敗 {s.get('n_fail')}；"
           f"bin 分佈 " + " · ".join(f"bin {b}={c}"
                                    for b, c in sorted((s.get('bin_counts') or {}).items(),
@@ -534,6 +564,14 @@ def _cmd_export(args: argparse.Namespace) -> int:
               f"正確率 {g.get('accuracy', 0):.1%}　"
               f"抓漏率 {g.get('miss_rate', 0):.1%}（漏抓 {g.get('fn', 0)} 顆真缺陷）　"
               f"誤殺率 {g.get('false_alarm_rate', 0):.1%}（誤判 {g.get('fp', 0)} 顆假點）")
+
+    # **沒有指定一次性的出口 → 照 recipe 上的 Output 卡寫**（F122 期 4）。
+    # 跟 Studio 的「Write outputs」同一件事：同一份 recipe、同一批結果、同一支
+    # `run_batch_steps`。`--csv` / `--excel` / `--klarf-out` 是**一次性**的出口，
+    # 不看卡片（以前這一支只有那一條路，於是 CLI 寫出來的東西跟 Studio 寫的
+    # 不是同一份：卡上的資料夾、勾選、圖、KLARF 模式都不算數）。
+    if not (args.csv or args.excel or args.klarf_out):
+        return _export_with_the_cards(args, run, results)
 
     if args.csv:
         print(f"→ CSV：{write_csv(results, args.csv)}")
@@ -558,7 +596,7 @@ def _cmd_export(args: argparse.Namespace) -> int:
             print(f"[錯誤] {exc}", file=sys.stderr)
             return 2
 
-    if args.klarf_out or args.dry_run:
+    if args.klarf_out:
         src = args.klarf or run.get("klarf_path")
         if not src:
             print("[錯誤] 沒有來源 KLARF；請用 --klarf 指定。", file=sys.stderr)
@@ -595,6 +633,60 @@ def _cmd_export(args: argparse.Namespace) -> int:
         if not args.dry_run:
             print(f"→ KLARF：{args.klarf_out}")
     return 0
+
+
+def _export_with_the_cards(args: argparse.Namespace, run: Any,
+                           results: List[Any]) -> int:
+    """`d4t export` 的預設：跑那一輪的 recipe 上的 Output 卡（F122 期 4）。
+
+    ``--dry-run``：每一張卡講它**會**寫到哪、寫哪幾個檔（Write KLARF 講會改
+    幾列），一個位元組都不寫 —— 同 Studio 的「Will write」儀表。
+    """
+    import json
+
+    from d4t.core.pipeline import run_batch_steps
+    from d4t.core.pipeline.recipe import Recipe
+    from d4t.core.pipeline.step import REGISTRY, SCALE_LOT, StepError
+
+    try:
+        recipe = Recipe.from_json_dict(json.loads(run.get("recipe_json") or ""))
+    except Exception as exc:  # CLI 邊界：舊的 run 可能沒有存 recipe
+        print(f"[錯誤] 這一輪沒有存下能用的 recipe（{exc}）。用 --csv / --excel "
+              "/ --klarf-out 一次性寫出。", file=sys.stderr)
+        return 2
+    cards = [(nid, REGISTRY[n.step]) for nid, n in recipe.nodes.items()
+             if n.enabled and n.step in REGISTRY
+             and getattr(REGISTRY[n.step], "scale", "") == SCALE_LOT]
+    if not cards:
+        print("[錯誤] 這一輪的 recipe 沒有 Output 卡，沒有東西可以照著寫。在 "
+              "Studio 加一張，或用 --csv / --excel / --klarf-out 一次性寫出。",
+              file=sys.stderr)
+        return 1
+    src = args.klarf or run.get("klarf_path")
+    if not src:
+        print("[錯誤] 這一輪沒有記下資料在哪；請用 --klarf 指定。", file=sys.stderr)
+        return 2
+    ds, code = _open_data(argparse.Namespace(
+        klarf=src, raw=getattr(args, "raw", None), gds=getattr(args, "gds", ""),
+        source=getattr(args, "source", None)), recipe)
+    if ds is None:
+        return code
+    if args.dry_run:
+        print("\n照 Output 卡會寫的東西（預覽，未寫檔）：")
+        for nid, cls in cards:
+            params = recipe.nodes[nid].params
+            try:
+                where = cls().destination(params, ds)
+            except StepError as exc:
+                print(f"  ✗ {cls.label}（{nid}）：{exc}")
+                continue
+            names = [f["name"] for f in (getattr(cls, "planned_files",
+                                                 lambda _p: [])(params))]
+            print(f"  · {cls.label}（{nid}）→ {where}"
+                  + (f"：{', '.join(names)}" if names else ""))
+        return 0
+    return _report_batch(run_batch_steps(recipe, ds, results,
+                                         cache_dir=getattr(args, "cache", None)))
 
 
 def _cmd_gui(_args: argparse.Namespace) -> int:
@@ -740,14 +832,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_runs.add_argument("--db", required=True, help="批次歷史 SQLite 路徑")
     p_runs.set_defaults(func=_cmd_runs)
 
-    p_ex = sub.add_parser("export", help="輸出：寫回 KLARF / CSV / Excel 報表")
+    p_ex = sub.add_parser(
+        "export", help="輸出：照那一輪 recipe 上的 Output 卡寫（預設），或用 "
+                       "--csv / --excel / --klarf-out 一次性寫")
     p_ex.add_argument("run_id")
     p_ex.add_argument("--db", required=True, help="批次歷史 SQLite 路徑")
+    p_ex.add_argument("--raw", default=None,
+                      help="資料是 .raw 時的版面（同 run 的 --raw）")
+    p_ex.add_argument("--gds", default="", help="GLAS 匯出（同 run 的 --gds）")
+    p_ex.add_argument("--source", action="append", default=None,
+                      help="第二份資料 `代號=路徑`（同 run 的 --source）")
+    p_ex.add_argument("--cache", default=None,
+                      help="影像段快取（出圖的卡要重跑每一顆，給了就快很多）")
     p_ex.add_argument("--mode", choices=["inplace", "annotate", "topn"], default="annotate",
                       help="寫回模式：inplace=就地改欄（無損）／annotate=另存含分數欄／topn=只留前 N 名")
-    p_ex.add_argument("--klarf", default=None, help="來源 KLARF（預設用 run 紀錄裡的路徑）")
-    p_ex.add_argument("--klarf-out", default=None, help="輸出 KLARF 路徑")
-    p_ex.add_argument("--dry-run", action="store_true", help="只預覽會改什麼，不寫檔")
+    p_ex.add_argument("--klarf", default=None,
+                      help="資料的路徑（KLARF 或影像資料夾；預設用 run 紀錄裡的路徑）")
+    p_ex.add_argument("--klarf-out", default=None,
+                      help="一次性：寫回 KLARF 到這個路徑（不看卡片，模式看 --mode）")
+    p_ex.add_argument("--dry-run", action="store_true",
+                      help="只預覽會寫什麼，不寫檔（照卡片時列每一張卡的去處；"
+                           "配 --klarf-out 時講 KLARF 會改幾列）")
     p_ex.add_argument("--class-col", default=None, help="inplace：bin 寫進哪個分類欄（例 CLASSNUMBER）")
     p_ex.add_argument("--bin-col", default=None, help="inplace：bin 寫進哪個 bin 欄（例 ROUGHBINNUMBER）")
     p_ex.add_argument("--size-col", default=None, help="inplace：CD 寫進哪個尺寸欄（例 DSIZE）")

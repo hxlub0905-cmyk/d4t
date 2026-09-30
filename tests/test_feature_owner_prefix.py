@@ -33,8 +33,9 @@
 ⚠ **`feature_math` / `feature_fill` 2026-08-27 刪掉了**（Phase 3）。這一檔跟著
 少了一條：``the_migration_also_reaches_the_algo_card``（改名遷移會不會走進那張
 卡的算式）。**帶著那張卡的舊 recipe 現在是一條 `unknown-step`，跑不起來** ——
-跑不起來的 recipe 不需要有人幫它改名。判定段的算式（`let` / 樹）走
-``_migrate_decide_renames``，那條路還在，由 ``test_rename_fallout.py`` 守。
+跑不起來的 recipe 不需要有人幫它改名。判定段的算式（`let` / 樹）這一道
+不改 —— 這個前綴規則比判定段早出生（見 `_migrate_rescued_feature_names` 的
+註解；以前這裡寫的 ``_migrate_decide_renames`` 從來不存在，F122 查到的）。
 """
 from __future__ import annotations
 

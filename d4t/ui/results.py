@@ -412,6 +412,9 @@ class ResultsWindow(QMainWindow):
         # 哪」，而樹上已經有一個答案了。換數字時也要重算（`_on_feature_pick`）。
         self._decide = decide
         self._refresh_cuts()
+        # 表上「判錯了」那幾格跟正確率同一條規矩（F122 期 3，`called_real`）。
+        self.table.set_outcomes(decide.bin_outcomes()
+                                if decide is not None else {})
 
     def selected_class(self) -> str:
         return self.verdict.selected()

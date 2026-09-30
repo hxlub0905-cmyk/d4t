@@ -30,17 +30,18 @@
 > （`pair_source` / `H2H` / `output_char` 全在，測試也全在），走這條路的人
 > 自己拉線。下面就是那份 recipe 當初的組法。
 
-1. **`Open KLARF…`** 載 **API（RSEM）那一份**當 main。⚠ 不是 EBI —— 理由見 §2。
+1. **`Open data…`** 載 **API（RSEM）那一份**當 main。⚠ 不是 EBI —— 理由見 §2。
 2. 卡片庫 → Input 段 → **`Pair source`** → 按 **`Open data…`** 選
    **EBI 那一份**。
 3. 卡片庫 → Compare 段 → **`H2H`**。
-4. **拉兩條線**（哪一條接哪個埠見 §3）。
+4. **拉線**（哪一條接哪個埠見 §3）：兩條進 H2H，再把 H2H 右下那顆方埠
+   （送去判定）拉進 Decision。
 5. 同一張 Pair 卡的 **`Rank by`** → 挑 **EBI 自己的分數欄**（下拉裡就是那一份
    真的有的欄位）。這一格是 ① 與 ② 分得開的唯一條件 —— 見 §5。
    **`Rank within`** 填 `XINDEX,YINDEX`（照 die 分組排名）。
 6. 判定段畫那棵樹（見 §5）—— 第一題永遠是 `pair_found`。
-7. 卡片庫 → Output 段 → **`Write comparison`**，填 **`Write to`** 資料夾
-   （**不用接線**，見 §3）。
+7. 卡片庫 → Output 段 → **`Write comparison`**，填 **`Write to`** 資料夾，
+   **接三條線**：左圖、右圖、Decision 的結果（見 §3.1）。
 8. **`Run all`**，看過 Results 之後按那個視窗的 **`Write outputs`**
    （⚠ 跑本身**不寫檔**，見 §4.3）。
 
@@ -58,10 +59,10 @@
 
 1. 卡片庫 → Input 段 → **`Pair source`** → `Open data…`。
 2. 卡片庫 → Compare 段 → **`H2H`**。
-3. **拉兩條線**（見 §3）。
+3. **拉線**（見 §3）：兩條進 H2H、H2H 進 Decision。
 4. 判定段畫那棵樹（見 §5）。
-5. 卡片庫 → Output 段 → **`Write comparison`**，填資料夾
-   （**不用接線**，見 §3）。
+5. 卡片庫 → Output 段 → **`Write comparison`**，填資料夾，接左圖、右圖、
+   Decision 的結果（見 §3.1）。
 
 ---
 
@@ -79,19 +80,18 @@ ground truth 是 API，所以要**走遍的是 API 的清單**。
 ## 3. 畫布怎麼接
 
 ```
-SEM image ──single──────────────┐
-   （API 空拍，main）                 ├──> H2H
-Pair source ──paired────┘
-
-         ┌ OUTPUT ────────────────────────────────┐
-         │  Write comparison          │   ← 沒有線（見 §3.1）
-         │  (not connected) · once per lot         │
-         └─────────────────────────────────────────┘
+Input ──single──────────────┬──> H2H ──aligned──────────> Write comparison（右圖）
+   （API 空拍，main）        │     └─(送去判定)─> Decision ─(結果)─> Write comparison
+Pair source ──paired────────┘
+Input ──single─────────────────────────────────────────> Write comparison（左圖）
 ```
+
+一條從頭接到尾的流（F124）：圖進 H2H 對位 → 對位的結果送進 Decision 分類 →
+分好類、連同左右兩張圖寫成對照圖。
 
 | 從哪 | 到哪 | 意思 |
 |---|---|---|
-| `SEM image` 的 `single` | **H2H 的 `Search inside`** | 大圖（要在裡面找） |
+| `Input` 的 `single` | **H2H 的 `Search inside`** | 大圖（要在裡面找） |
 | `Pair…` 的 `paired` | **H2H 的 `Small image`** | 小圖（拿去找的那一塊） |
 
 **小的當模板、大的當搜尋範圍** —— EBI 的 patch 是 128²、RSEM 是 1000²，
@@ -100,19 +100,25 @@ Pair source ──paired────┘
 > `Pair source` **沒有影像輸入** —— 它是 Input 段的卡，
 > 圖是從第二份 lot 撈出來的，不是從上游接來的。所以它左邊沒有埠。
 
-### 3.1 Output 段**不用接線**（副標寫 `(not connected)` 是正常的）
+### 3.1 Output 段也要接線
 
-Output 段每一張卡都沒有輸入埠 —— 它們是終點，不吐流也不吐特徵。畫布上它們
-待在自己的虛線區塊裡（`OUTPUT` / 「once per lot」）。**在 route 上就會跑**，
-整批跑完之後各跑一次。
+Output 段的卡是終點（不吐流、不吐數字），寫的是**整張結果表**；上游有 Decision
+才有類別（F124）。整批跑完之後各跑一次（卡片底下那條「once per lot」）。
 
-由此來的三件事：
+由此來的幾件事：
 
-* **不要拉線進去。** 那條線會落在一個不存在的埠上 —— 畫布會說謊。
-* 它要看哪一條影像流，是**打字**填的（`Left picture` / `Right picture`）。
-  拉線的那種欄位（`image_key`）在設定區是唯讀的，而這張卡不上畫布接線，
-  所以這兩格刻意是自由文字。慣用的名字：`single`（main 的原圖）、
-  `paired`（EBI 帶過來那一張）、`aligned`（H2H 對齊後裁出來的那一塊）。
+* **結果線要接**：Decision 右邊的方埠拉進 `Write comparison` 左下那顆方埠 ——
+  什麼都沒流進來的 Output 卡是紅的，而且不跑。
+* **判定第一題問的 `pair_found` 不用另外拉線**：它是 Pair source 記的，跟著
+  defect 經過 H2H 流進 Decision（F124 起判定問得到它上游每一張卡的數字）。
+  判定問到一張**沒有**流進來的卡的數字時，Decision 卡上會有一個黃色提醒，
+  告訴你接哪一張卡。
+* **左右兩張圖是兩顆影像埠**（`Left picture` / `Right picture`，F123 期 3）：
+  從**你要的那一張卡的那一顆埠**拉線進來。拿到的是那一張卡當時吐的那一份 ——
+  接 Input 的 `single` 就是原圖，不會變成後面某張 Enhance 卡改過的那一份。
+  慣用的接法：左邊接 Input 的 `single`（或不接＝這一顆跑的起點）、右邊接
+  Pair 卡的 `paired`（EBI 帶過來那一張）或 H2H 卡的 `aligned`（對齊後裁出來
+  的那一塊）。
 * **跑不寫檔**（`Run trial` 與 `Run all` 都不寫；2026-09-09 起寫是 Results
   視窗的 **`Write outputs`**）—— 調參數是一個迴圈，每拖一下滑桿就覆寫一次
   KLARF 是不可逆的災難，而寫之前你會想先看一眼數字。要寫出東西請跑完之後按
@@ -204,10 +210,10 @@ die **全部併成一組**（整整一行 die），而它：
 
 | 格子 | 填什麼 |
 |---|---|
-| **Write to** | 輸出資料夾（會產 `report.html` / `defects.csv` / `recipe.json` / `images/`）|
+| **Write to** | 輸出資料夾（會產 `report.html` / `defects.csv` / `recipe.json` / `images/`）。空著＝資料旁邊的 `d4t_comparison`。⚠ 跟 `Write report` 指到同一個資料夾的話檔名會撞（健檢會擋：`output-collision`）|
 | **At most this many rows with pictures** | 預設 200。超過會**講出來**並建議改用 `Write report`，但版面不會自動換 |
-| **Left picture** | 留空 = 自動挑（rsem 那條路就是 `single`）。要看整片 FOV 就留空或填 `single`；要「兩張圖同一塊區域」填 `aligned` |
-| **Right picture** | `paired`（EBI 帶過來那一張）|
+| **Left picture**（埠）| 不接 = 這一顆跑的起點（rsem 那條路就是 `single`）。要看整片 FOV 就接 Input 的 `single`；要「兩張圖同一塊區域」接 H2H 卡的 `aligned` |
+| **Right picture**（埠）| 接 Pair 卡的 `paired`（EBI 帶過來那一張）|
 | **Numbers to show** | 預設已含兩個擋板 —— **`ncc_score` 與 `align_peak_ratio`**。再加上你 carry 的分數欄與 `pair_die_rank` / `pair_die_total` |
 | **Mark where the defect is** | 開著：左圖上畫 **紅框（對到哪）＋ 綠十字（瞄準哪）** |
 

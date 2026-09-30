@@ -85,41 +85,47 @@ def test_load_patch_ebi(patch_tiff):
     assert ctx.features["n_channels"] == 2.0
 
 
-def test_load_single_gives_one_named_stream(patch_tiff):
-    """單張資料走 `load_single`，而它吐**一條**流（F11 Input-4）。
+def test_single_image_data_gives_one_named_stream(patch_tiff):
+    """單張資料：Input 卡的名字表一列 → **一條**流（F11 Input-4；F121 期 2）。
 
     這一條以前叫 `test_load_patch_rsem_alias`，斷言的是 `load_patch` 會把
     `single` **順手鏡射一份到 `test`**。那個鏡射拿掉了：資料只有一張圖，畫布上
-    卻有兩顆埠，正是使用者回報的「畫布跟實際對不起來」。
+    卻有兩顆埠，正是使用者回報的「畫布跟實際對不起來」。F11 拆出來的
+    `load_single` 在 F121 期 2 併回 Input，而「一條」由名字表那一列保證。
     """
     path, pages = patch_tiff
     item = DefectItem(defect_id="9", die=None, xrel_nm=None, yrel_nm=None,
                       images={"single": ImageRef(path, 2, "single")})
     ctx = Context(meta={"_defect_item": item, "_dataset_kind": "rsem"})
-    run_step("load_single", ctx)
+    run_step("load_patch", ctx, channel_map="1:single")
     assert set(ctx.images) == {"single"}          # 一條，不是兩條
     assert np.array_equal(ctx.images["single"], pages[2])
 
     # 名字是使用者的（畫布上的埠跟著改名）
     ctx2 = Context(meta={"_defect_item": item, "_dataset_kind": "rsem"})
-    run_step("load_single", ctx2, out="rsem_img")
+    run_step("load_patch", ctx2, channel_map="1:rsem_img")
     assert set(ctx2.images) == {"rsem_img"}
+    assert np.array_equal(ctx2.images["rsem_img"], pages[2])
 
 
-def test_load_single_refuses_data_with_several_images(patch_tiff):
-    """**不偷偷拿第一張**：這張卡承諾一顆一張，多張就是選錯卡。"""
-    path, _pages = patch_tiff
+def test_fewer_names_than_images_loads_the_named_ones_and_says_so(patch_tiff):
+    """一顆好幾張、名字表只寫一列 → 讀第一張，**並講出其餘沒載入**。
+
+    F121 期 2 使用者同意的那一格：以前 `load_single` 在這裡拒絕（「這張卡承諾
+    一顆一張」）；合回一張之後，名字表寫幾列就是要幾張，而沒寫到的那幾張要
+    **講出來**（不講的話使用者會以為每一張都算進去了）。
+    """
+    path, pages = patch_tiff
     item = DefectItem(defect_id="1", die=None, xrel_nm=None, yrel_nm=None,
                       images={"test": ImageRef(path, 0, "test"),
                               "ref": ImageRef(path, 1, "ref")})
     ctx = Context(meta={"_defect_item": item, "_dataset_kind": "ebi_patch"})
-    with pytest.raises(StepError) as e:
-        run_step("load_single", ctx)
-    # ⚠ **卡片名不寫死在這裡**：2026-09-18 使用者把它從「Load images」改成
-    # 「Patch」，而這一條當場紅了 —— 紅得沒道理，壞掉的不是「講得出該用
-    # 哪一張卡」這件事。問的改成：那句話裡**真的有那張卡現在的名字**。
-    from d4t.core.pipeline.step import get_step
-    assert get_step("load_patch").label in str(e.value)
+    run_step("load_patch", ctx, channel_map="1:single")
+    assert set(ctx.images) == {"single"}
+    assert np.array_equal(ctx.images["single"], pages[0])
+    warned = ctx.meta.get("warnings", [])
+    said = " ".join(warned)
+    assert "2 images" in said and "ref" in said, warned
 
 
 def test_load_patch_explicit_and_errors(patch_tiff):

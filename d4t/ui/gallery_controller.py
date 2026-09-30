@@ -366,7 +366,7 @@ class GalleryController(QObject):
 
         身分查 `bound_specs`（跟結果表的分組同一份）：有區域的項把那一塊
         **亮**在影像上（`highlight_region`），引擎的項（let / score）對映
-        Score / Bin 偽卡＝打開判定區。
+        Decision 偽卡＝打開判定區。
         """
         try:
             bound = {b.spec.name: b for b in verdict_features.bound_specs(

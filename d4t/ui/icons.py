@@ -48,13 +48,10 @@ GLYPH_ICONS = (
     "folder_open", "layers",
     # ⚠ ``stack``（F11）與 ``raw``（F113）**目前沒有人用**：2026-09-18 那一輪
     # `Open stack…` 拿掉、`Open raw…` 併進 `Open images…`。留著是因為畫一個
-    # 字形的成本在「想清楚它跟隔壁那顆怎麼分辨」，不在那幾行 —— 而底下
-    # ``folder_stack`` 的說明正是拿這兩個當對照。要再開一個入口時它們就在。
+    # 字形的成本在「想清楚它跟隔壁那顆怎麼分辨」，不在那幾行。要再開一個入口
+    # 時它們就在。（F110 的 ``folder_stack`` —— DOE 的 `Open conditions…` ——
+    # 2026-09-24 隨 F121 期 0 刪掉：那個入口的設計錯了，不是「之後再回來」。）
     "raw",
-    # F110：DOE 那個入口（`Open conditions…`）—— **資料夾裡還有資料夾**。
-    # 三顆 Open 並排，所以它的輪廓要跟另外兩顆都不一樣：它是唯一畫成
-    # 「一個資料夾裝著兩個小資料夾」的。
-    "folder_stack",
     # F85：**一張大圖**。現在是 `welcome.py` 在用（入口那邊 2026-09-18 併掉了）。
     # 唯一內部有東西的那一個 —— 外框空的話它跟 `stack` 的最上層一樣。
     "image",
@@ -437,16 +434,6 @@ def draw_glyph_icon(p: QPainter, name: str, size: float, color: str,
                     continue
                 p.fillRect(QRectF(m + c * cw, h * 0.20 + r * ch, cw, ch),
                            p.pen().color())
-    elif n == "folder_stack":
-        # 一個資料夾裝著兩個小資料夾 —— DOE：一個子目錄一顆、裡面是 condition。
-        # 跟 ``folder``／``folder_open`` 的差別是**裡面有東西**，跟 ``stack``
-        # 的差別是**外面有容器**（stack 是同一個東西的好幾層）。
-        p.drawLine(QPointF(m, h * 0.26), QPointF(w * 0.40, h * 0.26))
-        p.drawLine(QPointF(w * 0.40, h * 0.26), QPointF(w * 0.50, h * 0.38))
-        p.drawRect(QRectF(m, h * 0.38, w - 2 * m, h * 0.46))
-        inner = (w - 2 * m) * 0.34
-        for x in (m + (w - 2 * m) * 0.10, m + (w - 2 * m) * 0.54):
-            p.drawRect(QRectF(x, h * 0.52, inner, h * 0.22))
     elif n == "stack":
         # 三張疊起來的紙 —— 「一個檔案裡有好幾張圖」（F11 Input-2）。
         # 跟 ``folder`` 對比得出來：folder 是容器，stack 是**同一個東西的好幾層**。

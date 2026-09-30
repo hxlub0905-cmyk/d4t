@@ -98,8 +98,10 @@ def test_a_broken_answer_key_is_treated_as_no_answer_key(window, lot, tmp_path):
     assert window.ground_truth is None
 
 
-def test_the_accuracy_line_is_empty_without_a_ground_truth(window):
-    assert window._accuracy_text(0.5) == ""
+def test_the_score_histogram_has_no_accuracy_line(window):
+    """F122 期 3：分數直方圖底下那行「這個門檻下的正確率」跟門檻線一起退役
+    （判定只剩判定樹；準不準看 Results 的 baseline 條）。"""
+    assert window.histogram.bin_summary_text() == ""
 
 
 def test_accuracy_follows_the_threshold_without_rerunning_the_images():

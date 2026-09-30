@@ -58,7 +58,7 @@ SCALE_DEFECT = "defect"
 SCALE_LOT = "lot"
 _SCALES = (SCALE_DEFECT, SCALE_LOT)
 
-#: 整批那一層（F17-③）：跑完全部 defect 之後才跑一次的卡（Output 段那五張）。
+#: 整批那一層（F17-③）：跑完全部 defect 之後才跑一次的卡（Output 段那幾張）。
 #: 它們以前借用 ``CATEGORY_ADC`` —— 不是因為它們在做 ADC，而是因為那個值剛好
 #: 讓它們落在快取 checkpoint 之後。現在那件事由宣告推導，這個值可以講實話了。
 CATEGORY_BATCH = "batch"
@@ -70,14 +70,13 @@ CATEGORY_BATCH = "batch"
 #: core 不能 import ui，所以由一條 UI 測試 cross-check（第五種 kind 出現時
 #: 兩邊一起紅，而不是安靜地漏掉分群）。
 #:
-#: ⚠ ``doe_folder`` 在 **patch 那一群**（F110）：DOE 的每一張都是「以 defect
-#: 為中心、FOV 固定」拍出來的 —— 那正是 patch 形的定義，跟它是不是機台裁的
-#: 無關。`_center` 在它身上有幾何意義，而那是這張表唯一在回答的問題。
+#: ⚠ F110 的 ``doe_folder`` 曾經在 patch 那一群，2026-09-24（F121 期 0）隨那個
+#: 入口一起刪掉（使用者：設計錯了；DOE 的資料是 ``folder``）。
 #: ⚠ ``tiff_stack`` 2026-09-18（F114）從 `scope.SUPPORTED_KINDS` 拿掉了
 #: （使用者：「stack 功能請幫我拿掉 我們用不到」），所以也從這裡拿掉 ——
 #: 這兩張表分的是**支援的** kind，多一個沒人載得進來的字串只會讓那條
 #: cross-check 測試永遠紅。`ingest.load_tiff_stack` 本身沒動。
-PATCH_KINDS = ("ebi_patch", "doe_folder")
+PATCH_KINDS = ("ebi_patch",)
 SINGLE_IMAGE_KINDS = ("rsem", "folder")
 
 # --------------------------------------------------------------------------- #
@@ -286,6 +285,16 @@ IMAGE_TYPES = ("image_key", "image_keys")
 #: 區域埠，那一格會變成一個沒有人定義的區域名 —— 跑起來是 `unknown-region`，
 #: 而畫面上那條線看起來完全正常。
 REGION_TYPES = ("region_key", "region_keys")
+
+#: **數字線與結果線**的埠名（F123 期 2）。量測卡的 ``numbers`` 接進 Decision，
+#: Decision 的 ``results`` 接進 Output 卡（Output 也收量測卡直接來的 ``numbers``）。
+#:
+#: 它們**不是參數**：不寫進任何一格，線本身就是全部的資訊（「哪幾張卡的數字進了
+#: 判定」「Output 寫哪幾張卡的東西」）。所以判斷一條線是不是資料線看的是下游那張
+#: 卡宣告的 :attr:`Step.data_inputs`（`recipe_schema.is_data_edge`），跟
+#: `is_region_edge` 看下游那一格的型別同一個形狀。
+NUMBERS, RESULTS = "numbers", "results"
+DATA_PORTS = (NUMBERS, RESULTS)
 
 #: 值裡面裝著**特徵名**的型別（F37）。改名遷移照這一份走。
 #:
@@ -1033,6 +1042,31 @@ class Step(ABC):
     #: 的第 N 處（`tests/test_size_ceilings.py` 數著），而且它跟卡片隔了一個
     #: 目錄 —— 卡片改名的那天沒有人會想到去改它。手冊是**這張卡自己的**事。
     manual: ClassVar[str] = ""
+    #: 收**資料線**的入埠（F123 期 2；見 :data:`NUMBERS`）。一顆資料埠**接很多
+    #: 條**，跟影像埠「一顆一條」相反。預設沒有。
+    data_inputs: ClassVar[Tuple[str, ...]] = ()
+    #: **這張卡的產出就是數字**（F124）：它有一顆把量完的 defect 送去判定的埠。
+    #: 只有量東西的卡（GLV、CD、Focus index、H2H）是 —— 其餘的卡順手記的數字
+    #: （Input 的 ``n_channels``、Normalize 的 ``clip_frac``、Pair source 的
+    #: ``pair_found``）是附帶的紀錄，跟著 defect 沿線流下去，不另外長一顆埠。
+    #: 使用者（2026-09-29）：「Denoise 吐出數字」跟「畫布說明每一步變成什麼」
+    #: 是矛盾的。
+    measures: ClassVar[bool] = False
+
+    @classmethod
+    def data_output(cls, params: Dict[str, Any]) -> str:
+        """這張卡的資料出埠：量東西的卡（:attr:`measures`）是 :data:`NUMBERS`，
+        其餘 ``""``。
+
+        整批一次的卡是終點（Output 段不吐東西）；Decision 覆寫成 :data:`RESULTS`。
+        一張量測卡還沒宣告任何數字（壞掉的參數）也不長 —— 沒有東西可以送。
+        """
+        if cls.scale == SCALE_LOT or not cls.measures:
+            return ""
+        try:
+            return NUMBERS if cls.resolve_features(params) else ""
+        except Exception:  # 宣告壞了由 lint 講；這裡只是一顆埠
+            return ""
 
     # ---- 參數 -------------------------------------------------------------
     @classmethod
@@ -1508,6 +1542,17 @@ class Step(ABC):
         return out
 
     @classmethod
+    def optional_streams_in(cls, params: Dict[str, Any]) -> List[str]:
+        """這張卡用**名字**讀的影像流（沒有埠、少了只會那一格空著）（F122）。
+
+        :meth:`optional_features_in` 的影像流版。誰需要它：沒有埠的 Output 卡
+        （`Write comparison` 的左右兩張圖）—— 它們在整批跑完之後重跑每一顆、
+        照名字拿圖，打錯一個字照樣跑，只是那一格是空的。lint 對它報 warning
+        （`stale-stream-ref`）。
+        """
+        return []
+
+    @classmethod
     def optional_features_in(cls, params: Dict[str, Any]) -> List[str]:
         """這張卡會讀、但**少了只會退化不會失敗**的特徵（F37）。
 
@@ -1581,6 +1626,23 @@ class Step(ABC):
         還是一張大圖」（`PATCH_KINDS` / `SINGLE_IMAGE_KINDS`）。這是那一半。
         ``level`` 用 "error" / "warning" / "info"；`validate` 逐 route 呼叫，
         detail 會被冠上 route 名。
+        """
+        return []
+
+    @classmethod
+    def data_issues(cls, params: Dict[str, Any],
+                    data: Any) -> List[Tuple[str, str, str, str]]:
+        """**對著現在開著的那份資料**才看得出來的發現：``(code, level, title, detail)``。
+
+        ``data`` 是 `ingest.dataset.DataProfile`（一顆幾張、有沒有 KLARF、有哪幾欄；
+        core 的這一層不 import ingest，所以型別寫 Any）。跟 :meth:`kind_issues`
+        的差別是它問的是**事實**，不是資料型別的名字 —— 一條 pipeline 吃不吃得下
+        一份資料，看的是那幾個事實（F121 期 1 的結論）。只有 `validate` 拿到
+        ``data`` 時才呼叫（沒開資料的時候沒有東西可以對）。
+
+        為什麼要它（F121 期 3，使用者回報 2026-09-24）：一條 EBI 的 pipeline 開在
+        一個影像資料夾上，**每一顆**都在 Input 卡報同一句錯。那句話的每一個字在
+        開資料那一刻就知道了 —— 講一次、講在那張卡上、在開跑之前。
         """
         return []
 

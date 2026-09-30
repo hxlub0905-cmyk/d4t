@@ -135,7 +135,7 @@ def test_the_same_name_on_two_different_routes_is_not_a_collision():
     """
     rec = _recipe(
         {"load": RecipeNode("", "load_patch", {}),
-         "load2": RecipeNode("", "load_single", {"out": "test"}),
+         "load2": RecipeNode("", "load_patch", {"channel_map": "1:test"}),
          "a": _profile("epi"),
          "b": _profile("epi")},
         {"ebi_patch": ["load", "a"], "rsem": ["load2", "b"]})

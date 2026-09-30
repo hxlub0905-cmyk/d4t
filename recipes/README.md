@@ -22,7 +22,7 @@
 判定只問一句：那個峰有沒有高過「安靜」的水位（`quiet`，預設 32）。
 
 ```
-Patch ──test─┬──> Normalize (test)           ──test──┐
+Input ──test─┬──> Normalize (test)           ──test──┐
                    ├──> Normalize (ref, range from test) ──ref──┤
             ──ref──┘                                            ▼
                                                     Subtract |test − ref| ──diff──> Denoise (median 3) ──diff──> GLV (glv_max)
@@ -44,7 +44,7 @@ Patch ──test─┬──> Normalize (test)           ──test──┐
 **沒有第二張圖可以比的時候，同一張圖上的其他框就是參照**。
 
 ```
-SEM image ──single─┬──> ROI (stripes, crossing)          → on_pattern ───────┐
+Input ──────single─┬──> ROI (stripes, crossing)          → on_pattern ───────┐
                         ├──> ROI (stripes, between_vertical)   → between_columns ─┤
                         ├──> ROI (stripes, between_horizontal) → between_rows ────┤
                         └──single──────────────────────────────────> GLV (each box) <─────────┘
@@ -117,7 +117,7 @@ SEM image ──single─┬──> ROI (stripes, crossing)          → on_patt
 | GLV | **Looking for boxes that are** | 知道自己這一層只有暗缺陷（或只有亮的）就選一邊；不知道就留 `both`。⚠ 選錯方向比留 `both` 糟得多：合成資料上（兩種都有）選 `darker` 從 96% 掉到 71% |
 | GLV | **Pick the odd one by** | 預設 `glv_mean`。想抓「一格裡的一顆亮點」而不是「整格偏亮」就換 `glv_max` |
 | 三張 Region 卡 | **Box inset** | 框往內縮幾個 px。條紋邊緣是糊的，縮太少會把邊緣的灰階算進來 |
-| 輸出卡 | **Write to** | 站點資料。預設 `rsem_report` 是**相對於你啟動程式的位置** |
+| 輸出卡 | **Write to** | 站點資料。相對路徑（例 `rsem_report`）接在**資料旁邊**（KLARF 所在的資料夾）；空著＝那張卡的預設（`d4t_report`…；Write KLARF 是原檔旁邊的 `_adc`）|
 
 ### 命令列
 
@@ -129,13 +129,13 @@ python -m d4t run recipes/rsem-worst-box.json <你的.001> --workers 4
 
 ## `one-image-uniformity.json`
 
-**一張影像、沒有 KLARF、沒有參照**：用 `Open images…` 打開（指到那張圖，或指到
+**一張影像、沒有 KLARF、沒有參照**：用 `Open data…` 打開（指到那張圖，或指到
 一整批），這一份把量測框鋪滿整個視野、**逐格量一次**，然後回答一句話 ——
 **這片區域的灰階均不均勻**：CV %，以及左右與上下各斜了多少（`slope_per_100px`）。
 
 ```
                                         ┌──→ Write charts    四張圖 + 一張自己配的
-SEM image ──single─┬──> ROI (stripes) ┄cells┄> GLV (across boxes)
+Input ──────single─┬──> ROI (stripes) ┄cells┄> GLV (across boxes)
                         └──single──────────────────→ ┘   └──→ Write report   defects.csv + recipe
 ```
 

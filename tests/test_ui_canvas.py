@@ -122,11 +122,20 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     其中一條 —— 而引擎照線送資料，於是畫面上的線比實際接的多。
     """
     load, sub = window.pipeline.card("load"), window.pipeline.card("sub")
-    assert load.out_names() == ["test", "ref"]
+    # Input 卡另外有一顆 numbers 出埠（F123 期 2）；這一條問的是影像埠。
+    assert [s["name"] for s in load.out_specs()
+            if s["kind"] == "image"] == ["test", "ref"]
     assert sub.in_names() == ["test", "ref"]
 
+    # 載入的 fixture 被第 7 版遷移補了一條 glv → Decision 的數字線（F123 期 2）
+    # —— 這一條問的是影像線，所以只數影像線。
+    def image_edges():
+        return [e for e in window.model.edges
+                if e.src_out not in ("numbers", "results")]
+
     window.pipeline.link_to("load", "sub", port=0, dst_port=0)
-    assert window.model.edge_pairs() == [("load", "sub")], "model 仍然是一條依賴"
+    assert sorted({(e.src, e.dst) for e in image_edges()}) == [("load", "sub")], \
+        "model 仍然是一條依賴"
     assert len([e for e in window.pipeline._edges
                 if e.pair() == ("load", "sub")]) == 1, "拉一條就是一條"
 
@@ -136,14 +145,14 @@ def test_both_ports_can_land_on_the_same_node_and_each_gets_its_own_line(window)
     window.pipeline.link_to("load", "sub", port=1, dst_port=1)
     assert len([e for e in window.pipeline._edges
                 if e.pair() == ("load", "sub")]) == 2, "兩條並排的線"
-    assert len(window.model.edges) == 2, "model 也要記得兩條（F9-9）"
-    assert {e.src_out for e in window.model.edges} == {"test", "ref"}
+    assert len(image_edges()) == 2, "model 也要記得兩條（F9-9）"
+    assert {e.src_out for e in image_edges()} == {"test", "ref"}
     assert "Connected" in window.status_text()
 
     # 同一顆埠再拖一次：不是錯誤，訊息要講清楚那條線本來就在了
     window.pipeline.link_to("load", "sub", port=0)
-    assert window.model.edge_pairs() == [("load", "sub")]
-    assert len(window.model.edges) == 2
+    assert sorted({(e.src, e.dst) for e in image_edges()}) == [("load", "sub")]
+    assert len(image_edges()) == 2
     assert "already connected" in window.status_text()
     assert "Cannot" not in window.status_text()
 
@@ -404,7 +413,10 @@ def test_an_unwired_recipe_wraps_instead_of_running_off_the_screen(qapp):
     # 它多算了 116px 而紅掉，但畫面其實是塞得下的。）
     cols = max(c for c, _r in pos.values()) + 1
     width = cols * canvas_mod.NODE_W + (cols - 1) * canvas_mod.COL_GAP
-    assert width < 1200, "換行之後整張圖要塞得進一般的工作區寬度"
+    # F124（2026-09-30）：1200 → 1300。使用者選了「欄距加寬、埠名放得下」
+    # （116 → 156），四欄因此是 1284px；實際的換行點照舊跟著畫布寬度走
+    # （下面那一段），這一條守的是 `WRAP` 那個上限不要排成一條要橫著掃的長列。
+    assert width < 1300, "換行之後整張圖要塞得進一般的工作區寬度"
 
     # F13-1 之後換行點是**跟著實際寬度走**的，所以這條不變量對每一種寬度都
     # 要成立，不只對寫死的 WRAP。

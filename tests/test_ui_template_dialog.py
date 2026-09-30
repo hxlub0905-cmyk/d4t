@@ -1145,7 +1145,7 @@ def test_studio_hands_the_dialog_the_stream_the_card_actually_reads(window):
     """問的是卡片自己的 `source`，不是一組寫死的名字。
 
     單張影像那條路的流可能叫 `single`、`test`，或使用者自己取的任何名字
-    （`load_single` 的 `out` 是他填的）—— 寫死 `ref`/`test` 的話那條路永遠拿不到
+    （Input 卡的名字表是他填的）—— 寫死 `ref`/`test` 的話那條路永遠拿不到
     圖，而那顆「用畫面上那一張」的鈕就永遠不出現。
 
     另外一半同樣重要：**這張卡還沒接線的時候正是使用者會來開這個對話框的時候**，

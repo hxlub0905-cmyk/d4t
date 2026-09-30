@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import add_single_input  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLE_RECIPE = REPO / "tests" / "fixtures" / "recipes" / "die_to_die_basic.json"
 
@@ -62,7 +64,7 @@ def test_what_lands_on_disk_is_what_is_on_the_canvas(window, tmp_path):
     這支測試刻意**經過磁碟**（不是 `to_recipe()` 比一比）：`to_recipe` 對不對
     在 smoke test 裡已經有人問了，這裡問的是「存檔這條路有沒有在中間掉東西」。
     """
-    window.model.add_step("load_single")
+    add_single_input(window.model)
     nid = window.model.add_step("glv_stats")
     window.model.set_param(nid, "source", "single")
     window.model.recipe_id = "my_pipeline"
@@ -83,7 +85,7 @@ def test_an_edge_the_user_dragged_is_in_the_file(window, tmp_path):
     pipeline —— 而它照樣跑得完（route 的排列還在，順序仍然對），只是每一張卡
     接到的東西可能不是使用者接的那一個。
     """
-    src = window.model.add_step("load_single")
+    src = add_single_input(window.model)
     dst = window.model.add_step("glv_stats")
     window.model.add_edge(src, dst, src_out="single", dst_in="source")
 
@@ -106,7 +108,7 @@ def test_the_save_button_is_grey_until_there_is_something_to_save(window):
     """按鈕的前置條件不滿足 → 變灰 **並在 tooltip 說明原因**（推廣鐵則）。"""
     assert window.btn_save_recipe.isEnabled() is False
     assert "nothing to save" in window.btn_save_recipe.toolTip().lower()
-    window.model.add_step("load_single")
+    add_single_input(window.model)
     window._refresh_all()
     assert window.btn_save_recipe.isEnabled() is True
 
@@ -117,7 +119,7 @@ def test_the_save_button_is_grey_until_there_is_something_to_save(window):
 def test_the_title_grows_a_star_while_there_are_unsaved_changes(window,
                                                                 tmp_path):
     """星號是「還沒存」的唯一一個常駐訊號（每個編輯器都是這個慣例）。"""
-    window.model.add_step("load_single")
+    add_single_input(window.model)
     window._refresh_all()
     assert window.windowTitle().endswith("*")
 
@@ -148,7 +150,7 @@ def test_ctrl_s_writes_back_to_the_file_it_came_from(window, tmp_path):
     出來，使用者就會不存。
     """
     path = tmp_path / "round.json"
-    window.model.add_step("load_single")
+    add_single_input(window.model)
     assert window.save_recipe_path(path) is True
 
     window.model.add_step("glv_stats")
@@ -167,7 +169,7 @@ def test_ctrl_s_writes_back_to_the_file_it_came_from(window, tmp_path):
 
 def test_the_first_save_has_to_ask_where(window):
     """沒有原檔的時候 `Ctrl+S` 就是「另存」—— 那是唯一誠實的行為。"""
-    window.model.add_step("load_single")
+    add_single_input(window.model)
     assert window.recipe_path is None
     asked = []
     original = open_dialogs.save_recipe_as
@@ -244,7 +246,7 @@ def test_a_failed_save_says_so_and_does_not_pretend(window, tmp_path):
 
     這一條的重點在最後那一句：把 dirty 清掉的話，使用者會以為存好了。
     """
-    window.model.add_step("load_single")
+    add_single_input(window.model)
     folder = tmp_path / "a_folder"
     folder.mkdir()
     assert window.save_recipe_path(folder) is False

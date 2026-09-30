@@ -33,7 +33,7 @@ from d4t.core.pipeline import (  # noqa: E402
     run_batch, run_batch_steps,
 )
 from d4t.core.pipeline.recipe import (  # noqa: E402
-    Recipe, RecipeNode, ScoreSpec,
+    Edge, Recipe, RecipeNode, ScoreSpec,
 )
 
 KIND = "ebi_patch"
@@ -54,13 +54,18 @@ def recipe_for(folder, **over):
     params = {"folder": str(folder)}
     params.update(over)
     return Recipe(
-        recipe_id="bundle_demo", routes={KIND: ["load", "glv", "out"]},
+        recipe_id="bundle_demo", routes={KIND: ["load", "glv", "dec", "out"]},
         nodes={
             "load": RecipeNode("load", "load_patch", {}),
             "glv": RecipeNode("glv", "glv_stats",
                               {"source": "test", "metrics": "glv_max"}),
+            "dec": RecipeNode("dec", "decision", {}),
             "out": RecipeNode("out", "output_report", params),
         },
+        # 線都畫出來（F123 期 2：Output 寫的是線上游的東西）。
+        edges=[Edge("load", "glv", "test", "source"),
+               Edge("glv", "dec", "numbers", "numbers"),
+               Edge("dec", "out", "results", "results")],
         score=ScoreSpec(expr="glv_max", threshold=1.0,
                         bins={"below": 0, "above": 1}))
 
@@ -358,10 +363,10 @@ def test_pointing_at_a_file_says_so(dataset, tmp_path):
     assert "is a file, not a folder" in " ".join(bctx.errors.values())
 
 
-def test_an_empty_path_is_a_configuration_issue_not_a_crash():
+def test_an_empty_path_is_not_a_configuration_issue():
+    """F122：空＝寫到資料旁邊的預設資料夾（以前是一條會擋住試跑的 error）。"""
     from d4t.core.pipeline.step import REGISTRY
-    says = REGISTRY["output_report"].configuration_issues({"folder": ""})
-    assert says and "Write to" in says[0]
+    assert REGISTRY["output_report"].configuration_issues({"folder": ""}) == []
     assert REGISTRY["output_report"].configuration_issues(
         {"folder": "/tmp/x"}) == []
 

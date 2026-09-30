@@ -155,7 +155,8 @@ def test_a_downstream_card_still_pointing_at_center_is_caught_by_lint():
     def rec(pick):
         return Recipe(
             recipe_id="t", routes={"rsem": ["load", "r", "g"]},
-            nodes={"load": RecipeNode("load", "load_single", {}),
+            nodes={"load": RecipeNode("load", "load_patch",
+                                      {"channel_map": "1:single"}),
                    "r": RecipeNode("r", "roi_reference", {
                        "method": "layout layers", "layers": "17:epi",
                        "pick": pick}),

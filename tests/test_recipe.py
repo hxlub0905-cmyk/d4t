@@ -222,7 +222,9 @@ def test_an_old_two_item_edge_still_loads():
     assert r.edges == [Edge(src="load", dst="snr", src_out="", dst_in="")]
     # 讀進來之後寫出去就是新格式，而**執行順序沒有變**
     assert r.to_json_dict()["edges"] == [["load", "", "snr", ""]]
-    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr"]
+    # 舊檔案有判定（分數門檻）→ 第 6 版的遷移補一張 Decision 卡在最後
+    # （F123 期 1）。原本那三張的順序沒有變。
+    assert execution_order(r, "ebi_patch") == ["load", "sub", "snr", "decision"]
 
 
 def test_an_edge_with_ports_round_trips():
@@ -349,9 +351,14 @@ def test_validate_unknown_node_in_route():
 
 
 def test_validate_unknown_route_kind():
-    r = make_recipe()
+    # F121 期 1：只有一條 route 時不看鍵名，所以要兩條才有「不認得的 kind」。
+    r = make_recipe(routes={"ebi_patch": ["load", "sub", "snr"],
+                            "rsem": ["load", "sub", "snr"]})
     issues = validate(r, kind="no_such_kind", registry=REG)
     assert "unknown-route" in codes(issues)
+    one = make_recipe()
+    assert "unknown-route" not in codes(
+        validate(one, kind="no_such_kind", registry=REG))
 
 
 def test_validate_cycle():
@@ -482,12 +489,11 @@ def test_is_source_looks_at_declarations_not_at_position_or_values():
     from d4t.core.pipeline.step import REGISTRY
     import d4t.core.steps            # noqa: F401  (註冊全部卡片)
     sources = sorted(k for k, c in REGISTRY.items() if c.is_source())
-    # 三張 Input 卡（F11 Input-4：一種 source 一張卡）——其餘的卡都吃影像流。
+    # Input 卡（F11 Input-4 拆成兩張，F121 期 2 又合回一張）——其餘的卡都吃影像流。
     # `load_sidecar`（F11 Region-3）也是 source：它的輸入不是影像流，是 ingest
     # 掛在 `DefectItem.sidecars` 上的附加檔，所以畫布上它沒有輸入埠。
     # `pair_source`（F15）同理：它的輸入是**另一份掛上來的 lot**，不是流。
-    assert sources == ["load_patch", "load_sidecar", "load_single",
-                       "pair_source"], sources
+    assert sources == ["load_patch", "load_sidecar", "pair_source"], sources
 
 
 def test_validate_requires_ref_on_rsem():

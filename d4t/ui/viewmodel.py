@@ -23,10 +23,15 @@ from d4t.core.pipeline import (
 from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       TreeLeaf, TreeStep, _tree_from_json,
                                       _tree_to_json, feature_referrers,
-                                      is_region_edge, region_edge_values,
-                                      rules_to_tree)
+                                      is_data_edge, is_region_edge,
+                                      region_edge_values, rules_to_tree)
 from d4t.core.steps._util import centre_name, others_name
+from d4t.core.ingest.dataset import data_profile
+from d4t.core.steps.load import channel_map_for
 from d4t.core.steps.glv_stats import EACH_BOX, POOLED
+from d4t.core.steps.decision import DecisionStep
+from d4t.core.pipeline.recipe_schema import legacy_decision
+from . import strings
 
 #: GLV 卡最上面那三顆「要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
 #: 沒有新欄位，選了只動 roi / reference_region 兩條線與 across_boxes 那一格
@@ -168,7 +173,10 @@ class RecipeModel:
         #: 畫布上的線。F9-5b 起存的是 core 的 :class:`~d4t.core.pipeline.Edge`
         #: （帶埠），不再是一對節點 —— 埠決定**資料從哪來**，而不只是先後順序。
         self.edges: List[Edge] = []
-        self.expr = "0"
+        #: 二元門檻那條老路的分數表達式。**空＝還沒有判定**（F122）：引擎給
+        #: 每一顆「量完、沒分類」。以前全新 recipe 塞的是佔位值 ``"0"``，
+        #: 而那個佔位值在引擎裡是一條真的判定（``0 >= 0`` → 每一顆 bin 1）。
+        self.expr = ""
         self.threshold = 0.0
         #: 多類別判定（F22-UI）。``None`` = 這份 recipe 走 ``expr + threshold``
         #: 那條二元的老路。兩者**不能並存**（`validate` 的 `ambiguous-decision`），
@@ -207,17 +215,25 @@ class RecipeModel:
     #: 新 recipe 的起手卡。每一條 pipeline 都得先有影像才有得做，所以空白畫布
     #: 上第一件事一定是「加 Input」—— 那不是一個選擇，是一個儀式。
     #: 試用回饋（F7-9）原話：「一開始預設畫布上就應該有 load image 這個節點」。
+    #: F121 期 2 起**只有一張**（「Input」）—— F11 那時一顆一張的資料換成
+    #: `load_single`，那張卡併回來了；「畫布上冒出兩顆埠而資料只有一張」改由
+    #: :meth:`add_starter_input` 照資料填名字表來擋。
     STARTER_STEP = "load_patch"
 
-    #: **一顆一張影像**的資料型別 → 起手卡要換成 `load_single`（F11 Input-4）。
-    #: 一種 source 一張卡，所以「哪一張卡是起手卡」也跟著資料走 —— 給單張資料
-    #: 放一張 `load_patch`，畫布上會冒出兩顆埠而資料只有一張圖。
-    SINGLE_IMAGE_STARTERS = {"rsem": "load_single", "folder": "load_single"}
+    def add_starter_input(self, item: Any = None) -> str:
+        """開資料時補在**空白畫布**上的那張 Input 卡（F121 期 2），回它的 id。
 
-    @classmethod
-    def starter_step_for(cls, kind: str) -> str:
-        """這種資料的起手卡是哪一張。"""
-        return cls.SINGLE_IMAGE_STARTERS.get(str(kind or ""), cls.STARTER_STEP)
+        名字表照 ``item``（這批資料的第一顆）的影像填
+        （`steps/load.channel_map_for`）：一顆一張 → ``1:single``、EBI patch →
+        ``1:test, 2:ref``、N 張 → N 列。畫布上的埠因此一開始就等於資料真的有的
+        那幾張 —— F11 拆卡要解的「畫布跟實際對不起來」，合回一張之後由這裡守。
+        沒有 ``item`` 就留卡片的預設值。
+        """
+        nid = self.add_step(self.STARTER_STEP)
+        cmap = channel_map_for(item) if item is not None else ""
+        if cmap:
+            self.set_param(nid, "channel_map", cmap)
+        return nid
 
     @classmethod
     def starter(cls, kind: str = "ebi_patch") -> "RecipeModel":
@@ -431,10 +447,62 @@ class RecipeModel:
             i += 1
         return f"{base}{i}"
 
+    def decision_node(self) -> str:
+        """畫布上那一張 Decision 卡的 id（沒有回 ``""``）—— F123 期 1。
+
+        判定是一張卡之後，「這份 recipe 有沒有判定」有兩個問法：``decide``
+        （內容）與這張卡（它在畫布上的位置）。它們是**同一件事**，所以加卡與刪卡
+        讓兩邊一起動（:meth:`add_step` / :meth:`remove`），而認這張卡只有這一處。
+        """
+        return next((nid for nid in self.node_order
+                     if nid in self.nodes
+                     and self.nodes[nid].step == DecisionStep.key), "")
+
+    def _drop_decision_cards(self) -> None:
+        """每一條 route 上的 Decision 卡都拿掉（不記復原：開檔時的整理）。"""
+        gone = {nid for nid, n in list(self.nodes.items())
+                + list(self._other_nodes.items()) if n.step == DecisionStep.key}
+        self.node_order = [n for n in self.node_order if n not in gone]
+        self.nodes = {k: v for k, v in self.nodes.items() if k not in gone}
+        self._other_nodes = {k: v for k, v in self._other_nodes.items()
+                             if k not in gone}
+        self._other_routes = {rk: [n for n in v if n not in gone]
+                              for rk, v in self._other_routes.items()}
+        self.edges = [e for e in self.edges
+                      if e.src not in gone and e.dst not in gone]
+        self._other_edges = [e for e in self._other_edges
+                             if e.src not in gone and e.dst not in gone]
+
     def add_step(self, step_key: str, at: Optional[int] = None) -> str:
         step_cls = get_step(step_key)          # 未知 key 會 raise KeyError
+        deciding = step_key == DecisionStep.key
+        if deciding and self.decision_node():
+            # 一份 recipe 判一次（`validate` 的 duplicate-decision）—— 已經有了
+            # 就回那一張，呼叫端把它選起來，而不是生出第二張同一棵樹。
+            return self.decision_node()
         self._push_undo()
         node_id = self._new_id(step_key)
+        # 別條 route 上已經有那一張（F123：一份 recipe 判一次）→ 同一張卡也排進
+        # 這一條，不是生第二張。
+        shared = next((nid for nid, n in self._other_nodes.items()
+                       if deciding and n.step == DecisionStep.key), "")
+        if shared:
+            node_id = shared
+        if deciding:
+            # 卡與內容一起來（同一步復原）：沒有判定就給一個空的 —— 還沒有問題的
+            # 判定樹，由呼叫端（Studio 的 `add_decision`）接著建議第一題。
+            if self.decide is None:
+                self.decide = legacy_decision(
+                    ScoreSpec(self.expr, self.threshold, self.bins)) \
+                    or DecideSpec(let=[], rules=[], otherwise_bin=0,
+                                  otherwise_label="", score="")
+                self.expr = ""
+            if at is None:
+                # 排在第一張 Output 卡前面：判定在量測之後、寫出去之前。
+                at = next((i for i, nid in enumerate(self.node_order)
+                           if nid in self.nodes and getattr(
+                               get_step(self.nodes[nid].step), "scale", "")
+                           == "lot"), None)
         # **剛加進來的卡前後都是空的**（F10，使用者定調 2026-08-17）：
         # 全預設之後把每一格輸入清掉。畫布上沒有線，這張卡就沒有來源 ——
         # 而在這之前，一張新卡帶著 ``source="diff"`` 這種預設值進來，畫布照著
@@ -444,7 +512,8 @@ class RecipeModel:
         # 清的是**這一張卡的值**，不是卡片的 ``default`` —— 後者是規格的預設
         # 值，手寫 recipe 省略那一格時仍然要有東西可用。
         params = step_cls.validate_params(step_cls.cleared_inputs())
-        self.nodes[node_id] = RecipeNode(id=node_id, step=step_key, params=params)
+        self.nodes[node_id] = (self._other_nodes.pop(shared) if shared else
+                               RecipeNode(id=node_id, step=step_key, params=params))
         if at is None:
             self.node_order.append(node_id)
         else:
@@ -469,6 +538,13 @@ class RecipeModel:
         """
         if node_id in self.nodes:
             self._push_undo()
+            if self.nodes[node_id].step == DecisionStep.key:
+                # 刪掉 Decision 卡＝拿掉判定（同一步復原；見 `decision_node`）——
+                # 每一條 route 上的那一張（它們是同一張）。
+                self.decide = None
+                self.expr = ""
+                self._other_routes = {rk: [n for n in v if n != node_id]
+                                      for rk, v in self._other_routes.items()}
             del self.nodes[node_id]
             self.node_order = [n for n in self.node_order if n != node_id]
             gone = [(e.dst, e.dst_in) for e in self.edges
@@ -514,8 +590,10 @@ class RecipeModel:
             return []
 
         def image_edges(pick):
+            # 數字線與結果線也不算（F123 期 2）：它們不「穿過」任何一張卡。
             return [e for e in self.edges
-                    if pick(e) and not is_region_edge(e, self.nodes)]
+                    if pick(e) and not is_region_edge(e, self.nodes)
+                    and not is_data_edge(e, self.nodes)]
 
         up = self._through_edge(node, image_edges(lambda e: e.dst == node_id))
         if up is None:
@@ -634,11 +712,46 @@ class RecipeModel:
                     if n not in set(step_cls.resolve_features(after))]
         except Exception:  # 顯示用，壞了就不講
             return []
+        return self._still_referred(gone, str(node_id))
+
+    def removal_fallout(self, node_id: str) -> List[str]:
+        """刪掉這張卡之後，誰還指著它產出的名字（F122）。
+
+        改參數（:meth:`rename_fallout`）一直會講這一句；**刪卡不會** —— 判定樹
+        上問那個數字的題目從此永遠答「否」，而刪的那一刻畫面上什麼都沒說，只有
+        判定卡上一個要等重畫才出現的徽章。別張卡也產出同一個名字的話不算
+        （名字還在）。**刪之前叫**：刪完之後查不到它產出什麼。
+        """
+        node = self.nodes.get(str(node_id))
+        if node is None:
+            return []
+        try:
+            mine = self._features_of(node)
+            others: set = set()
+            for nid in self.node_order:
+                other = self.nodes.get(nid)
+                if nid != str(node_id) and other is not None and other.enabled:
+                    others |= set(self._features_of(other))
+        except Exception:  # 顯示用，壞了就不講
+            return []
+        return self._still_referred([n for n in mine if n not in others],
+                                    str(node_id))
+
+    @staticmethod
+    def _features_of(node: RecipeNode) -> List[str]:
+        step_cls = get_step(node.step)
+        try:
+            params = step_cls.validate_params(dict(node.params))
+        except Exception:  # 參數壞了就用原樣問（顯示用）
+            params = dict(node.params)
+        return list(step_cls.resolve_features(params))
+
+    def _still_referred(self, gone: List[str], skip: str) -> List[str]:
         out: List[str] = []
         for name in gone:
             where = feature_referrers(
                 name, self.nodes, score_expr=str(self.expr or ""),
-                decide=self.decide, skip=str(node_id))
+                decide=self.decide, skip=skip)
             if where:
                 out.append("“%s” is no longer produced — %s still refer%s to it."
                            % (name, " and ".join(where),
@@ -690,26 +803,41 @@ class RecipeModel:
         """
         if on == (self.decide is not None):
             return
+        if not on:
+            # 拿掉判定＝拿掉那張 Decision 卡（F123 期 1：兩者同生同滅，
+            # 刪卡那一支順手清 ``decide``）。一步復原。
+            cards = [nid for nid in self.node_order if nid in self.nodes
+                     and self.nodes[nid].step == DecisionStep.key]
+            with self.compound("use-decide"):
+                for nid in cards:
+                    self.remove(nid)
+                if self.decide is not None:
+                    self._push_undo()
+                    self.decide = None      # expr 留空＝沒有判定（F122）
+                    self._changed()
+            return
+        with self.compound("use-decide"):
+            self._use_decide_on()
+
+    def _use_decide_on(self) -> None:
         self._push_undo()
-        if on:
-            expr = str(self.expr or "").strip()
-            # **常數不是門檻**（U1，2026-08-24）—— 見 `is_a_constant_expression`。
-            # 這裡以前問的是「``expr`` 是不是空的」，而全新 recipe 的 ``expr``
-            # 是佔位值 ``"0"``，於是每一份新 recipe 都從一條 ``0 >= 0`` 開始。
-            real = expr and not is_a_constant_expression(expr)
-            rules = []
-            if real:
-                rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
-                                  bin=int(self.bins.get("above", 1)), label=""))
-            self.decide = DecideSpec(
-                let=[], rules=rules,
-                otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
-                score=expr if real else "")
-            self.expr = ""          # 並存是 error，所以這一格要清掉
-        else:
-            self.decide = None
-            if not str(self.expr or "").strip():
-                self.expr = "0"
+        expr = str(self.expr or "").strip()
+        # **常數不是門檻**（U1，2026-08-24）—— 見 `is_a_constant_expression`。
+        # 這裡以前問的是「``expr`` 是不是空的」，而全新 recipe 的 ``expr``
+        # 是佔位值 ``"0"``，於是每一份新 recipe 都從一條 ``0 >= 0`` 開始。
+        real = expr and not is_a_constant_expression(expr)
+        rules = []
+        if real:
+            rules.append(Rule(when="%s >= %g" % (expr, float(self.threshold)),
+                              bin=int(self.bins.get("above", 1)), label=""))
+        self.decide = DecideSpec(
+            let=[], rules=rules,
+            otherwise_bin=int(self.bins.get("below", 0)), otherwise_label="",
+            score=expr if real else "")
+        self.expr = ""          # 並存是 error，所以這一格要清掉
+        # 判定是一張卡（F123 期 1）：內容有了，畫布上那張也要在。
+        if not self.decision_node():
+            self.add_step(DecisionStep.key)
         self._changed()
 
     def _edit_decide(self, **kw) -> None:
@@ -765,7 +893,8 @@ class RecipeModel:
         if self.decide is None:
             return
         used = {r.bin for r in self.decide.rules} | {self.decide.otherwise_bin}
-        nxt = next(b for b in range(1, 1000) if b not in used)
+        # 用光了回 MAX_BIN，不拋 StopIteration（同 `_fresh_bin`，F122 補上這一支）。
+        nxt = next((b for b in range(1, 1000) if b not in used), MAX_BIN)
         self._edit_decide(rules=list(self.decide.rules) + [Rule("", nxt, "")])
 
     def remove_rule(self, i: int) -> None:
@@ -1038,7 +1167,71 @@ class RecipeModel:
             if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == s.name
                        for x in out):
                 out.append(s.name + self.FEATURE_LABEL_SEP + label)
+        if self._takes_data(upto_node):
+            # Output 卡（F124）：**全部列出**，流進這張卡的排前面、沒流進來的
+            # 排後面並註明 —— 跟 Decision 同一個規則（`decision_numbers`）。
+            out = self._flowing_first(out, str(upto_node))
         return out
+
+    def _takes_data(self, node_id: Optional[str]) -> bool:
+        """``node_id`` 是一張收資料線、但不是 Decision 的卡（Output）。"""
+        node = self.nodes.get(str(node_id or ""))
+        try:
+            takes = node is not None and bool(get_step(node.step).data_inputs)
+        except KeyError:
+            takes = False
+        return takes and node.step != DecisionStep.key
+
+    def _flowing_first(self, items: List[str], dst: str) -> List[str]:
+        """流進 ``dst`` 的數字在前；沒流進來的排後面，標題註明（F124）。
+
+        F123 期 2 是**只列**接進來的卡 —— 使用者：「Feature 就可以處理了，而且
+        可用的參數更多」。所以不藏，只排序：沒流進來的照樣挑得到（挑了之後
+        lint 提醒、給一顆「Connect」），只是它的那一組標題寫著它沒接上。
+        """
+        near, far = self._split_flowing(items, dst)
+        tag = strings.tr("not connected")
+        return near + [x + " · " + tag for x in far]
+
+    def _split_flowing(self, items: List[str],
+                       dst: str) -> Tuple[List[str], List[str]]:
+        """``(流進 dst 的, 沒流進來的)``，各自保持原順序。"""
+        from d4t.core.pipeline.recipe_schema import upstream_of
+
+        up = upstream_of(dst, self.edges) | {dst}
+        owners = self.feature_owners()
+        near: List[str] = []
+        far: List[str] = []
+        for x in items:
+            owner = owners.get(x.split(self.FEATURE_LABEL_SEP, 1)[0])
+            (near if not owner or owner in up else far).append(x)
+        return near, far
+
+    def decision_numbers_not_flowing(self) -> List[str]:
+        """**知道是誰的、而且沒流進** Decision 的數字名（給「建議一題」避開 ——
+        建議一個沒流進來的數字，等於建議一題馬上會被提醒的題目）。
+
+        問的是「確定沒流進來的」而不是「確定流進來的」：宿主餵的清單裡可能有
+        model 不認得來歷的名字（舊名字、測試餵的），那些不該因此被排掉。
+        沒有 Decision 卡就是空的。"""
+        nid = self.decision_node()
+        if not nid:
+            return []
+        far = self._split_flowing(self.labelled_features(), nid)[1]
+        return [x.split(self.FEATURE_LABEL_SEP, 1)[0] for x in far]
+
+    def decision_numbers(self) -> List[str]:
+        """判定的「插入數字 ▾」：**全部**的數字（F124）。
+
+        流進 Decision 的（它上游每一張卡記的，含量測卡以外那幾張順手記的）
+        排前面；沒流進來的排後面、那一組的標題註明 —— 挑得到，挑了會被提醒
+        （`decision-not-wired`，warning）。沒有 Decision 卡（手寫的 recipe）
+        就照原順序。
+        """
+        nid = self.decision_node()
+        if not nid:
+            return self.labelled_features()
+        return self._flowing_first(self.labelled_features(), nid)
 
     def feature_owners(self) -> Dict[str, str]:
         """特徵名 → 產出它的**節點 id**（幽靈線／淡線用，F24 ④）。
@@ -1066,7 +1259,10 @@ class RecipeModel:
             recipe = self.to_recipe()
         except Exception:  # 顯示層，壞了就不畫線
             return {}
-        return {b.spec.name: b.node_id
+        # 判定寫的數字（``score``、let、``decide_unanswered``）以前沒有卡可以指
+        # （owner 是 ""，畫布上找入口小卡）；F123 期 1 起它們屬於那張 Decision 卡。
+        decision = self.decision_node()
+        return {b.spec.name: (b.node_id or decision)
                 for b in bound_specs(recipe, self.kind)}
 
     def bound_feature_specs(self) -> List[Any]:
@@ -1740,9 +1936,15 @@ class RecipeModel:
         m.nodes = {nid: RecipeNode(id=nid, step=n.step, params=dict(n.params),
                                    enabled=n.enabled)
                    for nid, n in recipe.nodes.items() if nid in set(m.node_order)}
-        m.expr = recipe.score.expr
-        m.threshold = float(recipe.score.threshold)
         m.decide = getattr(recipe, "decide", None)
+        # **常數的分數不是判定**（F122，UI 層的遷移 —— 同 `_adopt_threshold_as_a_tree`）：
+        # 以前 Studio 存出來的「還沒加判定」的 recipe 帶著佔位值 ``"0"``，畫面說
+        # 「沒有判定」、引擎卻把每一顆分進 bin 1。打開就照畫面改成空的，存檔
+        # 寫的就是畫面上那一份（CLAUDE.md §1：存出跟畫面不一樣的東西才是說謊）。
+        m.expr = ("" if m.decide is None
+                  and is_a_constant_expression(recipe.score.expr)
+                  else recipe.score.expr)
+        m.threshold = float(recipe.score.threshold)
         # 分流與**沒在編的那幾條 route**（F23 期2）：原樣抱著，`to_recipe`
         # 合併回去。共用的節點在 `m.nodes`（上面那行收了），這裡只留其他
         # route 專屬的。
@@ -1756,6 +1958,10 @@ class RecipeModel:
                           if nid not in in_route}
         m._other_edges = [e for e in (recipe.edges or [])
                           if not (e.src in in_route and e.dst in in_route)]
+        if m.decide is None and not str(m.expr).strip():
+            # 沒有判定就沒有那張卡（F123 期 1：兩者同生同滅）—— 第 6 版遷移會替
+            # 一份帶著佔位分數 ``"0"`` 的舊檔案補一張，而那個佔位值上面剛清掉。
+            m._drop_decision_cards()
         m.bins = dict(recipe.score.bins)
         # 區域線推回它落在的那一格（F42 B2）。**只填不清** —— 舊檔案的區域
         # 參數還沒有線，那一格是它唯一的儲存（見 :meth:`_hydrate_regions`）。
@@ -1788,8 +1994,21 @@ class RecipeModel:
         self.route_by = None
         self._changed()
 
-    def validate(self):
-        return validate(self.to_recipe(), kind=self.kind)
+    def validate(self, data: Any = None):
+        """健檢。``data`` ＝ **現在開著的資料**（一份 `Dataset`；只給型別字串也行）。
+
+        給了就照「這份 recipe 在這份資料上會跑哪一條（F121 期 1）、那條上的卡
+        對這份資料講不講得通（一顆幾張、有沒有 KLARF —— F121 期 3，
+        `Step.data_issues`）」來檢查 —— 那正是開跑前要問的。以前這裡一律拿
+        ``self.kind``（正在編的 route 鍵），於是一份 `ebi_patch` 的 recipe 開在
+        一個影像資料夾上時健檢說「沒問題」，跑下去每一顆都錯。沒有資料時退回
+        ``self.kind``。
+        """
+        if data is None or isinstance(data, str):
+            return validate(self.to_recipe(), kind=data or self.kind)
+        return validate(self.to_recipe(),
+                        kind=str(getattr(data, "kind", "") or self.kind),
+                        data=data_profile(data))
 
 
 # ---------------------------------------------------------------------------

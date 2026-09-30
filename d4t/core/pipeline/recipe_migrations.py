@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import replace
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from d4t.core.log import swallowed
 
@@ -32,7 +32,10 @@ from .recipe_schema import (
 from .step import (
     FEATURE_TYPES,
     IMAGE_TYPES,
+    NUMBERS,
     REGISTRY,
+    RESULTS,
+    SCALE_LOT,
     SINGLE_IMAGE_KINDS,
     Step,
 )
@@ -67,29 +70,74 @@ def describe_migration(raw: Any, recipe: Any) -> List[str]:
         old_version = _as_int(raw.get("version", 1), "recipe 'version'")
     except Exception:  # 只是一句提示，不准擋載入
         return says
-    if old_version >= RECIPE_VERSION:
-        return says
 
-    raw_edges = raw.get("edges") or []
-    added = len(getattr(recipe, "edges", []) or []) - len(raw_edges)
-    if added > 0:
-        says.append("added %d wire%s" % (added, "" if added == 1 else "s"))
-
+    # 補線、拆出新卡 —— 那幾道遷移都掛在版本閘底下，所以只問舊版本的檔案
+    # （目前版本的檔案沒被那幾道碰過，不該講話）。
     raw_nodes = raw.get("nodes") or {}
+    if old_version < RECIPE_VERSION:
+        raw_edges = raw.get("edges") or []
+        # 第 8 版那一道（F124）會**拿掉**幾條：從不再送得出數字的卡拉進 Decision／
+        # Output 的線。只數那一種 —— 其他遷移改埠名的線在新舊兩邊各算一次，
+        # 用集合相減會把一次改名講成「加一條、拿一條」。
+        new_set = {tuple(e.to_json()) for e in (getattr(recipe, "edges", []) or [])
+                   if hasattr(e, "to_json")}
+        dropped = [e for e in raw_edges
+                   if isinstance(e, (list, tuple)) and len(e) == 4
+                   and e[1] == NUMBERS and tuple(e) not in new_set]
+        added = (len(getattr(recipe, "edges", []) or [])
+                 - (len(raw_edges) - len(dropped)))
+        if dropped:
+            says.append("took off %d wire%s from cards that do not measure"
+                        % (len(dropped), "" if len(dropped) == 1 else "s"))
+        if added > 0:
+            says.append("added %d wire%s" % (added, "" if added == 1 else "s"))
+        if isinstance(raw_nodes, dict):
+            new_ids = [nid for nid in (getattr(recipe, "nodes", {}) or {})
+                       if nid not in raw_nodes]
+            # 補上來的 Decision 卡不是「拆出來的」（F123 期 1）：判定一直都在，
+            # 只是以前不是一張卡。那一句要講它是什麼。
+            decided = [nid for nid in new_ids
+                       if getattr(recipe.nodes[nid], "step", "") == "decision"]
+            if decided:
+                says.append("put the decision on the canvas as a card")
+            extra = len(new_ids) - len(decided)
+            if extra > 0:
+                says.append("split %d card%s"
+                            % (extra, "" if extra == 1 else "s"))
+
+    # **換卡不看版本號**（F121 期 2，2026-09-24）：有幾道換卡看的是「舊東西在
+    # 不在」（`load_single` → Input），對**目前版本**的檔案一樣會動手 —— 以前
+    # 這裡整段被「目前版本就不用講」擋掉，那幾次升級因此是安靜的。比對前後對
+    # 沒被換過的卡講不出任何一句話，所以不會多出雜訊。
     if isinstance(raw_nodes, dict):
-        new_nodes = getattr(recipe, "nodes", {}) or {}
-        extra = len(new_nodes) - len(raw_nodes)
-        if extra > 0:
-            says.append("split %d card%s" % (extra, "" if extra == 1 else "s"))
-        swapped = sorted(
-            {str((raw_nodes.get(nid) or {}).get("step", ""))
-             for nid, node in new_nodes.items()
-             if nid in raw_nodes
-             and str((raw_nodes.get(nid) or {}).get("step", ""))
-             not in ("", str(getattr(node, "step", "")))})
-        if swapped:
-            says.append("renamed %s" % ", ".join("“%s”" % k for k in swapped))
+        became: Dict[str, str] = {}
+        for nid, node in (getattr(recipe, "nodes", {}) or {}).items():
+            old = str((raw_nodes.get(nid) or {}).get("step", "")) \
+                if isinstance(raw_nodes.get(nid), dict) else ""
+            new = str(getattr(node, "step", "") or "")
+            if old and new and old != new:
+                became.setdefault(old, new)
+        if became:
+            says.append("renamed %s" % ", ".join(
+                "“%s” → “%s”" % (_card_word(old), _card_word(new))
+                for old, new in sorted(became.items())))
     return says
+
+
+#: 已經不在卡片庫裡、但舊檔案還寫著的卡 → 使用者當時在畫面上看到的名字。
+#: 升級的那一句話要講**他認得的字**（「SEM image」），不是 recipe 的鍵。
+_RETIRED_CARD_LABELS = {
+    "load_single": "SEM image",     # F121 期 2 併進 Input（`load_patch`）
+}
+
+
+def _card_word(key: str) -> str:
+    """一張卡在升級提示裡叫什麼：卡片庫裡有就用它的 label，退役的查上表，
+    都沒有就原樣（認不得的 key 本身就是線索，不要猜一個漂亮的名字）。"""
+    cls = REGISTRY.get(key)
+    if cls is not None:
+        return str(getattr(cls, "label", "") or key)
+    return _RETIRED_CARD_LABELS.get(key, key)
 
 
 def _migrate_region_params_into_edges(
@@ -355,7 +403,8 @@ _SINGLE_IMAGE_KINDS = SINGLE_IMAGE_KINDS
 
 
 def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
-                              routes: Dict[str, List[str]]) -> None:
+                              routes: Dict[str, List[str]],
+                              version: Any = 1) -> None:
     """單張影像那條 route 上的 ``load_patch`` → ``load_single``（F11 Input-4）。
 
     為什麼需要這一道
@@ -370,6 +419,14 @@ def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
     而它上面有一張 ``load_patch``。不是靠「新東西不在」—— 那分不出「舊檔案」與
     「新 recipe 剛好沒填」。
 
+    ⚠ **F121 期 2（2026-09-24）起這一道只對第 1 版的檔案跑**（``version``）。
+    `load_single` 併回 `load_patch`（「Input」）之後，「單張 route 上有一張
+    `load_patch`」變成**新檔案的正常樣子** —— 那個「舊東西」不再只屬於舊檔案，
+    再照它判斷的話，每一次 `to_json_dict → from_json_dict` 都會把 Input 卡換成
+    `load_single(out="test")`、再被下一道換回 `load_patch("1:test")`，名字表從
+    `1:single` 變成 `1:test`，下游的線全斷（鐵則 9 的形狀）。拆卡（F11，08-17）
+    早於第 2 版（F42 B3，08-27），所以第 2 版以上的檔案一定已經拆過了。
+
     ⚠ **兩條 route 可以共用同一個節點**，而 v1 的雙輸入 recipe 正是那樣寫的
     （``dual_route_basic.json`` 的 ebi_patch 與 rsem 共用九個節點裡的八個，
     包含那張 load 卡）。就地換掉共用的那一張會**把另一條 route 弄壞** ——
@@ -377,6 +434,8 @@ def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
     但這顆有 2 張」）。所以共用的情況要**多開一個節點**給單張那條 route 用，
     而不是改掉大家的那一張。
     """
+    if _as_int(version, "recipe 'version'") >= 2:
+        return
     single = [k for k in routes if str(k) in _SINGLE_IMAGE_KINDS]
     if not single:
         return
@@ -405,6 +464,145 @@ def _migrate_split_load_cards(nodes: Dict[str, "RecipeNode"],
                 nodes[nid] = RecipeNode(id=node.id, step="load_single",
                                         params={"out": "test"},
                                         enabled=node.enabled)
+
+
+def _migrate_decision_into_a_card(nodes: Dict[str, "RecipeNode"],
+                                  routes: Dict[str, List[str]],
+                                  decide: Optional["DecideSpec"],
+                                  score: "ScoreSpec") -> None:
+    """有判定的舊檔案 → 畫布上補一張 Decision 卡（F123 期 1）。
+
+    **只對第 5 版以前的檔案**（`Recipe.from_json_dict` 的版本閘；鐵則 9：第 6 版
+    起「有判定就有那張卡」是存檔時就成立的事，所以不能拿「卡不在」當判準 ——
+    一份手寫的新 recipe 刻意沒有那張卡，不該被補）。
+
+    有判定＝有 ``decide``，或舊的分數門檻（`recipe_schema.legacy_decision` 會把它
+    變成一題樹）。卡排在每一條 route 上**第一張 Output 卡的前面**：沒有線的卡照
+    route 的排列跑、也照它排版，而判定在量測之後、Output 之前。卡沒有參數，判定
+    的內容照舊住在 ``decide`` —— 所以引擎算出來的數字一個都不變。
+    """
+    if decide is None and not str(getattr(score, "expr", "") or "").strip():
+        return
+    if any(n.step == "decision" for n in nodes.values()):
+        return
+    nid = _fresh_id(nodes, "decision")
+    nodes[nid] = RecipeNode(id=nid, step="decision", params={})
+    for key, order in routes.items():
+        at = next((i for i, x in enumerate(order)
+                   if x in nodes and getattr(REGISTRY.get(nodes[x].step),
+                                             "scale", "") == "lot"),
+                  len(order))
+        routes[key] = list(order[:at]) + [nid] + list(order[at:])
+
+
+def _migrate_measured_lines(recipe: Any) -> None:
+    """送去判定、送去寫出的線（F123 期 2 開的頭，F124 定的形狀）。
+
+    **只對第 7 版以前的檔案**（`Recipe.from_json_dict` 的版本閘，鐵則 9 —— 第 8 版
+    起線是使用者拉的，一份刻意沒接某張卡的新 recipe 不該被補）。三步：
+
+    1. **拿掉從不再送得出數字的卡拉出來的數字線**（F124：只有量測卡有那顆埠；
+       第 7 版的檔案可能有 Normalize／Input → Decision 那種線）。判準是「舊東西
+       在」：一條 ``numbers`` 資料線、來源那張卡的 `Step.data_output` 已經不是
+       ``numbers``。
+    2. **判定問到的數字要流得進 Decision**：產出它的卡不在 Decision 上游，就從
+       `data_lines.feeder`（它自己，或它下游第一張量測卡）補一條線。沒有路可流的
+       留給 lint 講（`decision-not-wired`，warning）。
+    3. **每一張 Output 都要有東西流進來**：一條線都沒有的，有 Decision 就從
+       Decision 接；沒有就從每一張量測卡接。
+
+    F123 的版本（第 7 版）另外給「以前寫得出去、補完之後不在上游的卡」各補一條
+    直接接 Output 的線 —— F124 起 Output 寫整張表，那幾條不再需要，所以不補。
+    在 `Recipe` 組好之後跑：「誰產出哪個數字」只有一份答案（`bound_specs`），而它
+    要一份完整的 recipe。只動線，不動任何卡片或參數 —— 引擎算出來的數字不變。
+    """
+    from .data_lines import feeder
+    from .recipe_schema import is_data_edge, upstream_of
+    from .recipe_validate import referenced_features
+    from .verdict_features import bound_specs   # 延後：它 import recipe
+
+    nodes, edges = recipe.nodes, recipe.edges
+
+    def sends(nid: str) -> bool:
+        node = nodes.get(nid)
+        cls = REGISTRY.get(node.step) if node is not None else None
+        if cls is None:
+            return False
+        try:
+            return cls.data_output(cls.validate_params(node.params)) == NUMBERS
+        except Exception:  # 參數壞了由 bad-param 講
+            return False
+
+    edges[:] = [e for e in edges
+                if not (e.src_out == NUMBERS and is_data_edge(e, nodes)
+                        and e.src in nodes and not sends(e.src))]
+
+    owners: Dict[str, Set[str]] = {}
+    for kind in recipe.routes:
+        try:
+            specs = bound_specs(recipe, kind)
+        except Exception:  # 壞掉的 route 由 lint 講；這裡只是少補幾條線
+            swallowed("recipe_migrations._migrate_measured_lines")
+            continue
+        for b in specs:
+            if b.node_id:
+                owners.setdefault(str(b.spec.name), set()).add(b.node_id)
+    have = set(edges)
+
+    def add(edge: "Edge") -> None:
+        if edge not in have:
+            edges.append(edge)
+            have.add(edge)
+
+    decision = next((nid for nid, n in nodes.items() if n.step == "decision"), "")
+    if decision:
+        for name in sorted(referenced_features(recipe)):
+            for owner in sorted(owners.get(name, ())):
+                if owner in upstream_of(decision, edges):
+                    continue
+                via = feeder(recipe, owner)
+                if via and via != decision:
+                    add(Edge(via, decision, NUMBERS, NUMBERS))
+    senders: List[str] = []
+    for order in recipe.routes.values():
+        senders.extend(n for n in order if n not in senders and sends(n))
+    for out in sorted(nid for nid, n in nodes.items()
+                      if getattr(REGISTRY.get(n.step), "scale", "") == SCALE_LOT
+                      and RESULTS in getattr(REGISTRY.get(n.step),
+                                             "data_inputs", ())):
+        if any(e.dst == out for e in edges):
+            continue
+        if decision:
+            add(Edge(decision, out, RESULTS, RESULTS))
+        else:
+            for w in senders:
+                add(Edge(w, out, NUMBERS, RESULTS))
+
+
+def _migrate_single_into_input(nodes: Dict[str, "RecipeNode"]) -> None:
+    """``load_single``「SEM image」→ ``load_patch``「Input」（F121 期 2）。
+
+    使用者 2026-09-24 同意把兩張 Input 卡合回一張（「入口簡單化」）。
+    `load_single(out="x")` 與 `load_patch(channel_map="1:x")` 在一顆一張的資料上
+    像素與特徵逐一相同（實測），所以換卡**不動節點 id、不動流名**：
+    ``recipe.edges`` 上的埠名照樣對得上，一條線都不用改。其餘參數
+    （``nm_per_px`` / ``carry`` / ``only_*``）兩張卡同名同義，原樣帶過去。
+
+    判準是「**舊東西在不在**」（鐵則 9）：節點的 step 是 ``load_single`` 就換。
+    換完之後不再有 ``load_single``，所以跑第二次是 no-op。
+    ⚠ **排在 :func:`_migrate_split_load_cards` 之後**：那一道（只對第 1 版）會
+    產出 ``load_single``，而這一道要把它接著換掉 —— 遷移鏈一段一段接。
+    """
+    for nid, node in list(nodes.items()):
+        if node.step != "load_single":
+            continue
+        params = dict(node.params)
+        # 空的 ``out`` 在 `load_single` 上是「一條流都不吐」—— 那張卡本來就跑不動，
+        # 換成預設名是讓畫布上至少有一顆埠可以接，而不是造出一張沒有埠的卡。
+        out = str(params.pop("out", "single") or "").strip() or "single"
+        params["channel_map"] = "1:%s" % out
+        nodes[nid] = RecipeNode(id=node.id, step="load_patch", params=params,
+                                enabled=node.enabled)
 
 
 def _migrate_merged_cards(nodes: Dict[str, "RecipeNode"]) -> None:
@@ -1464,8 +1662,13 @@ def _migrate_rescued_feature_names(nodes: Dict[str, "RecipeNode"],
 
     # ⚠ 這裡以前還有一條「改寫 `feature_math` 節點的算式」。那張卡 2026-08-27
     # 刪掉了（Phase 3），而帶著它的舊 recipe 開起來是一條 `unknown-step` ——
-    # **跑不起來的 recipe 沒有必要幫它改名**。判定段的算式（`let` / 樹）走
-    # `_migrate_decide_renames`，那一條還在。
+    # **跑不起來的 recipe 沒有必要幫它改名**。
+    #
+    # 判定段（`decide` 的 `let` / 樹）**這一道不改**，而那是對的：這個前綴規則
+    # （F17-②，2026-08-21）比判定段（F21-D，2026-08-23）早出生，存得出判定段的
+    # 檔案一開始就是新前綴。這裡以前寫「走 `_migrate_decide_renames`，那一條還在」
+    # —— 那支函式從來不存在（F122 查到的）；判定段唯一的改名遷移是
+    # `_rename_in_decide`（相對量改叫 `cmp_*` 那一張表）。
     expr = str(getattr(score, "expr", "") or "")
     new_expr = swap(expr)
     return score if new_expr == expr else replace(score, expr=new_expr)

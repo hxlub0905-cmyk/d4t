@@ -28,6 +28,398 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F124 期 4：丟在卡上就好的拉線（2026-09-30）
+
+使用者：「繼續」。紀錄在計畫書 §11。F124 四期都做完。
+
+* `ui/link_drop.py`：丟在埠上接那一顆；只有一格就直接接；兩格以上跳小選單問
+  （會取代哪一條也寫出來）；取消＝不接。以前丟在卡上沒丟準會安靜地挑高度最近的
+  那一格 —— Compare 的 a／b 看丟的高低。
+* 選單可關（`link_drop.ASK`，conftest 關掉）＋ `CHOOSE` 讓測試代替使用者挑。
+* 整套 311 個檔案一次全綠。
+
+## F124 期 3：線不從卡背後穿過、整理照流排（2026-09-30）
+
+使用者：「繼續」。紀錄在計畫書 §10。
+
+* 往前走的線碰到夾在中間的卡就從上方的空隙繞過去（`ui/edge_route.py`）；繞行的
+  垂直那段落在埠名外面、一顆輸入埠一條道。
+* 排版搬進 `ui/layout.py`：沒有入口的卡是起點（Pair source 疊在 Input 下面）；
+  最後一列只剩 Output 時排到它上游那一欄下面，不再孤零零換到最左邊。
+* 整套跑出五個紅檔，全是這一期改的形狀：文件樹少兩支新模組、測試用的假卡沒有埠
+  資訊被當成起點（起點改成「沒有入口**也不讀東西**」）、兩條形狀測試的容許值、
+  停在線上的卡（線現在會繞開，拆成兩條）。
+
+## F124 期 2：畫布的樣子（2026-09-30）
+
+使用者選了 A（欄距加寬、埠名放得下）。紀錄在計畫書 §9。
+
+* 資料埠寫 `measured` / `classified`（`wording.port_word`，recipe 的鍵不動）。
+* 欄距 116 → 156、埠名寬 52 → 74、小一號字；原樣送出又沒接線的埠畫小畫淡。
+* 問題清單上多一顆「Connect ＿」，走跟手拉的線同一條路、一步復原。放在問題
+  清單而不是判定面板 —— 那是「有什麼問題」唯一的家。
+* 整套測試只紅一條：四欄從 1,044 變 1,284px，超過「塞得進工作區」那條的 1,200
+  （門檻改 1,300、寫了理由）。
+
+## F124 期 1：流進 Decision 的東西（2026-09-30）
+
+使用者：「繼續」。紀錄在計畫書 §8。
+
+* 送去判定的埠只長在量測卡上（`Step.measures`）；判定問得到 Decision 上游每一張卡
+  的數字，問到沒流進來的卡是 warning ＋ `Issue.connect`（期 2 那顆鈕用）。
+* Output 寫整張表、Write charts 回到每一張 GLV；「插入數字 ▾」全部列出，沒流進來的
+  排後面註明。
+* 第 8 版遷移取代第 7 版那一道；出貨 recipe 存第 8 版，uniformity 的 `numbers` 卡改名
+  `report`（副標會被讀成數字線）。
+* 抓到的一件：量測卡以外沒有送出去的埠之後，**只有影像卡的 recipe** 的 Output 永遠
+  接不上 —— `output-not-connected` 在那種 recipe 上不講。
+
+## F124 開案：畫布是一條從頭接到尾的資料流（2026-09-29）
+
+使用者看完 F123 的畫布：「我現在又覺得有數字線很奇怪」。沒有動程式，來回五輪、
+每一輪都截示意圖（臨時腳本改畫法，repo 沒動），最後六張說「可以」。計畫書
+`docs/plans/F124-measured-flow.md`；F123 搬進 `docs/history/plans/`（期 2 的規則由
+F124 修正，其餘三期照留）。
+
+* **定調**（計畫書 §1 五句話）：畫布描述資料流、中間不能斷（Output、Decision 都要有
+  線進來）；但線不准限制判定問得到哪些數字 —— feature 用名字就找得到，而且全部都該
+  能當 ADC 的 attribute。
+* **結論**：線只講「流到哪裡」。送去判定的埠只長在量測卡（GLV、CD、Focus index、
+  H2H）；流過去的是整顆 defect，上游每一張卡順手記的數字跟著走；問到沒流進來的卡
+  → 提醒＋一顆「Connect」，不擋。
+* **逐張看卡時找到、F123 沒發現的**：① Output 的排除式判準碰到「量測卡沒有數字埠」
+  會把量測欄位全排掉（報表安靜地少欄）—— 期 1 必改；② 丟在卡上沒丟準埠時
+  `in_param_at` 安靜地挑高度最近的那一格（Compare 的 a／b 看丟的高低）；
+  ③ rsem-worst-box 的 Input → GLV 從 ROI 卡背後穿過，看起來像 ROI 吐出來的；
+  ④ `USING-CHARACTERIZATION.md` §3.1 還寫著「Output 段不用接線」；⑤ one-image-uniformity
+  的 Write report id 叫 `numbers`，副標會被讀成數字線。
+* **中途推翻過的提案**（留著，下次有人想「再簡化一點」時先看）：右邊合併成一個出口
+  （Input 多 channel、ROI 一個區域三個名字、Align 吐兩條 → 一半的卡每拉一次都要選）；
+  左邊的埠名平常不印（F10／F68 修過的 a／b、量測／參考區域會回來）；區域線改同色
+  （U20 量過：50% 縮放下虛實分不出來）。
+
+## F123 期 4：線的顏色照資料種類（2026-09-29）
+
+使用者：「繼續」。紀錄在計畫書 §9。
+
+* 影像線一個中性色、數字／結果線 ADC 紫；區域線照選項原文「維持」（它是那個區域
+  自己的顏色）。舊的「線帶著來源卡的階段色」（F13-⑤）那條測試改寫成新規則。
+* 「這條從哪裡來」改成滑鼠停在線上時，它與上游整條路徑亮起來、其他淡掉。
+* 換行的線沿列與列之間的空隙繞，不再斜穿過卡（截圖上那條穿過 Write charts 的
+  結果線）。守它的測試第一版用了 `QPainterPath.intersects`，而那一支看的是**填滿
+  的面積** —— 開放的折線被自動閉合成一大塊，新舊都「壓到」；改成描邊之後才量得
+  出差別（舊的穿、新的不穿）。
+* 規模尺：`canvas.py` 3,199 → 3,263（簽）。
+* F123 四期都做完；計畫書等使用者看過畫布再搬進 history。
+
+---
+
+## F123 期 3：Output 自己的輸入（2026-09-29）
+
+使用者：「繼續」。紀錄在計畫書 §8。
+
+* **Write comparison 的左右兩張圖是真的影像埠**，照線拿那一張卡當時吐的那一份
+  （`engine.image_through_line`）。以前照名字撿「最後一個寫這個名字的人」——
+  畫布上接 Input 的 `test`，拿到的是後面 Tone 改過的那張（測試釘住了）。
+* **Write charts 不另開「boxes」線**：它只畫上游 GLV 量的框（`glv_hist` 記下
+  是哪一張卡），跟第 2 期「Output 寫線上游的東西」同一條規則；兩條 charts lint
+  也只看上游。
+* Output 卡用名字吃的數字不在上游 → `output-number-not-upstream`（warning，
+  那一欄會整排空白）；設定欄的清單只列上游的。
+* 文件：USING-CHARACTERIZATION（兩顆埠、結果線要接）、USING-UNIFORMITY（拉一條
+  線進 Write charts）。
+
+---
+
+## F123 期 2：數字線與結果線（2026-09-29）
+
+使用者：「繼續做第二期」；中途「附上畫布截圖」。三個答案見計畫書 §1，設計在 §6。
+
+* **core**（`data_lines.py`，新）：埠由卡片宣告（`Step.data_inputs` / `data_output`），
+  `is_data_edge` 看下游那顆埠 —— 跟 `is_region_edge` 同一個形狀，線照舊住
+  `recipe.edges`。lint：`decision-not-wired`（error，數字線必要）、
+  `output-not-connected`、`needs-decision`（Write KLARF）、`data-port-mismatch`、
+  `decide-without-card`。**引擎一個數字都沒動**：必要性靠 Studio／CLI 在 error 時
+  不跑來守。
+* **Output 寫的是線上游的東西**（`rows_for_output`）：上游沒有 Decision 就沒有
+  score／bin；判準是**排除**（屬於不在上游的卡的數字拿掉、認不出是誰的留著）。
+  ⚠ 「上游」只沿**線**走：靠名字隱式綁的影像流不算 —— 從舊檔案遷移上來的不受影響
+  （第 3 步替每一張寫數字、但不在上游的卡補一條直接的線），記憶體裡手組的 recipe
+  要把線畫出來（十幾支測試因此補線）。
+* **第 7 版遷移** `_migrate_data_lines`：判定問到的卡補數字線、Decision 補結果線、
+  以前寫得出去但不在新上游裡的卡補直接的線。出貨三份存成第 7 版；doctor 6 → 7。
+* **畫布**：紫色方埠（數字／結果），`numbers` 標籤小一號放得下；拉線的第三條岔路
+  `edit_plan._plan_data`（擋得住的四件事各講一句話）、剪一條就是一條
+  （`canvas_edges`）、刪卡不提議補資料線；`card_menu` 列得出資料線能接到哪；
+  「插入數字 ▾」與樹的起手建議只列接進 Decision 的卡（`decision_numbers`、
+  `suggest_condition(allowed=)`）。
+* 全套抓到的一個真的：一份 recipe 多一張同名的 GLV 時，`glv_max` 的值來自新的
+  那一張，而判定問的正是它 —— 那張沒接進 Decision，新規則當場擋下（以前是一條
+  「撞名」的 warning，跑下去用的是另一張卡的數字）。
+* 規模尺：`recipe.py` 653 → 659、遷移道數 24 → 25、`canvas.py` 3,154 → 3,193（簽）；
+  `studio.py` 4,186 → 4,168、方法 191 → 190（判定摘要搬進 `tree_scene`）。
+* 還沒做：Tidy up 換行之後結果線會從右上拉回左下、穿過別的卡（期 4 一起看）。
+
+---
+
+## F123 期 1：Decision 變成一張真的卡（2026-09-29）
+
+使用者：「我會覺得對畫布來說很奇怪，不管是 ADC card 或者是 Output card 的定位
+（理論上 input = output）」→ 看了做法 A 的截圖 →「我想直接做 B」。計畫書
+`docs/history/plans/F123-decision-and-output-cards.md`；三個問題的答案在它的 §1。
+
+* **core**：註冊 `decision`「Decision」（ADC 段、沒有參數、`run` 是 no-op ——
+  判定照舊在整條 pipeline 跑完之後由引擎算）。內容仍住在 `recipe.decide`（搬進卡的
+  參數要改一百多處引用，而那件事使用者看不到）。第 6 版遷移補卡，版本閘拆成
+  `< 5` / `< 6`（鐵則 9：第 5 版以前那三道**不能**對第 5 版的檔案再跑一次）。
+  停用那張卡＝不判；一份 recipe 最多一張（`duplicate-decision`）。
+* **卡與內容同生同滅，只在 model 一處**：`add_step("decision")` 沒有判定就給一個
+  空的、`remove` 那張卡拿掉判定、`use_decide(True/False)` 補卡／刪卡 —— 都是一步
+  復原。開檔時沒有判定（例：佔位分數 `"0"` 被清掉）就不留那張卡。
+* **畫布**：淡紫虛線框、入口小卡、卡片庫的 `__score__` 偽卡**拿掉**。樹掛在
+  Decision 卡底下（根對齊卡的中線、排在所有卡片下面，一條線從卡接到根）；拖卡樹
+  跟著走（就地搬、不重建 —— F50 的殘影那一條）；雙擊卡收合／展開；單擊卡右邊是
+  判定面板。刪卡先問（`canvas_edges._drop_the_tree`，原本 ✕ 那一句）。判定的 lint
+  走**跟每一張卡同一條路**（`_node_problems` 把 `DECISION_ISSUE_CODES` 掛到那張卡）
+  —— 另抄的 `_decision_problem` 與 `_EntryItem._paint_badge` 跟著拿掉。
+* `feature_owners`：let／`score` 的來源從空字串（找入口小卡）改成那張卡的 id，
+  幽靈線因此指回一張真的卡。`measurement_signature` 不算 ADC 段的卡（停用 Decision
+  只改判定，Re-run 秒級重判就夠）；`decision_signature` 算它的開關。
+* 三份出貨 recipe 存成第 6 版；`tools/doctor.py` 的 `RECIPE_VERSION` 字面值 5 → 6
+  （那一份是刻意抄的，`test_offline_tools` 比對）。
+* 規模尺：`recipe.py` 650 → 653、遷移道數 23 → 24（簽）；`studio.py` 4,236 → 4,186、方法 192 → 191、`canvas.py` 3,163 → 3,154（跟著降）。
+* 全套抓到的三個真洞（不只是斷言要改）：開舊門檻檔時畫布摘要停在「no decision
+  yet」（卡已經被遷移補上，`add_step` 回舊卡就不通知）；加判定時直接改
+  `selected_node`，儀表板那句「showing X — the card picked last」因此說錯是誰的；
+  `describe_migration` 對沒有 `.step` 的節點會炸（它只是一句提示，不准擋載入）。
+* 還沒做：Decision 卡上寫著「(not connected)」—— 它現在真的沒有線；期 2 給它
+  「numbers」入埠與「results」出埠之後那一行就是線上的字。
+
+---
+
+## F122 期 4：CLI 的 export 照卡片寫（2026-09-29）
+
+使用者：「繼續期4」。
+
+* `d4t export <run_id>` 預設**跑那一輪 recipe 上的 Output 卡**（同 Studio 的
+  「Write outputs」）；`--dry-run` 列每一張卡的去處與檔名（`Step.destination`，
+  跟 `run_batch` 走同一支）。`--csv` / `--excel` / `--klarf-out` 照舊是一次性的
+  出口、不看卡片 —— 沒拿掉，因為那是廠內可能已經寫進腳本的東西（「不確定的時候
+  先收起來」那一條的精神：不刪會被用到的路，只把預設換成對的那一條）。
+* `run` 的「開資料」與「講寫了什麼」兩段抽成 `_open_data` / `_report_batch`，
+  兩個命令共用（`export` 也吃 `--raw` / `--gds` / `--source` / `--cache`）。
+* 期 3 的全套跑出一個紅：`_positive_bins_of_run` 的 `except Exception` 沒留痕
+  （鐵則 7 的 `swallowed`）—— `test_core_log` 抓到，補上。
+
+---
+
+## F122 期 3：ADC 的方向（2026-09-29）
+
+使用者：「繼續期3」。表在計畫書 §5。
+
+* **舊門檻那條路退役**。沒有做成「讀檔時遷移成樹」—— 那會讓幾十支用舊格式
+  當填充的測試的來回比對全部改寫，而**要退役的是算法不是格式**：磁碟上那個
+  `score` 區塊永遠要讀得進來。所以做成「引擎在判定那一刻換成一模一樣的一題樹」
+  （`recipe_schema.legacy_decision`：`score >= 門檻`；分數在判定之前算，期 1
+  那一刀正好讓這一題問得到它）。CLI rescore 的第三份門檻比法、Studio 開檔的轉換
+  （以前是 `use_decide` 出來的 `expr >= thr` 規則，跟引擎不同形狀）、宣告層都叫
+  同一支。
+* **黃金值重凍了一次，而且要講清楚**：分數、bin、每一個量測數字逐項相同；每一顆
+  多一欄 `decide_unanswered = 0`（兩份 fixture recipe 是舊格式，現在走判定樹，而
+  判定樹一定寫那一欄）。當初答使用者的是「黃金值不動」—— 數字沒動，欄位多一格。
+* Studio 分數直方圖上的門檻線整族拿掉（`studio.py` 4,293 → 4,236、方法 197 → 192、
+  `self.*` 266 → 261）。它在期 1 之後只剩「還沒有判定」的 recipe 走得到，而那時候
+  拖一條線什麼都不決定。
+* 一個名字：「Score / Bin」→「Decision」、「Verdict」→「Class」、名詞表收成四個字。
+* 紅色菱形：那一題用到沒有人產出的數字。
+* 「判成真的」看 outcome（`decide_tree.called_real`；沒標的照舊 `bin != 0`）。
+* 沒做：CLI `export` 照卡片寫（期 4）；畫布上 Output 的位置（期 5，等使用者）。
+
+---
+
+## F122 期 2：Output 安靜做錯／擋錯的八件（2026-09-29）
+
+使用者：「繼續」。表在計畫書 §4，這裡記決定與沒想到的。
+
+* **「Write to」空著＝資料旁邊的預設**（每張卡一個名字：`d4t_report` /
+  `d4t_comparison` / `d4t_charts`；Write KLARF 是原檔旁的 `_adc` / `_top`，in place
+  是原檔）。以前那是一條 error，**擋住試跑** —— 而試跑根本不寫。
+* **Write KLARF 在沒有 KLARF 的資料上**：開資料時卡上一條 warning、寫的時候跳過並講、
+  其他輸出照寫（使用者定的）。預設路徑的規則住 `klarf_out.default_output_path`：
+  第一版寫成 `get_step("output_klarf").default_path(...)`，規模尺抓到「UI 按卡片名字
+  分支」多了兩處 —— 改成問 export 那一層就一處都不多。
+* **Write outputs 對簽章**：量測改了（「Run again」）或判定改了（「先按 Re-run」）
+  就拒寫。底稿搬進 `RunController.snapshot`，`studio.py` 因此 −9。
+* Studio 寫的時候帶快取；試跑子集寫完講「N of M」。
+* lint：`output-collision`（error，比檔名不比資料夾）、`stale-stream-ref`
+  （warning，通用鉤子 `Step.optional_streams_in`）。
+* CLI 0 顆就停（`uniformity_charts/` 落在 cwd 那一個 —— 建資料夾的其實是 Write report）。
+* 規模尺：`inspectors.py` 1,733 → 1,745（簽了，Write KLARF 儀表的兩件內容）；
+  `studio.py` 4,302 → 4,293（兩格一起降）。
+* 黃金值三份逐項相同；typecheck 128；ruff 乾淨。
+
+---
+
+## F122 期 1：ADC 安靜做錯的八件（2026-09-29）
+
+使用者：「接下來做 ADC 跟 output 兩張卡（先不要動），先列出想法」→「先修會安靜做錯
+的，接著按照你的建議修」。計畫書 `docs/plans/F122-adc-and-output.md`（五個問題的答案
+與期 5 的畫布提案都在那裡）。
+
+* **沒有判定＝沒有 bin**：`decide` 與 `score.expr` 都空 → `(None, None)`。Studio 新
+  recipe 不再塞佔位值 `"0"`（那是一條真的判定：每一顆 bin 1、分數 0，而畫面說
+  「unclassified」）；打開帶常數分數的舊檔案照畫面改成空的（UI 層遷移）。
+* **樹上問 `score`**：分數改在 let 之後、判定之前算；重判前拿掉上一次的 `score` /
+  `decide_unanswered`。以前整批跑答「否」、Re-run 答得出來 —— 同一份 recipe 兩種 bin。
+* **「問不出來 → bin N」**：`verdict_rows` 多一列（判定帶、HTML 報表、box plot 以前把
+  它們算在「否」那片葉子）；畫布托盤旁寫「3 → bin 99」。
+* `rules_to_tree` 帶 outcome（Studio 點一下規則 recipe 就把好／壞消息丟掉）。
+* 分數的說明改對（ADCSCORE 不是 DSIZE、空＝沒有分數）；**沒有分數就沒有 ADCSCORE
+  欄**（以前全填 0.0）。
+* 刪卡也講「誰還指著它的數字」（`RecipeModel.removal_fallout`）。
+* 判定 lint：題目缺數字講「答『否』」而不是「會失敗」；知道資料時講「去 Input 卡勾
+  Carry these columns」或「這份資料沒有 KLARF」；`route_taken` 不再被說成沒人算。
+* CLI `rescore`：卡片出錯的那一顆不再拿殘缺的 features 重判。
+* 順手：`add_rule` 的 `StopIteration`、三處過期的註解、歡迎頁的「by a threshold」。
+* 查過不是問題的：舊的 feature 改名遷移不改 `decide` —— 那兩張表比判定段早出生。
+* 黃金值三份逐項相同；typecheck 128（上限 128）；ruff 乾淨。
+
+---
+
+## F121 期 4：一顆 Open（2026-09-29）
+
+使用者：「繼續做期4」。入口簡單化的最後一期 —— **F121 五期都做完了**，計畫書留在
+`docs/plans/` 等使用者試用後說收。
+
+* **一顆「Open data…」**：`scope.INPUT_SOURCES` 剩一列，工具列、空白畫面、Input 卡
+  上是同一個字。卡上那顆以前先跳一張「你要開哪一種」的選單，現在直接是對話框
+  （非原生，檔案與資料夾都挑得到）。`open_dialogs` 的 `ask_klarf` / `ask_images` /
+  `raw_folder_for` 換成 `ask_data` ＋ `open_path`；`studio.py` 拿掉那張選單
+  （4,347 → 4,302，HARD_CAPS 與一般上限一起降）。
+* **「這條路徑是什麼」只有一個家**：`ingest.dataset.plan_open` → `klarf` / `folder` /
+  `image` / `raw`，CLI 的 `_open_input` 叫同一支。認 KLARF 看檔頭
+  （`looks_like_klarf`），不看副檔名。
+* **做的時候量出來的**：EBI 的 lot 資料夾裡 KLARF 旁邊躺著它的 patch `.tif`，第一版
+  把整個 lot 資料夾判成「影像資料夾」。改成**正好一份 KLARF 就開那份**；兩份以上
+  不替人挑，`load_folder` 講「挑一份」並列名字（`_KLARFS_ONLY_WARNING`）。
+* **CLI 行為變了兩處**（往「跟 Studio 一樣」）：只有一份 KLARF 的資料夾開那份
+  KLARF；直接給 `.raw` 檔案走 raw。
+* 畫面上六處「use “Open KLARF…” first」改成 “Open data…”；歡迎頁的字從表上讀
+  （`welcome.open_title`）。反向測試 `test_ui_one_open.py` 用 ast 掃 `d4t/ui` 的字串
+  擋退役的三個鈕名。文件（CLAUDE.md §5、USING-*、recipes/README、
+  `one-image-uniformity.json` 的說明）一起改；USING-SIMGEN 那一格本來就寫錯
+  （Golden Cell 視窗的鈕叫 `Open image…`），順手對上。
+* 黃金值三份逐項相同；typecheck 128（上限 128）；ruff 乾淨。
+
+---
+
+## F121 期 3：Input 卡看資料（2026-09-24）
+
+使用者回報的那一個到這裡收尾：EBI 的 recipe 開在沒有 KLARF 的 RSEM 影像上，
+**開資料的那一刻** Input 卡上就有兩句話、按跑在第一顆之前擋下、名字表旁一顆鈕
+一按就對齊。
+
+* `ingest.dataset.DataProfile` / `data_profile`：一顆幾張（整批最少／最多）、第一顆
+  的影像名、有沒有 KLARF、有哪幾欄。「第幾張」的排法搬進 `images_in_order`（只有
+  一個家，Input 卡與 profile 共用）。
+* `Step.data_issues(params, data)` ＋ `validate(recipe, data=…)`：Input 卡講三件 ——
+  名字表要的張數比資料多（error）、比資料少（info）、`carry` / `only_*` 要 KLARF 或
+  那一欄而資料沒有（error；`only_*` 以前講的是「篩選沒對上」）。呼叫點排在入口卡的
+  `continue` 之前（第一版排在後面，入口卡一句都問不到）。
+* Studio 的健檢與開跑前那兩道、CLI `run` 都餵資料（`RecipeModel.validate(dataset)`）。
+* 名字表編輯器的「Match this data's images」：`steps/load.fit_channel_map` ——
+  **線能留的就留**（資料有的位置留原名）。第一版照字面填 `1:single`，連 `test` 那一條
+  也斷了；改完之後 EBI 在 RSEM 上是 `1:test`，只有吃 `ref` 的卡變紅。知道一顆幾張之後
+  名字表只排那麼多列（一顆一張不再多一列寫著 ref）。
+* 沒做：KLARF 那幾格整塊變灰（理由在計畫書期 3）。
+
+---
+
+## F121 期 2：一張 Input 卡（2026-09-24）
+
+使用者：「繼續做」（四項已同意：合卡、一顆 Open、名字少於張數就讀第一張並警告、
+舊 recipe 自動升級）。
+
+* `load_single`「SEM image」併回 `load_patch`，**label 改成「Input」**（key 沒動，
+  出貨 recipe 與黃金值裡的 `load_patch` 一個字都不變）。開資料時補在空白畫布上的
+  那一張，**名字表照資料填**（`steps/load.channel_map_for`、
+  `RecipeModel.add_starter_input`）：一顆一張 → `1:single`，畫布上一顆埠。
+* 遷移 `_migrate_single_into_input`：`load_single(out="x")` → `load_patch("1:x")`，
+  節點 id 與流名不變、線一條都不用動。**F11 拆卡那一道加了版本閘（只對第 1 版）**
+  —— 不加的話合卡之後每存一次，`1:single` 就被換成 `1:test`（鐵則 9）。
+* 升級提示講使用者看過的名字：「renamed “SEM image” → “Input”」，而且不再因為檔案
+  是目前版本就不講（`describe_migration`）。
+* 兩份出貨 recipe 改成新格式；卡片庫只剩一張載入卡（README／ARCHITECTURE 的卡數
+  20 → 19）。
+* 黃金值三份逐項相同；typecheck 128（上限 128）；規模尺：遷移 22 → 23、`recipe.py`
+  648 → 650、UI 按卡片名分支 23 → 20。
+* 留給期 3：資料開著時從卡片庫**手動**加的 Input 卡，名字表是預設的 test/ref。
+
+---
+
+## F121 期 1：recipe 不再以資料型別當鑰匙（2026-09-24）
+
+使用者回報的那一句（`unknown input-type route 'folder'; this recipe only defines
+['ebi_patch']`）從這一期起不會再出現在單 route 的 recipe 上。
+
+* **一個判準一個家**：`recipe_schema.route_for(recipe, kind)` —— 只有一條 route 就是
+  那一條（不管資料），好幾條才挑同名的。引擎（`resolve_route`）、整批那一層
+  （`run_batch_steps`）、`validate`、CLI、Studio 都叫它。型別與鍵名對得上時選到的
+  跟以前逐字相同 → 黃金值三份逐項相同。
+* `validate` 的 kind 相依 lint（GLV `_center` 那兩條）問的是**資料**的型別，不是鍵名。
+* Studio：開資料**只在空白畫布**時改 `model.kind`（先開 recipe 再開資料不再默默改名、
+  不再讓存檔改寫原檔）；健檢（Problems 列、畫布警示點、開跑前兩道關）傳
+  `dataset.kind`；預覽、區域檢查、校正傳資料的型別。
+* **沒照計畫的一件**：`model.kind` 沒改名成 `model.route`（理由在計畫書期 1）。
+* 反向還在：手寫的多型別 recipe 碰到沒有的那一種 → 開跑**之前**擋下（以前是跑完
+  每一顆都錯）。
+* 還沒解的（期 3）：一條 Patch 的 pipeline 開在單張影像上，還是每一顆報「Patch 要 ≥2
+  張」—— 講的是真正的原因了，但要提前到開跑之前、掛在 Input 卡上。
+
+---
+
+## F121 期 0：拿掉 DOE 入口（2026-09-24）
+
+使用者：「DOE 的相關都先拿掉……（我當初設計錯了）。DOE 更像是一個資料夾內有多張
+圖片但沒有 KLARF 的情況（單張 image）」→「好 開始做」。
+
+* 刪（不是收起來 —— 設計錯了）：`doe_folder` kind、`Open conditions…` 鈕與它的
+  `folder_stack` 圖示、`ingest.load_doe_folder`、CLI「資料夾裡只有資料夾 → DOE」那條
+  判別、`tools/make_doe_sample.py`、`tests/test_doe_folder.py`。
+* **留著**（DOE 那一輪帶出來、但本身通用）：`align` 卡、`combine`、`snr_px`、三條以上
+  的流時特徵名帶流名前綴。
+* 只有子資料夾的資料夾現在會講「影像在下一層」（CLI 與 Studio 同一句）。
+* 黃金值三份逐項相同；全套 `run_tests.py`。
+* ⚠ 順手看到、沒修、也還沒查原因：CLI 跑一批 **0 顆**（例：只有子資料夾的
+  資料夾）時，`Write charts` 把 `uniformity_charts/` 寫進**目前的工作目錄**。
+  跟 DOE 無關，記在這裡。
+
+---
+
+## F121 開案：沒有 KLARF 的 RSEM 影像每一顆都 card error（2026-09-24）
+
+使用者回報：跑沒有 KLARF 的 RSEM 影像，每一顆都報
+`unknown input-type route 'folder'; this recipe only defines ebi_patch`。
+使用者定調「先查出原因，不要急著動手」—— **這一輪只查、只寫計畫書，程式沒動。**
+
+* **原因**：recipe 用資料型別當鑰匙（`routes = {"ebi_patch": …}`），沒有 KLARF 的影像
+  是 `folder`（不是 `rsem`）。三條走得到的路都在 headless Studio 重現過（先有
+  pipeline 再開影像／先開影像再開 recipe／先開 recipe 再開影像 —— 最後一條會**默默把
+  route 改名**，存檔就改寫原檔）。
+* **為什麼沒擋下**：開跑前健檢 `model.validate()` 拿 pipeline 自己的 kind 去比，
+  `unknown-route` 那條 lint 寫好了卻餵錯型別。
+* **改名也救不了**：實測三份出貨 recipe 硬改成 `folder` —— die-to-die 要兩張圖、
+  rsem-worst-box 要 KLARF 欄。卡能不能用看「一顆幾張、有沒有 KLARF」，不看型別名。
+* **SEM image ＝ 名字表一列的 Patch**：在 folder／rsem 上像素與特徵逐一相同。
+* 使用者：「我想要一勞永逸的改法，Input 跟 Output 和 ADC card 這三張比較特別」、
+  「先從 input 開始」、「我想把入口簡單化」；同意合卡（推翻 F11 Input-4）、一顆 Open、
+  名字少於張數就讀第一張並警告、舊 recipe 自動升級；**DOE 先拿掉**（「我當初設計錯了」）。
+* 計畫書：[`docs/plans/F121-simple-input.md`](docs/plans/F121-simple-input.md)
+  —— 期 0 拿掉 DOE、期 1 recipe 不認型別（一條 route 就跑那條，不改格式）、
+  期 2 一張 Input 卡（key 留 `load_patch`）、期 3 Input 卡看資料、期 4 一顆 Open。
+
+---
+
 ## 專案評價之後的「嚴重～高」那一批（2026-09-24）
 
 使用者：「7 先不要做，按順序做 4 5 6 2 1，6 要有一個切換的按鈕」。#3 量過之後撤回

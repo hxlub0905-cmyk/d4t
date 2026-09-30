@@ -174,21 +174,43 @@ def test_the_cut_area_and_the_hit_test_read_the_same_number(window):
     assert edge.boundingRect().contains(inside)
 
 
-def test_a_card_parked_on_top_of_the_line_does_not_hide_the_cut_button(window):
+def test_a_card_parked_on_a_line_makes_the_line_go_around_it(window):
+    """F124 期 3：往前走的線碰到夾在中間的卡就繞過去 —— 停一張卡在中點上，
+    中點就離開了那張卡（下一條測試因此要把繞行關掉，才驗得到「被蓋住」）。"""
+    src, nid, _ = _wired_pair(window)
+    other = window.add_card_after(nid, "tone")
+    edge = next(e for e in window.pipeline._edges if e.pair() == (src, nid))
+    centre = edge.cut_center()
+    parked = window.pipeline.node_item(other)
+    parked.setPos(centre.x() - canvas_mod.NODE_W / 2.0,
+                  centre.y() - canvas_mod.NODE_H / 2.0)
+    window.pipeline.refresh_edges()
+    moved = edge.cut_center()
+    assert not parked.shape().contains(parked.mapFromScene(moved))
+
+
+def test_a_card_parked_on_top_of_the_line_does_not_hide_the_cut_button(
+        window, monkeypatch):
     """節點是拖得動的，所以「線的中點會不會被某張卡蓋到」不是設計時算得完的事。
 
     線平常畫在卡片底下（卡片才是主角），於是被蓋住的那顆 × 既看不見也按不到。
     滑鼠移上來的那一條**抬到卡片之上** —— 使用者正在瞄的就是它。
+
+    F124 期 3 起往前走的線會繞開卡（上一條），但換行的線、繞不開的線照樣可能
+    被蓋到 —— 所以這裡把繞行關掉，驗的仍是「被蓋住時按得到」。
     """
-    src, nid, edge = _wired_pair(window)
+    from d4t.ui import edge_route
+    monkeypatch.setattr(edge_route, "forward_detour", lambda *a, **k: None)
+    src, nid, _ = _wired_pair(window)
+    # 停上去的是**另一張**卡（一張沒接線的）。以前這裡拖的是線的終點那張 ——
+    # 拖了終點線就變了，得反覆追中點；F123 期 4 起往左拖的線改成繞行，那個
+    # 追法就追不到了。另一張卡才是使用者拖一下會發生的事，而且線不會跟著動。
+    other = window.add_card_after(nid, "tone")
+    edge = next(e for e in window.pipeline._edges if e.pair() == (src, nid))
     centre = edge.cut_center()
     resting = edge.zValue()
 
-    # 把另一張卡直接停在中點上（使用者拖一下就會發生的事）
-    parked = window.pipeline.node_item(nid)
-    parked.setPos(centre.x() - canvas_mod.NODE_W / 2.0,
-                  centre.y() - canvas_mod.NODE_H / 2.0)
-    centre = edge.cut_center()          # 路徑跟著端點動了，重取一次
+    parked = window.pipeline.node_item(other)
     parked.setPos(centre.x() - canvas_mod.NODE_W / 2.0,
                   centre.y() - canvas_mod.NODE_H / 2.0)
     centre = edge.cut_center()

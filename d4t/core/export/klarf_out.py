@@ -323,6 +323,21 @@ def _column_entries_18(doc: KlarfDoc) -> List[str]:
     return [" ".join(c.split()) for c in cm.group(1).split(",") if c.strip()]
 
 
+def default_output_path(mode: str, klarf_path: str) -> str:
+    """Write KLARF 的「Write to」空著時寫到哪（F122，使用者：「預設寫到資料旁邊」）。
+
+    **in place 改的就是原檔**（那正是 in place 的意思；寫之前 Studio 會問）。
+    另外兩種寫一個新檔在原檔旁邊，檔名多一段（``_adc`` / ``_top``）——
+    絕不蓋掉原檔。答不出原檔在哪就回空字串（呼叫端講「填 Write to」）。
+    """
+    if not klarf_path:
+        return ""
+    if mode == "inplace":
+        return klarf_path
+    stem, ext = os.path.splitext(klarf_path)
+    return "%s_%s%s" % (stem, "top" if mode == "topn" else "adc", ext or ".001")
+
+
 # ---------------------------------------------------------------------------
 # annotate：欄位 + 值一起插進去
 # ---------------------------------------------------------------------------
@@ -347,7 +362,16 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
             "The defect column definitions of this KLARF cannot be read, so no "
             "columns can be appended. Run the KLARF health check first.")
 
-    new_names = [str(score_col), str(class_col)]
+    # **沒有分數就沒有分數欄**（F122）。一棵沒寫分數表達式的判定樹給每一顆
+    # ``score = None``（F30：分類器沒有分數，不是 0 分）—— 以前這一欄照樣插、
+    # 每一列填 ``missing_score``（0.0），讀起來就是「每一顆都得 0 分」，正是
+    # 引擎那邊花一整段註解擋掉的那個假數字。
+    has_score = any(r.get("score") is not None for r in results)
+    if not has_score:
+        notes.append("No defect has a score (the decision has no score "
+                     "formula), so no {} column was added - only {}."
+                     .format(score_col, class_col))
+    new_names = ([str(score_col)] if has_score else []) + [str(class_col)]
     feat_cols: List[Tuple[str, str]] = []       # (欄位名, 特徵名)
     for f in extra_features or ():
         name = _feature_col_name(f)
@@ -375,8 +399,9 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
 
     # ---- 每列的值（先算好，才不會邊改邊查）----
     n_rows = len(doc.defects)
+    head = [_fmt_float(missing_score, decimals)] if has_score else []
     vals: List[List[str]] = [
-        [_fmt_float(missing_score, decimals), str(int(missing_class))]
+        head + [str(int(missing_class))]
         + [_fmt_float(missing_score, decimals) for _ in feat_cols]
         for _ in range(n_rows)
     ]
@@ -388,8 +413,8 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
         feats = r.get("features") or {}
         score = r.get("score")
         b = r.get("bin")
-        cell = [
-            _fmt_float(missing_score if score is None else score, decimals),
+        cell = ([_fmt_float(missing_score if score is None else score,
+                            decimals)] if has_score else []) + [
             str(int(missing_class) if b is None else int(b)),
         ]
         for _name, fkey in feat_cols:
@@ -402,12 +427,17 @@ def _annotate(doc: KlarfDoc, results: Sequence[Dict[str, Any]],
         filled[idx] = True
 
     n_unfilled = sum(1 for f in filled if not f)
-    if n_unfilled:
+    if n_unfilled and has_score:
         notes.append(
             "{} defect rows have no matching ADC result; column {} is filled "
             "with {} and column {} with {} (meaning \"not judged\").".format(
                 n_unfilled, score_col, _fmt_float(missing_score, decimals),
                 class_col, int(missing_class)))
+    elif n_unfilled:
+        notes.append(
+            "{} defect rows have no matching ADC result; column {} is filled "
+            "with {} (meaning \"not judged\").".format(
+                n_unfilled, class_col, int(missing_class)))
     if n_missing_feat:
         notes.append("{} feature values were absent from the results and were "
                      "filled with {}.".format(

@@ -135,9 +135,9 @@ def test_a_card_with_no_headline_just_gets_a_list():
     """
     from d4t.ui.feature_panel import panel_model
 
-    card = get_step("load_single")
+    card = get_step("load_patch")
     specs = card.resolve_feature_specs(card.validate_params({}))
-    bounds = [type("B", (), {"node_id": "load", "label": "Load one image",
+    bounds = [type("B", (), {"node_id": "load", "label": "Input",
                              "spec": s})() for s in specs]
     model = panel_model({"n_channels": 1.0}, bounds)
     assert len(model) == 1

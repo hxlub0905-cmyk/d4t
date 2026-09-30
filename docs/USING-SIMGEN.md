@@ -40,7 +40,7 @@ python -m d4t simgen
 | 怎麼給 | 什麼時候用 |
 |---|---|
 | **Paste image (Ctrl+V)** | 最快 —— 螢幕截圖直接貼，不必先存檔 |
-| **Open images…** | 手上已經有 PNG／TIF |
+| **Open image…** | 手上已經有 PNG／TIF |
 | **Open recipe…** | 從 recipe 的模板那一格（`gc2:…`）取，跟你正在跑的 pipeline 用同一張 |
 | 底下那個文字框 | 別人把 `gc2:205x73:205x73:eJx…` 這串貼給你 |
 
@@ -123,7 +123,7 @@ OUT/patch/LOT_SYN.001            KLARF 1.2
 OUT/{rsem,patch}/ground_truth.json
 ```
 
-兩份都是 d4t 直接讀得動的 —— Studio 的 `Open KLARF…` 挑那個 `.001`。
+兩份都是 d4t 直接讀得動的 —— Studio 的 `Open data…` 挑那個 `.001`（或它所在的資料夾）。
 
 `ground_truth.json` 的 key 是 defect id：
 

@@ -91,6 +91,12 @@ def _wire(win, out_path, step="output_report", **params):
         win.model.set_param(out, name, value)
     win.model.set_expr("glv_max")
     win.model.set_threshold(1.0)
+    # F123 期 2：判定是一張卡、Output 寫的是線上游的東西 —— 線都畫出來。
+    win.model.use_decide(True)
+    dec = win.model.decision_node()
+    win.model.add_edge(load, glv, src_out="test", dst_in="source")
+    win.model.add_edge(glv, dec, src_out="numbers", dst_in="numbers")
+    win.model.add_edge(dec, out, src_out="results", dst_in="results")
     return load, glv, out
 
 
@@ -228,3 +234,49 @@ def test_the_async_path_uses_a_background_thread(window, tmp_path, qapp):
     assert _spin(qapp, lambda: out.exists(), 30.0), \
         "背景那條路沒有把檔案寫出來"
     assert not window.output_worker.is_running()
+
+
+# --------------------------------------------------------------------------- #
+# F122：寫的是「畫面上這份 recipe 的結果」，而且試跑的子集要講
+# --------------------------------------------------------------------------- #
+def test_a_changed_decision_must_be_rerun_before_writing(window, tmp_path):
+    """改了判定沒按 Re-run 就寫：以前 CSV / KLARF 是**上一份**判定的 bin，
+    畫面上是新的那一份。"""
+    out = tmp_path / "stale"
+    _wire(window, out, contents="table")
+    assert window.run_all(sync=True) is True
+    window.model.set_threshold(1e9)                 # 判定改了
+    assert window.write_outputs(sync=True) is False
+    assert not out.exists()
+    assert "Re-run" in window.status_text(), window.status_text()
+    assert window.run_ctl.rerun(sync=True) is True
+    assert window.write_outputs(sync=True) is True
+    assert out.exists()
+
+
+def test_a_changed_measuring_card_must_be_run_again(window, tmp_path):
+    out = tmp_path / "stale2"
+    _, glv, _ = _wire(window, out, contents="table")
+    assert window.run_all(sync=True) is True
+    window.model.set_param(glv, "metrics", "glv_max,glv_median")
+    assert window.write_outputs(sync=True) is False
+    assert not out.exists()
+    assert "Run again" in window.status_text(), window.status_text()
+
+
+def test_changing_only_the_output_card_does_not_block_writing(window, tmp_path):
+    """**反向**：Output 卡的資料夾換了不影響任何數字 —— 照樣寫。"""
+    _, _, out_id = _wire(window, tmp_path / "a", contents="table")
+    assert window.run_all(sync=True) is True
+    window.model.set_param(out_id, "folder", str(tmp_path / "b"))
+    assert window.write_outputs(sync=True) is True
+    assert (tmp_path / "b" / "defects.csv").exists()
+
+
+def test_writing_a_trial_says_it_is_not_the_whole_lot(window, tmp_path):
+    out = tmp_path / "trial_write"
+    _wire(window, out, contents="table")
+    assert window.run_trial(2, workers=1, sync=True) is True
+    assert window.write_outputs(sync=True) is True
+    assert "2 of the %d defects" % N in window.status_text(), \
+        window.status_text()

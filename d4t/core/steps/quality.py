@@ -50,6 +50,7 @@ class FocusQualityStep(MultiSourceStep):
     """對焦品質：Laplacian 變異數 / Tenengrad / FFT 高頻比。"""
 
     key = "focus_quality"
+    measures = True                 # 產出就是數字：送得進判定（F124）
     #: 這張卡有一本手冊（F117 K1）—— 參數區那一行 "Manual" 打開它。
     manual = "USING-FOCUS.md"
     # ⚠ 只有 `label` 換掉（同 `glv_stats`）—— `key`（`focus_quality`）與

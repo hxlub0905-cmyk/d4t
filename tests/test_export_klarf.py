@@ -488,3 +488,27 @@ def test_results_matched_by_defectid_not_position(lot, tmp_path):
     by_id = {r["defect_id"]: r["score"] for r in results}
     for row in new.defects:
         assert float(row[si]) == pytest.approx(by_id[row[di]], abs=1e-4)
+
+
+
+# --------------------------------------------------------------------------- #
+# F122：沒有分數就沒有分數欄
+# --------------------------------------------------------------------------- #
+def test_annotate_without_scores_adds_no_score_column(lot, tmp_path):
+    """一棵沒寫分數表達式的判定樹給每一顆 ``score = None``（F30）。以前
+    ADCSCORE 照插、每一列填 0.0 —— 讀起來是「每一顆都得 0 分」。"""
+    doc = klarf_core.load(lot["klarf"])
+    results = make_results()
+    for r in results:
+        r["score"] = None
+    out = tmp_path / "annotated.001"
+    plan = klarf_out.apply_writeback(doc, results, "annotate", str(out))
+    new = klarf_core.load(str(out))
+    assert new.col_index("ADCCLASS") >= 0
+    assert new.col_index("ADCSCORE") < 0
+    assert any("no ADCSCORE column" in n for n in plan.notes)
+    # **反向**：有分數的時候照舊兩欄都在。
+    out2 = tmp_path / "scored.001"
+    klarf_out.apply_writeback(klarf_core.load(lot["klarf"]), make_results(),
+                              "annotate", str(out2))
+    assert klarf_core.load(str(out2)).col_index("ADCSCORE") >= 0

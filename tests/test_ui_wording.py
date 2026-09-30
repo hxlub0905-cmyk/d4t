@@ -195,8 +195,10 @@ def _issue_calls():
 def test_every_lint_has_a_code_you_can_read_off_the_source():
     """``code`` 一律是字面值 —— **不然沒有人數得出還剩幾條沒搬**。
 
-    唯一的例外是**一個**轉手的地方（`Step.kind_issues`：「這組設定對不對」
-    有時取決於那顆 defect 拿到的是 patch 還是一張大圖，所以判準在卡片上）。
+    唯一的例外是**一個**轉手的地方（`recipe_validate._relayed`）：判準在卡片上的
+    那兩種 —— `Step.kind_issues`（「這組設定對不對」有時取決於那顆 defect 拿到的
+    是 patch 還是一張大圖）與 `Step.data_issues`（F121 期 3：對著開著的那份資料，
+    一顆幾張、有沒有 KLARF）—— 都從那一個地方過。
     ⚠ 那個數字寫死成 1 是故意的：第二個轉手的地方出現時，名冊會**安靜地**
     少掉一批 code，而這一條會在那一天紅。
     """

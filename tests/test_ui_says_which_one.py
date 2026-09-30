@@ -118,9 +118,9 @@ def test_a_plain_feature_is_left_alone():
 # E3：縮圖上標得出 defect 在哪
 # --------------------------------------------------------------------------- #
 def test_only_the_kinds_where_the_image_is_cut_around_the_defect(qapp):
-    """⚠ **`folder` / `doe_folder` 不標。**
+    """⚠ **`folder` 不標。**
 
-    那兩種沒有 KLARF、也沒有「defect 在哪」這回事（整張圖就是那一顆）——
+    它沒有 KLARF、也沒有「defect 在哪」這回事（整張圖就是那一顆）——
     在那上面畫一個十字是**憑空指一個地方**，而使用者會以為那裡真的有東西。
     """
     from d4t.ui import scope

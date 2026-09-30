@@ -20,7 +20,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import d4t.core.steps  # noqa: F401 — 觸發卡片註冊（同 `batch.py`：REGISTRY 是 import 時填的）
 
 from ..core.pipeline import get_step
-from ..core.pipeline.step import GROUPS, ParamSpec
+from ..core.pipeline.step import DATA_PORTS, GROUPS, NUMBERS, RESULTS, ParamSpec
 
 __all__ = ["grouped", "compatible", "input_param_for", "build_menu"]
 
@@ -62,8 +62,26 @@ def grouped(step_keys: Sequence[str]) -> List[Tuple[str, List[Tuple[str, str]]]]
     return out
 
 
+def _takes_data(step_key: str, kind: str) -> str:
+    """這張卡收 ``kind``（``numbers`` / ``results``）那種線的資料埠（沒有回空）。
+
+    Decision 只收數字；Output 卡的 ``results`` 兩種都收（F123 期 2：接
+    Decision 有類別，直接接量測卡沒有 —— 使用者「不想綁死一定要有 Decision」）。
+    """
+    try:
+        ports = tuple(get_step(step_key).data_inputs)
+    except KeyError:
+        return ""
+    if RESULTS in ports and kind in DATA_PORTS:
+        return RESULTS
+    return NUMBERS if (kind == NUMBERS and NUMBERS in ports) else ""
+
+
 def compatible(step_keys: Sequence[str], kind: str) -> List[str]:
-    """``kind`` 是 ``image`` 或 ``region``：哪些卡有一格吃那種東西。順序照給的。"""
+    """``kind`` 是 ``image`` / ``region`` / ``numbers`` / ``results``：哪些卡
+    接得上那種線。順序照給的。"""
+    if str(kind) in DATA_PORTS:
+        return [str(k) for k in step_keys if _takes_data(str(k), str(kind))]
     want = _REGION_TYPES if str(kind) == "region" else _IMAGE_TYPES
     return [str(k) for k in step_keys
             if any(p.type in want for p in _inputs(str(k)))]
@@ -71,6 +89,8 @@ def compatible(step_keys: Sequence[str], kind: str) -> List[str]:
 
 def input_param_for(step_key: str, kind: str) -> str:
     """``kind`` 那種線接進這張卡時該落在哪一格（第一格吃那種東西的參數名）。"""
+    if str(kind) in DATA_PORTS:
+        return _takes_data(str(step_key), str(kind))
     want = _REGION_TYPES if str(kind) == "region" else _IMAGE_TYPES
     for p in _inputs(step_key):
         if p.type in want:

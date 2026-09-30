@@ -102,8 +102,8 @@ def test_window_constructs_with_library_cards(window):
     assert window.model.node_order == []
     assert window.pipeline.node_ids() == []
     assert window.selected_node is None
-    # 兩張載入卡都在卡片庫裡，讓他挑
-    assert window.library.entry("load_single") is not None
+    # 載入卡在卡片庫裡，讓他自己放（F121 期 2 起只有一張「Input」）
+    assert window.library.entry("load_patch") is not None
     assert window.model.dirty is False, "使用者什麼都還沒做，不該被問「要存檔嗎」"
     # 預覽沒有影像、直方圖沒有資料
     assert window.image_view.has_image() is False
@@ -305,37 +305,19 @@ def test_run_trial_fills_histogram(window, synlot):
 
 
 # --------------------------------------------------------------------------- #
-# 7. 門檻：拖曳只是預覽，放開才寫回 model
+# 7. 分數的直方圖沒有門檻線（F122 期 3：舊門檻那條路整條退役）
 # --------------------------------------------------------------------------- #
-def test_threshold_live_preview_vs_commit(window, synlot):
+def test_the_score_histogram_has_no_threshold_line(window, synlot):
+    """以前沒有判定樹的 recipe 會在分數直方圖上畫一條拖得動的門檻線 —— 而
+    F122 期 1 之後「沒有判定樹」就是「還沒有判定」，拖那條線什麼都不決定。
+    判定的門檻住在樹的每一步上。"""
     _loaded(window, synlot)
-    if not window.trial_scores:
-        window.run_trial(8, workers=1, sync=True)
-
-    window._on_threshold_committed(42.5)
-    assert window.model.threshold == pytest.approx(42.5)
-    assert window.model.to_recipe().score.threshold == pytest.approx(42.5)
-    # F25：門檻**沒有編輯格了**（使用者：「二元門檻的 UI 完全拿掉」）。
-    # 這一條守的是底下那條規矩本身 —— 拖曳只預覽、放開才寫回 model ——
-    # 而那條規矩對任何一個「拖了才算數」的控制項都要成立。
+    window.run_trial(8, workers=1, sync=True)
+    window._refresh_spread()
+    assert window.histogram.threshold() is None
+    assert window.histogram.bin_summary_text() == ""
     from PySide6.QtWidgets import QDoubleSpinBox
     assert window.decide_panel.findChild(QDoubleSpinBox) is None
-
-    # 拖曳中（changed）只重算 bin 摘要，絕對不能動 model
-    before = window.model.threshold
-    window._on_threshold_changed(77.25)
-    assert window.model.threshold == pytest.approx(before)
-    live = window.histogram.bin_summary_text()
-    # 前綴比對而不是整句相等：合成資料旁邊就有 ground_truth.json，於是同一行
-    # 後面還會接一段正確率（Phase 1）。這一條要驗的是**bin 數跟著門檻走**，
-    # 不是那一行長什麼樣子 —— 整句相等會讓它每加一個讀數就紅一次。
-    assert live.startswith("   ".join(
-        "bin %s=%s" % (k, v)
-        for k, v in sorted(vm_mod.rebin(window.trial_scores, 77.25,
-                                        window.model.bins).items())))
-
-    window._on_threshold_committed(50.0)
-    assert window.model.threshold == pytest.approx(50.0)
 
 
 # --------------------------------------------------------------------------- #

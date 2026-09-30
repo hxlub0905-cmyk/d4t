@@ -35,7 +35,7 @@ from .engine import (
     _eval_score, _safe_num, result_to_json_dict, run_defect,
     run_defect_cached,
 )
-from .recipe import Recipe, execution_order
+from .recipe import Recipe, execution_order, route_for
 
 __all__ = ["run_batch", "apply_lot_scaling", "redecide",
            "rerun_decision", "measurement_signature",
@@ -550,11 +550,14 @@ def redecide(recipe: Recipe, rows, revive: bool = False) -> int:
             r["error"] = "[score] %s" % e
             r["score"], r["bin"] = None, None
             continue
-        feats = dict(r.get("features") or {})
+        # 判定自己寫的兩個名字**以這一次為準**（F122）：這一次沒有分數表達式
+        # 的話，上一次的 ``score`` 不准留在 features 裡冒充這一次的。
+        feats = {k: v for k, v in (r.get("features") or {}).items()
+                 if k not in ("score", "decide_unanswered")}
         feats.update({k: _safe_num(v) for k, v in ctx.features.items()})
         r["features"] = feats
         r["score"] = _safe_num(score)
-        r["bin"] = int(b)
+        r["bin"] = None if b is None else int(b)
         r["ok"], r["error"] = True, None      # revive：救回來的顆從此是好的
         redone += 1
     return redone
@@ -616,7 +619,10 @@ def measurement_signature(recipe: Recipe) -> str:
     lot = set()
     for nid, node in nodes.items():
         cls = REGISTRY.get(str((node or {}).get("step", "")))
-        if cls is not None and getattr(cls, "scale", "") == SCALE_LOT:
+        # Decision 卡（F123 期 1）也不算：它不量任何東西，停用它只改判定 ——
+        # 那一半在 `decision_signature` 裡，Re-run 秒級重判就夠了。
+        if cls is not None and (getattr(cls, "scale", "") == SCALE_LOT
+                                or getattr(cls, "category", "") == "adc"):
             lot.add(nid)
     d["nodes"] = {k: v for k, v in nodes.items() if k not in lot}
     d["routes"] = {k: [x for x in (v or []) if x not in lot]
@@ -624,6 +630,27 @@ def measurement_signature(recipe: Recipe) -> str:
     d["edges"] = [e for e in (d.get("edges") or [])
                   if len(e) >= 3 and e[0] not in lot and e[2] not in lot]
     blob = json.dumps(d, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
+def decision_signature(recipe: Recipe) -> str:
+    """判定段（``decide`` ＋ 舊的 ``score``）的簽章（F122）。
+
+    `measurement_signature` 的另一半：「這批結果的 **bin** 還是不是現在這份
+    recipe 會給的」。Studio 的「Write outputs」拿兩個一起比 —— 以前它只看這批
+    是不是被停掉的，於是改了判定沒按 Re-run 就寫，KLARF 與 CSV 裡是**上一份**
+    判定的 bin，而畫面上是新的那一份。
+    """
+    import json
+
+    d = recipe.to_json_dict()
+    parts = {k: d.get(k) for k in ("decide", "score", "route_by")}
+    # 停用那張 Decision 卡＝不判（F123 期 1，`engine._eval_score`）—— 它的開關
+    # 是判定的一部分。
+    parts["cards"] = sorted(
+        (nid, bool(n.enabled)) for nid, n in recipe.nodes.items()
+        if n.step == "decision")
+    blob = json.dumps(parts, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
@@ -705,8 +732,9 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
     遲早會有人忘記關；做成**另一支要自己叫的函式**，試跑那條路就是根本沒叫它。
 
     所以規則是一句話：**要寫出東西的那條路自己叫這一支，試跑不叫。**
-    目前叫它的只有 CLI（`python -m d4t run`）—— Studio 只有試跑那條路，
-    它的輸出目前仍然走 Export 精靈（見 docs/ROADMAP.md）。
+    叫它的有兩個：CLI（`python -m d4t run`）與 Studio 的「Write outputs」
+    （`run_controller.write_outputs`，鐵則 11：跑不寫，寫是另一個動作）。
+    （這裡以前寫「Studio 的輸出走 Export 精靈」—— 那個精靈 F16 Stage 5c 就刪了。）
 
     一張卡出錯**不影響其他卡**（鐵則 7 的跨顆版）：訊息記進 ``bctx.errors``，
     其餘照跑，而整批的結果本來就已經在 ``rows`` 裡了。
@@ -732,7 +760,8 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
     # 只跑一次：Output 卡寫檔是不可逆的，寫兩次不是「再保險一次」是覆寫）。
     rb = getattr(recipe, "route_by", None)
     if rb is None:
-        route_keys = [k]
+        # 跟逐顆那一層同一支（`route_for`）：只有一條 route 就是那一條。
+        route_keys = [route_for(recipe, k) or k]
     else:
         route_keys = sorted({str(v) for v in rb.map.values()}
                             | ({str(rb.default).strip()}
@@ -761,7 +790,26 @@ def run_batch_steps(recipe: Recipe, dataset: Any,
                 continue
             try:
                 params = step_cls.validate_params(node.params)
-                step_cls().run_batch(bctx, params)
+                step_cls().run_batch(_view_for(bctx, nid, step_cls,
+                                               route_keys, reg), params)
             except Exception as e:  # 鐵則 7 的跨顆版
                 bctx.errors[nid] = str(e)
     return bctx
+
+
+def _view_for(bctx: Any, nid: str, step_cls: Any, route_keys: Sequence[str],
+              reg: Dict[str, Any]) -> Any:
+    """一張 Output 卡看到的那一份：**線上游的東西**（F123 期 2）。
+
+    結果表換成 `data_lines.rows_for_output` 過濾過的；其餘（``outputs`` /
+    ``warnings`` / ``errors`` 那幾格）是**同一個物件**，所以這張卡寫的、報的都
+    回到整批那一份。沒有資料入埠的卡看整份（它們不是 Output）。
+    """
+    import dataclasses
+
+    from .data_lines import rows_for_output
+
+    if not getattr(step_cls, "data_inputs", ()):
+        return bctx
+    rows, decided = rows_for_output(bctx.recipe, nid, bctx.rows, route_keys, reg)
+    return dataclasses.replace(bctx, rows=rows, decided=decided, node_id=nid)

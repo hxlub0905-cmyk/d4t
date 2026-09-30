@@ -293,7 +293,8 @@ def test_the_card_is_an_end_point_like_every_other_output_card(tmp_path):
     assert card.resolve_reads(p) == []
     assert card.resolve_writes(p) == []
     assert card.resolve_features(p) == []
-    assert card.configuration_issues({"folder": ""}), "沒填路徑要講"
+    # 沒填路徑不是錯（F122：空＝資料旁邊的 d4t_report）
+    assert not card.configuration_issues({"folder": ""})
 
 
 # --------------------------------------------------------------------------- #

@@ -81,7 +81,11 @@ def test_switching_back_leaves_a_usable_expression(panel):
     panel.set_multi_class(True)
     panel.set_multi_class(False)
     assert m.decide is None
-    assert str(m.expr).strip(), "切回去之後那一格不能是空的（空的解析不出來）"
+    # F122：空的＝「還沒有判定」（引擎給每一顆「量完、沒分類」），**不是**錯。
+    # 以前這裡要求一個非空的佔位值，而那個佔位值在引擎裡是一條真的判定。
+    assert not str(m.expr).strip()
+    assert not [i for i in m.validate() if i.level == "error"
+                and i.code == "score-expr"]
 
 
 def test_there_is_no_threshold_editor_anywhere(panel):

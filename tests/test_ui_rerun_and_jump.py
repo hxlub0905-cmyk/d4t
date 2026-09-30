@@ -49,7 +49,7 @@ def window(qapp, lot):
 
 def _wire(win, when="glv_max > 1", out_dir=None):
     """Load → Gray level → 判定樹（一步）→（選配）一張 Output 卡。"""
-    win.model.add_step("load_patch")
+    load = win.model.add_step("load_patch")
     glv = win.model.add_step("glv_stats")
     win.model.set_param(glv, "source", "test")
     win.model.set_param(glv, "metrics", "glv_max")
@@ -58,11 +58,16 @@ def _wire(win, when="glv_max > 1", out_dir=None):
     win.model.use_decide(True)
     win.model.ensure_tree()
     win.model.set_tree_when("", when)
+    # 線都畫出來（F123 期 2：判定問的數字要接進 Decision、Output 寫它上游的）。
+    dec = win.model.decision_node()
+    win.model.add_edge(load, glv, src_out="test", dst_in="source")
+    win.model.add_edge(glv, dec, src_out="numbers", dst_in="numbers")
     out = None
     if out_dir is not None:
         out = win.model.add_step("output_report")
         win.model.set_param(out, "folder", str(out_dir))
         win.model.set_param(out, "contents", "table")
+        win.model.add_edge(dec, out, src_out="results", dst_in="results")
     return glv, out
 
 

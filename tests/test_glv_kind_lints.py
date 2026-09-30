@@ -19,9 +19,11 @@ from d4t.core.pipeline.step import PATCH_KINDS, REGISTRY, SINGLE_IMAGE_KINDS
 
 
 def _recipe(kind, glv_params, edges=()):
-    load = "load_single" if kind in SINGLE_IMAGE_KINDS else "load_patch"
+    # 一顆一張 → 名字表一列（F11 那時是 `load_single`，F121 期 2 併回 Input）；
+    # 流名取 `test`，跟底下那幾條線接的埠同名。
+    load = {"channel_map": "1:test"} if kind in SINGLE_IMAGE_KINDS else {}
     nodes = {
-        "load": RecipeNode("load", load, {}),
+        "load": RecipeNode("load", "load_patch", load),
         "roi": RecipeNode("roi", "roi_reference",
                           {"method": "stripes in the image",
                            "roi_out": "cells"}),

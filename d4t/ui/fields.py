@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
@@ -1148,6 +1148,7 @@ class ChannelMapField(QWidget):
                  min_rows: int = 0, row_kind: str = "images"):
         super().__init__(parent)
         self._edits: List[QLineEdit] = []
+        self._labels: List[QLabel] = []
         self._emitting = False
         self._row_kind = str(row_kind)
         self._words = self._WORDS.get(self._row_kind, self._WORDS["images"])
@@ -1172,6 +1173,18 @@ class ChannelMapField(QWidget):
         self._add_btn.clicked.connect(lambda: self._add_row(emit=True))
         outer.addWidget(self._add_btn, 0, Qt.AlignLeft)
 
+        #: 「把目前的名字表對齊到開著的那份資料」的那支函式（``None``＝還沒開
+        #: 資料；規則在 core：`steps/load.fit_channel_map`）。對齊的結果跟目前的
+        #: 值不一樣時才露出那顆鈕（F121 期 3）：一份 EBI 的 recipe 開在一張一張的
+        #: RSEM 上，Input 卡的健檢會說「名字表要 2 張、這份資料一顆 1 張」——
+        #: 這顆鈕是那句話的下一步，按一下就對齊。
+        self._fitter: Optional[Callable[[str], str]] = None
+        self._fill_btn = QPushButton(strings.tr("Match this data's images"), self)
+        self._fill_btn.setProperty("variant", "secondary")
+        self._fill_btn.clicked.connect(self._fill_from_data)
+        self._fill_btn.setVisible(False)
+        outer.addWidget(self._fill_btn, 0, Qt.AlignLeft)
+
         self.set_text(value)
 
     # -- 值 ------------------------------------------------------------------
@@ -1194,7 +1207,11 @@ class ChannelMapField(QWidget):
                     pairs[int(left.strip())] = right.strip()
                 except ValueError:          # 壞值由 core 的 parse 負責報錯
                     continue
-        floor = 0 if self._row_kind == "labels" else len(self._DEFAULTS)
+        # 沒資料的時候至少兩列（test／ref，看起來不像壞掉）；**知道一顆幾張之後照
+        # 那個數**（F121 期 3）—— 一顆一張的資料下面多一列 placeholder 寫著
+        # 「ref」，會讓人以為還有一張參照。
+        floor = 0 if self._row_kind == "labels" \
+            else (self._min_rows or len(self._DEFAULTS))
         rows = max(floor, max(pairs) if pairs else 0, self._min_rows)
         self._emitting = True
         try:
@@ -1204,6 +1221,7 @@ class ChannelMapField(QWidget):
                 edit.setText(pairs.get(i + 1, ""))
         finally:
             self._emitting = False
+        self._sync_fill()
 
     def row_count(self) -> int:
         return len(self._edits)
@@ -1216,6 +1234,46 @@ class ChannelMapField(QWidget):
         """這批資料一顆有幾張圖 —— 列數至少排到這麼多（不動已經填的名字）。"""
         self._min_rows = max(0, int(n))
         self.set_text(self.text())
+
+    def set_fitter(self, fit: Optional[Callable[[str], str]]) -> None:
+        """「對齊到開著的那份資料」的函式（F121 期 3；``None`` = 沒開資料）。"""
+        self._fitter = fit
+        self._sync_fill()
+
+    def _fitted(self) -> str:
+        if self._fitter is None or self._row_kind != "images":
+            return ""
+        try:
+            return str(self._fitter(self.text()) or "")
+        except Exception:                 # 顯示用：算不出來就不給那顆鈕
+            return ""
+
+    def suggestion_button(self) -> QPushButton:
+        """「照這份資料填」那顆鈕（測試用；它只在值跟資料對不上時看得見）。"""
+        return self._fill_btn
+
+    def _sync_fill(self) -> None:
+        fitted = self._fitted()
+        want = bool(fitted) and fitted != self.text()
+        self._fill_btn.setVisible(want)
+        if want:
+            self._fill_btn.setToolTip(strings.tr(
+                "Make the names match the data you opened: %s. Names the data "
+                "has an image for stay, so their wires stay; a name with no "
+                "image goes away, and the cards it fed turn red.") % fitted)
+
+    def _fill_from_data(self) -> None:
+        """對齊到資料：多出來的列拿掉（一顆一張就是**一列**），然後講給表單聽。"""
+        fitted = self._fitted()
+        if not fitted:
+            return
+        self.set_text(fitted)
+        keep = max(self._min_rows, len(fitted.split(",")))
+        while len(self._edits) > keep and not self._edits[-1].text().strip():
+            self._edits.pop().deleteLater()
+            self._labels.pop().deleteLater()
+        self.changed.emit(self.text())
+        self._sync_fill()
 
     # -- 內部 ----------------------------------------------------------------
     def _default_name(self, index: int) -> str:
@@ -1237,12 +1295,14 @@ class ChannelMapField(QWidget):
         self._grid.addWidget(label, i, 0)
         self._grid.addWidget(edit, i, 1)
         self._edits.append(edit)
+        self._labels.append(label)
         if emit and not self._emitting:
             self._on_edited("")
 
     def _on_edited(self, _text: str) -> None:
         if not self._emitting:
             self.changed.emit(self.text())
+            self._sync_fill()
 
 
 class TemplateField(QWidget):
