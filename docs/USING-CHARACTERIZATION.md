@@ -34,13 +34,14 @@
 2. 卡片庫 → Input 段 → **`Pair source`** → 按 **`Open data…`** 選
    **EBI 那一份**。
 3. 卡片庫 → Compare 段 → **`H2H`**。
-4. **拉兩條線**（哪一條接哪個埠見 §3）。
+4. **拉線**（哪一條接哪個埠見 §3）：兩條進 H2H，再把 H2H 右下那顆方埠
+   （送去判定）拉進 Decision。
 5. 同一張 Pair 卡的 **`Rank by`** → 挑 **EBI 自己的分數欄**（下拉裡就是那一份
    真的有的欄位）。這一格是 ① 與 ② 分得開的唯一條件 —— 見 §5。
    **`Rank within`** 填 `XINDEX,YINDEX`（照 die 分組排名）。
 6. 判定段畫那棵樹（見 §5）—— 第一題永遠是 `pair_found`。
-7. 卡片庫 → Output 段 → **`Write comparison`**，填 **`Write to`** 資料夾
-   （**不用接線**，見 §3）。
+7. 卡片庫 → Output 段 → **`Write comparison`**，填 **`Write to`** 資料夾，
+   **接三條線**：左圖、右圖、Decision 的結果（見 §3.1）。
 8. **`Run all`**，看過 Results 之後按那個視窗的 **`Write outputs`**
    （⚠ 跑本身**不寫檔**，見 §4.3）。
 
@@ -58,10 +59,10 @@
 
 1. 卡片庫 → Input 段 → **`Pair source`** → `Open data…`。
 2. 卡片庫 → Compare 段 → **`H2H`**。
-3. **拉兩條線**（見 §3）。
+3. **拉線**（見 §3）：兩條進 H2H、H2H 進 Decision。
 4. 判定段畫那棵樹（見 §5）。
-5. 卡片庫 → Output 段 → **`Write comparison`**，填資料夾
-   （**不用接線**，見 §3）。
+5. 卡片庫 → Output 段 → **`Write comparison`**，填資料夾，接左圖、右圖、
+   Decision 的結果（見 §3.1）。
 
 ---
 
@@ -79,15 +80,14 @@ ground truth 是 API，所以要**走遍的是 API 的清單**。
 ## 3. 畫布怎麼接
 
 ```
-Input ──single──────────────────┐
-   （API 空拍，main）                 ├──> H2H
-Pair source ──paired────┘
-
-         ┌ OUTPUT ────────────────────────────────┐
-         │  Write comparison          │   ← 沒有線（見 §3.1）
-         │  (not connected) · once per lot         │
-         └─────────────────────────────────────────┘
+Input ──single──────────────┬──> H2H ──aligned──────────> Write comparison（右圖）
+   （API 空拍，main）        │     └─(送去判定)─> Decision ─(結果)─> Write comparison
+Pair source ──paired────────┘
+Input ──single─────────────────────────────────────────> Write comparison（左圖）
 ```
+
+一條從頭接到尾的流（F124）：圖進 H2H 對位 → 對位的結果送進 Decision 分類 →
+分好類、連同左右兩張圖寫成對照圖。
 
 | 從哪 | 到哪 | 意思 |
 |---|---|---|
@@ -100,15 +100,19 @@ Pair source ──paired────┘
 > `Pair source` **沒有影像輸入** —— 它是 Input 段的卡，
 > 圖是從第二份 lot 撈出來的，不是從上游接來的。所以它左邊沒有埠。
 
-### 3.1 Output 段**不用接線**（副標寫 `(not connected)` 是正常的）
+### 3.1 Output 段也要接線
 
-Output 段的卡是終點（不吐流、不吐數字），**寫的是接進來那幾條線上游的東西**
-（F123）。整批跑完之後各跑一次（卡片底下那條「once per lot」）。
+Output 段的卡是終點（不吐流、不吐數字），寫的是**整張結果表**；上游有 Decision
+才有類別（F124）。整批跑完之後各跑一次（卡片底下那條「once per lot」）。
 
-由此來的三件事：
+由此來的幾件事：
 
-* **結果線要接**：Decision 右邊的 `results` 拉進 `Write comparison` 左下那顆
-  方埠 —— 沒接的 Output 卡是紅的，而且不跑（它沒有東西可寫）。
+* **結果線要接**：Decision 右邊的方埠拉進 `Write comparison` 左下那顆方埠 ——
+  什麼都沒流進來的 Output 卡是紅的，而且不跑。
+* **判定第一題問的 `pair_found` 不用另外拉線**：它是 Pair source 記的，跟著
+  defect 經過 H2H 流進 Decision（F124 起判定問得到它上游每一張卡的數字）。
+  判定問到一張**沒有**流進來的卡的數字時，Decision 卡上會有一個黃色提醒，
+  告訴你接哪一張卡。
 * **左右兩張圖是兩顆影像埠**（`Left picture` / `Right picture`，F123 期 3）：
   從**你要的那一張卡的那一顆埠**拉線進來。拿到的是那一張卡當時吐的那一份 ——
   接 Input 的 `single` 就是原圖，不會變成後面某張 Enhance 卡改過的那一份。

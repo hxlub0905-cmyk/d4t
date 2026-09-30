@@ -1,6 +1,6 @@
-# F123 期 2：數字線與結果線在畫布上（2026-09-29）。
+# F123 期 2：數字線與結果線在畫布上（2026-09-29）；F124（2026-09-30）。
 """畫布那一半：方埠、拉得出來、接錯講得出為什麼、剪一條就是一條、
-「插入數字 ▾」只列接進 Decision 的卡。
+「插入數字 ▾」全部列出、流進 Decision 的排前面（F124）。
 
 core 那一半（lint、Output 寫上游、遷移）在 `tests/test_data_lines.py`。
 """
@@ -57,8 +57,10 @@ def test_the_cards_grow_the_data_ports(window):
     assert {"name": "results", "kind": "results"} in dec.out_specs()
     assert [s["kind"] for s in dec.in_specs()] == ["numbers"]
     assert [s["kind"] for s in rep.in_specs()] == ["results"]
-    # 一張不寫數字的卡（Compare）沒有數字埠。
-    assert "numbers" not in [s["kind"] for s in view.card("sub").out_specs()]
+    # 不量東西的卡沒有數字埠（F124）：Compare 不寫數字；Input、Normalize、
+    # Denoise 順手記了幾個，但那些跟著圖流下去，不另外長一顆埠。
+    for nid in ("sub", "load", "norm", "dn"):
+        assert "numbers" not in [s["kind"] for s in view.card(nid).out_specs()], nid
 
 
 def test_the_lines_land_on_their_own_ports(window):
@@ -82,10 +84,17 @@ def test_a_numbers_line_dropped_on_a_card_lands_on_the_data_port(window):
 # --------------------------------------------------------------------------- #
 # 拉線
 # --------------------------------------------------------------------------- #
+def _add_cd(window):
+    nid = window.model.add_step("cd_measure")
+    canvas_edges.connect(window, "dn", nid, "diff", "source")
+    return nid
+
+
 def test_numbers_into_the_decision_is_one_more_line(window):
     before = _data_edges(window)
-    canvas_edges.connect(window, "dn", "decision", "numbers", "numbers")
-    assert ("dn", "decision", "numbers", "numbers") in _data_edges(window)
+    cd = _add_cd(window)
+    canvas_edges.connect(window, cd, "decision", "numbers", "numbers")
+    assert (cd, "decision", "numbers", "numbers") in _data_edges(window)
     assert set(before) <= set(_data_edges(window)), "資料埠接很多條，不擠掉舊的"
     assert "Connected" in window.status_text()
 
@@ -101,6 +110,9 @@ def test_the_wrong_lines_are_refused_with_a_reason(window):
     assert "image or a region" in window.status_text()
     canvas_edges.connect(window, "glv", "sub", "numbers", "a")
     assert "Decision or an Output" in window.status_text()
+    # 不量東西的卡送不出數字（F124）：從 Denoise 拉得出來的只有圖。
+    canvas_edges.connect(window, "dn", "decision", "numbers", "numbers")
+    assert "measuring card" in window.status_text()
     assert len(window.model.edges) == n, "擋下來的線不准留下任何痕跡"
 
 
@@ -131,29 +143,52 @@ def test_the_card_menu_lists_where_a_data_line_can_go():
 
 
 # --------------------------------------------------------------------------- #
-# 判定只問得到接進來的卡
+# 判定問得到每一個數字；流進來的排前面（F124）
 # --------------------------------------------------------------------------- #
-def test_the_number_picker_lists_only_the_wired_cards(window):
-    names = [x.split("\t")[0] for x in window.model.decision_numbers()]
-    assert "glv_max" in names
-    assert "n_channels" not in names, "Input 沒接進 Decision"
-    canvas_edges.connect(window, "load", "decision", "numbers", "numbers")
-    names = [x.split("\t")[0] for x in window.model.decision_numbers()]
-    assert "n_channels" in names
+def _names(items):
+    return [x.split("\t")[0] for x in items]
 
 
-def test_cutting_the_numbers_line_puts_a_badge_on_the_decision(window):
+def _groups(items):
+    return {x.split("\t")[0]: x.split("\t")[1] for x in items}
+
+
+def test_the_number_picker_lists_every_number_flowing_ones_first(window):
+    items = window.model.decision_numbers()
+    groups = _groups(items)
+    assert groups["glv_max"] == "GLV"
+    assert groups["n_channels"] == "Input", "Input 在 GLV 上游：流進來了"
+    cd = _add_cd(window)
+    items = window.model.decision_numbers()
+    groups = _groups(items)
+    assert "not connected" in groups["cd_median"], "列得出來，只是註明"
+    assert _names(items).index("cd_median") > _names(items).index("glv_max")
+    canvas_edges.connect(window, cd, "decision", "numbers", "numbers")
+    assert _groups(window.model.decision_numbers())["cd_median"] == "CD"
+
+
+def test_the_suggested_question_stays_away_from_numbers_that_do_not_flow_in(window):
+    """「建議一題」不挑一個馬上會被提醒的數字（`tree_panel.suggest_question`）。"""
+    assert "cd_median" not in window.model.decision_numbers_not_flowing()
+    cd = _add_cd(window)
+    assert "cd_median" in window.model.decision_numbers_not_flowing()
+    assert "glv_max" not in window.model.decision_numbers_not_flowing()
+    canvas_edges.connect(window, cd, "decision", "numbers", "numbers")
+    assert "cd_median" not in window.model.decision_numbers_not_flowing()
+
+
+def test_cutting_the_numbers_line_reminds_on_the_decision(window):
     canvas_edges.on_edge_removed(window, "glv", "decision", "numbers",
                                  "numbers")
     window._refresh_pipeline()
     card = window.pipeline.card("decision")
-    assert "wired" in card.problem(), card.problem()
+    assert "Connect “GLV”" in card.problem(), card.problem()
 
 
-def test_a_new_output_card_says_it_has_nothing_to_write(window):
+def test_a_new_output_card_says_nothing_flows_into_it(window):
     nid = window.model.add_step("output_report")
     window._refresh_pipeline()
-    assert "results port" in window.pipeline.card(nid).problem()
+    assert "Draw a line into it" in window.pipeline.card(nid).problem()
 
 
 # --------------------------------------------------------------------------- #
@@ -168,15 +203,15 @@ def test_write_comparison_grows_two_picture_ports(window):
         ("results", "results")]
 
 
-def test_an_output_cards_number_list_is_what_is_upstream_of_it(window):
-    names = [x.split("\t")[0] for x in window.model.labelled_features(
-        upto_node="report", include_upto=False)]
-    assert "glv_max" in names                   # GLV → Decision → 報表
+def test_an_output_cards_number_list_puts_what_flows_in_first(window):
+    def groups():
+        return _groups(window.model.labelled_features(
+            upto_node="report", include_upto=False))
+    assert groups()["glv_max"] == "GLV"          # GLV → Decision → 報表
     canvas_edges.on_edge_removed(window, "glv", "decision", "numbers",
                                  "numbers")
-    names = [x.split("\t")[0] for x in window.model.labelled_features(
-        upto_node="report", include_upto=False)]
-    assert "glv_max" not in names, "GLV 不在報表上游了，清單不該再列它"
+    assert "not connected" in groups()["glv_max"], \
+        "GLV 不流進報表了：照樣列得出來（F124），只是註明"
 
 
 # --------------------------------------------------------------------------- #
@@ -219,7 +254,7 @@ def test_a_line_that_wraps_to_the_next_row_goes_around_the_cards(qapp):
         view.tidy()
         back = [e for e in view._edges
                 if e.dst.in_port(e.dst_port).x() < e.src.out_port(e.port).x()]
-        assert ("decision", "numbers") in [e.pair() for e in back], \
+        assert ("decision", "report") in [e.pair() for e in back], \
             "前提：結果線要換行（一列兩張）"
         pen = QPainterPathStroker(QPen(Qt.black, 2.0))
         for e in back:

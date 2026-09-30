@@ -629,6 +629,7 @@ class GlvStatsStep(MultiSourceStep):
     """Gray level：量一塊的灰階，可以再說「跟誰比」（見模組 docstring）。"""
 
     key = "glv_stats"
+    measures = True                 # 產出就是數字：送得進判定（F124）
     #: 這張卡有一本手冊（F117 K1）—— 參數區那一行 "Manual" 打開它。
     manual = "USING-UNIFORMITY.md"
     #: ``key`` 不動（recipe 的鍵）。短名是使用者要的（F16）。

@@ -128,9 +128,9 @@ class _OutputStep(Step):
     # 快取邊界改成從宣告推導之後，這一格可以講實話了。
     category = CATEGORY_BATCH
     group = GROUP_OUTPUT
-    #: **寫的是線上游的東西**（F123 期 2，使用者：「不想綁死一定要有
-    #: Decision」）：從 Decision 接 ``results`` 就有類別，直接從量測卡接
-    #: ``numbers`` 就只有那些數字。可以接很多條（`batch.rows_for_output`）。
+    #: 寫的是**整張結果表**（F124）；從 Decision 接 ``results`` 就有類別，直接
+    #: 從量測卡接 ``numbers`` 就沒有（F123 期 2，使用者：「不想綁死一定要有
+    #: Decision」）。可以接很多條（`batch.rows_for_output`）。
     data_inputs = (RESULTS,)
     # **整批一次**（F17-④）。`is_batch` 現在是這一格推導出來的 ——
     # 直接寫 `is_batch = True` 仍然認得（舊卡片、外掛），但新的卡片
@@ -272,21 +272,6 @@ def _anchor(path: str, bctx: Any) -> str:
         return path
     base = os.path.dirname(src) if os.path.isfile(src) else src
     return os.path.join(base, path)
-
-
-def _upstream_notes(bctx: Any, notes: Any) -> List[Any]:
-    """GLV 留下的框，只留**這張卡上游**那幾張量的（F123 期 3）。
-
-    Output 寫的是線上游的東西（F123 期 2）；這一張吃的不是結果表而是
-    ``ctx.meta["glv_hist"]``，所以同一條規則在這裡再套一次。沒記是誰量的
-    （快取續跑的舊快照）就留著 —— 認不出來的不丟（同 `rows_for_output`）。
-    """
-    from ..pipeline.recipe_schema import upstream_of
-
-    up = upstream_of(str(bctx.node_id or ""), getattr(bctx.recipe, "edges", []))
-    return [n for n in (notes or [])
-            if not (isinstance(n, dict) and n.get("node"))
-            or not bctx.node_id or n["node"] in up]
 
 
 def _warn_if_unranked(key: str, bctx: Any, rows: Any,
@@ -2068,8 +2053,10 @@ class OutputUniformityStep(_OutputStep):
                 r = bctx.rerun(item, sources={k: getattr(v, "items", v)
                                               for k, v in sources.items()})
                 ctx = getattr(r, "context", None)
-                notes = _upstream_notes(
-                    bctx, (getattr(ctx, "meta", None) or {}).get("glv_hist"))
+                # 每一張 GLV 量的框都畫（F124：線講流到哪裡，不挑哪幾張 ——
+                # F123 期 3 只畫上游那幾張，那一版跟著「只寫上游」一起退掉）。
+                notes = list((getattr(ctx, "meta", None) or {}).get("glv_hist")
+                             or [])
                 series = export_unif.chart_series(
                     notes, metric=str(p["metric"]).strip())
             except Exception:  # 鐵則 7 的跨顆版

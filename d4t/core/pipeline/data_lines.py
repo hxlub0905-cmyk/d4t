@@ -1,22 +1,23 @@
-# d4t 數字線與結果線 — authored 2026-09-29 (F123 期 2).
-"""**數字線與結果線**：量測卡 → Decision → Output 的那兩種線（F123 期 2）。
+# d4t 數字線與結果線 — authored 2026-09-29 (F123 期 2); F124 2026-09-30.
+"""**送去判定的線與送去寫出的線**：量測卡 → Decision → Output（F123 期 2、F124）。
 
-使用者（2026-09-29）選了做法 B：Decision、Output 跟 Input 一樣是真的卡，線由
-使用者拉。三個答案（`docs/history/plans/F123-decision-and-output-cards.md` §1）：
+F123 做法 B：Decision、Output 跟 Input 一樣是真的卡，線由使用者拉
+（`docs/history/plans/F123-decision-and-output-cards.md`）。F124 改了規則
+（`docs/plans/F124-measured-flow.md` §1，使用者 2026-09-29）：
 
-* **數字線必要** —— 判定樹只能問「有線接進 Decision 的那幾張卡」的數字；
-* **Output 寫的是線上游的東西** —— 接 Decision 有類別，直接接量測卡沒有；
-* 線的顏色照資料種類（期 4）。
+* **線只講「流到哪裡」，不講「准你用哪些數字」。** 流過去的是整顆 defect ——
+  判定問得到的是 Decision **上游**每一張卡的數字（`recipe_schema.upstream_of`），
+  不是只有直接接進來的那幾張。問到一張沒流進來的卡：提醒＋接誰（warning，不擋）。
+* **送去判定的埠只長在量測卡上**（`Step.measures`）；其餘卡順手記的數字跟著流。
+* **Output 寫整張表**；上游有 Decision 才有類別。
 
 線住在 ``recipe.edges``（一條線就是一條線，F42 B4）；是不是資料線由
 `recipe_schema.is_data_edge` 判斷（下游那顆埠是它宣告的資料入埠）。這一支管
 兩件事，兩件都**不動引擎算出來的任何一個數字**：
 
-1. :func:`data_line_issues` —— lint。「數字線必要」由這裡守：Studio 與 CLI 在
-   error 時都不跑，所以它真的是必要的；而引擎照舊把整張數字表給判定。
-2. :func:`rows_for_output` —— 一張 Output 卡看得到哪幾欄。**判準是排除**：宣告
-   上屬於「不在上游的卡」的數字拿掉，認不出是誰的留著 —— 列舉的話，一個宣告
-   漏掉的數字會安靜地從報表上消失（這個 repo 最貴的那種失敗）。
+1. :func:`data_line_issues` —— lint。
+2. :func:`rows_for_output` —— 一張 Output 卡寫出去的結果表（整張；沒有 Decision
+   在上游時類別那兩格空著、判定自己算的數字不寫）。
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ from ..log import swallowed
 from .recipe_schema import is_data_edge, upstream_of
 from .step import DATA_PORTS, NUMBERS, REGISTRY, RESULTS, Step
 
-__all__ = ["data_line_issues", "rows_for_output", "wired_into",
+__all__ = ["data_line_issues", "rows_for_output", "wired_into", "feeder",
            "DECISION_KEY"]
 
 #: Decision 卡的 key（`steps/decision.py`）。core 不 import steps（卡片是外掛），
@@ -65,38 +66,93 @@ def _owners(recipe: Any, kinds: Sequence[str],
     return out
 
 
+def feeder(recipe: Any, owner: str,
+           registry: Optional[Dict[str, Type[Step]]] = None) -> str:
+    """要從哪一張卡拉線，``owner`` 記的數字才流得進 Decision／Output（F124）。
+
+    ``owner`` 自己送得出數字（量測卡）就是它；不然沿**它往下游的線**找第一張
+    送得出數字的卡（Normalize 記的 ``clip_frac`` 跟著圖流到 GLV，接 GLV 就到了）。
+    找不到回 ``""``：那個數字在這份 recipe 裡沒有路可以流過去，一鍵接不起來。
+    """
+    reg = REGISTRY if registry is None else registry
+    nodes = recipe.nodes
+
+    def sends(nid: str) -> bool:
+        node = nodes.get(nid)
+        cls = reg.get(node.step) if node is not None else None
+        if cls is None:
+            return False
+        try:
+            return cls.data_output(cls.validate_params(node.params)) == NUMBERS
+        except Exception:  # 參數壞了由 bad-param 講
+            return False
+
+    seen, todo = {owner}, [owner]
+    while todo:
+        nid = todo.pop(0)
+        if sends(nid):
+            return nid
+        for e in recipe.edges:
+            if e.src == nid and e.dst not in seen \
+                    and not is_data_edge(e, nodes, reg):
+                seen.add(e.dst)
+                todo.append(e.dst)
+    return ""
+
+
+def _not_flowing(recipe: Any, dst: str, names: Sequence[str], kind: str,
+                 reg: Dict[str, Type[Step]], decided: bool,
+                 ) -> Dict[str, List[str]]:
+    """``names`` 裡**沒有流進** ``dst`` 的：卡 id → 那張卡的數字。
+
+    流進來＝產出它的卡在 ``dst`` 上游。判定自己寫的數字（``score``、let、
+    ``decide_unanswered``，沒有卡）要上游有 Decision（``decided``）—— 沒有的話
+    歸在 ``""`` 底下。認不出是誰的（沒有人宣告）不算：那是別的 lint 的事。
+    """
+    up = upstream_of(dst, recipe.edges)
+    owners = _owners(recipe, [kind], reg)
+    away: Dict[str, List[str]] = {}
+    for name in names:
+        found = owners.get(name, set())
+        cards = {o for o in found if o}
+        if cards and not (cards & up):
+            for o in sorted(cards):
+                away.setdefault(o, []).append(name)
+        elif ("" in found and not cards and not decided
+              and name not in _NOT_THE_DECISIONS):
+            away.setdefault("", []).append(name)
+    return away
+
+
 def rows_for_output(recipe: Any, node_id: str, rows: Sequence[Dict[str, Any]],
                     kinds: Sequence[str],
                     registry: Optional[Dict[str, Type[Step]]] = None,
                     ) -> Tuple[List[Dict[str, Any]], bool]:
-    """一張 Output 卡看得到的結果表 → ``(rows, 有沒有類別)``。
+    """一張 Output 卡寫出去的結果表 → ``(rows, 有沒有類別)``。
 
-    「上游」＝沿**所有**線往回走得到的卡（`recipe_schema.upstream_of`）。上游
-    有一張啟用的 Decision 才有類別；沒有的話 ``score`` 與 ``bin`` 兩格是空的、
-    判定自己算的數字也不寫。宣告上屬於不在上游的卡的數字拿掉；認不出是誰的
-    （沒有人宣告）留著。
+    **整張表**（F124）：線講的是流到哪裡，不是准寫哪幾欄。上游（沿**所有**線往回
+    走，`recipe_schema.upstream_of`）有一張啟用的 Decision 才有類別；沒有的話
+    ``score`` 與 ``bin`` 兩格是空的、判定自己算的數字也不寫。
+
+    ⚠ F123 的版本是「只寫上游卡片的數字」（排除式）。F124 起量測卡以外的卡沒有
+    送出去的埠，照那個判準一張量測卡接進來、它上游那幾張卡以外的數字全被排掉
+    —— 報表會安靜地少欄。
     """
     nodes = recipe.nodes
     up = upstream_of(node_id, recipe.edges)
     decided = any(n in nodes and nodes[n].step == DECISION_KEY and nodes[n].enabled
                   for n in up)
-    drop: Set[str] = set()
-    for name, owners in _owners(recipe, kinds, registry).items():
-        cards = {o for o in owners if o}
-        if cards and not (cards & up):
-            drop.add(name)
-        elif ("" in owners and not cards and not decided
-              and name not in _NOT_THE_DECISIONS):
-            drop.add(name)
-    if decided and not drop:
+    if decided:
         return list(rows), True
+    drop = {name for name, owners in _owners(recipe, kinds, registry).items()
+            if "" in owners and not {o for o in owners if o}
+            and name not in _NOT_THE_DECISIONS}
     out: List[Dict[str, Any]] = []
     for r in rows:
         r2 = dict(r)
         r2["features"] = {k: v for k, v in (r.get("features") or {}).items()
                           if k not in drop}
-        if not decided:
-            r2["score"], r2["bin"] = None, None
+        r2["score"], r2["bin"] = None, None
         out.append(r2)
     return out, decided
 
@@ -153,34 +209,20 @@ def data_line_issues(recipe: Any, kind: str, order: Sequence[str],
                 detail="route '%s': %s. %s" % (kind, why, advice),
                 route=str(kind), advice=advice))
 
-    # ---- 2. 判定問到的數字要有線（必要）--------------------------------------
+    # ---- 2. 判定問到的數字要流得進來（提醒，不擋；F124）------------------------
     cards = [nid for nid in order if nid in nodes
              and nodes[nid].step == DECISION_KEY]
     decide_like = (getattr(recipe, "decide", None) is not None
                    or str(getattr(recipe.score, "expr", "") or "").strip())
     if cards and nodes[cards[0]].enabled:
         dec = cards[0]
-        wired = set(wired_into(recipe, dec))
-        owners = _owners(recipe, [kind], reg)
-        missing: Dict[str, List[str]] = {}
-        for name in sorted(referenced_features(recipe)):
-            found = {o for o in owners.get(name, ()) if o}
-            if found and not (found & wired):
-                for o in sorted(found):
-                    missing.setdefault(o, []).append(name)
-        if missing:
-            who = tuple(card_name(nodes, o) for o in missing)
-            names = tuple(n for ns in missing.values() for n in ns)
-            advice = ("Draw a line from the numbers port of %s into the "
-                      "Decision card - the decision can only ask about "
-                      "numbers that are wired into it."
-                      % " and ".join(Q % w for w in who))
-            issues.append(Issue(
-                code="decision-not-wired", level="error", node_id=dec,
-                title="The decision asks about numbers that are not wired in",
-                detail="route '%s': it asks about %s. %s"
-                       % (kind, ", ".join(names), advice),
-                names=names, route=str(kind), advice=advice))
+        away = _not_flowing(recipe, dec, sorted(referenced_features(recipe)),
+                            kind, reg, decided=True)
+        if away:
+            issues.append(_not_flowing_issue(
+                recipe, "decision-not-wired", dec, away, kind, reg,
+                title="The decision asks about numbers that do not flow into it",
+                where="the Decision card"))
     elif decide_like and not cards and any(
             RESULTS in getattr(cls_of(n), "data_inputs", ()) for n in order):
         advice = ("Add the Decision card and wire it into the Output cards - "
@@ -192,18 +234,28 @@ def data_line_issues(recipe: Any, kind: str, order: Sequence[str],
                    "card. %s" % (kind, advice),
             route=str(kind), advice=advice))
 
-    # ---- 3. Output 卡：要有東西進來；寫類別的要有 Decision ------------------
+    # ---- 3. Output 卡：要有東西流進來；寫類別的要有 Decision --------------------
+    # 「流得進來的東西」：一張 Decision，或一張送得出數字的量測卡。一份只有影像
+    # 卡的 recipe（整理圖片的 DOE）沒有任何東西接得進 Output —— 那時候講「沒接」
+    # 是一條修不好的紅字（推廣鐵則），所以不講。
+    can_feed = any(
+        cls_of(n) is not None and (
+            nodes[n].step == DECISION_KEY or feeder(recipe, n, reg) == n)
+        for n in order if nodes.get(n) is not None and nodes[n].enabled)
     for nid in order:
         c = cls_of(nid)
         if c is None or RESULTS not in c.data_inputs or not nodes[nid].enabled:
             continue
+        # 任何一條線都算（Write comparison 的左圖右圖也是流進來的東西）。
         if not any(e.dst == nid for e in recipe.edges):
-            advice = ("Draw a line into its results port - from the Decision "
-                      "card for the classes, or from a measuring card for its "
-                      "numbers alone.")
+            if not can_feed:
+                continue
+            advice = ("Draw a line into it - from the Decision card for the "
+                      "classes, or from a measuring card for its numbers "
+                      "alone.")
             issues.append(Issue(
                 code="output-not-connected", level="error", node_id=nid,
-                title="%s has nothing to write" % (Q % card_name(nodes, nid)),
+                title="Nothing flows into %s" % (Q % card_name(nodes, nid)),
                 detail="route '%s': nothing is wired into it. %s"
                        % (kind, advice),
                 route=str(kind), advice=advice))
@@ -211,66 +263,92 @@ def data_line_issues(recipe: Any, kind: str, order: Sequence[str],
         up = upstream_of(nid, recipe.edges)
         decided = any(u in nodes and nodes[u].step == DECISION_KEY
                       and nodes[u].enabled for u in up)
-        issues.extend(_numbers_not_upstream(recipe, nid, c, kind, up, decided,
-                                            reg))
+        issues.extend(_numbers_not_upstream(recipe, nid, c, kind, decided, reg))
         if getattr(c, "needs_decision", False):
             if not decided:
                 advice = ("It writes each defect's class, so wire the "
                           "Decision card into it.")
+                dec_ids = tuple(n for n in cards if nodes[n].enabled)
                 issues.append(Issue(
                     code="needs-decision", level="error", node_id=nid,
                     title="%s needs the classes"
                           % (Q % card_name(nodes, nid)),
                     detail="route '%s': there is no Decision upstream of it. "
                            "%s" % (kind, advice),
-                    route=str(kind), advice=advice))
+                    route=str(kind), advice=advice, connect=dec_ids[:1]))
     return issues
 
 
+def _not_flowing_issue(recipe: Any, code: str, dst: str,
+                       away: Dict[str, List[str]], kind: str,
+                       reg: Dict[str, Type[Step]], title: str,
+                       where: str) -> Any:
+    """「用到的數字沒有流進 ``dst``」那一條（Decision 與 Output 共用，F124）。
 
-def _numbers_not_upstream(recipe: Any, nid: str, c: Type[Step], kind: str,
-                          up: Set[str], decided: bool,
-                          reg: Dict[str, Type[Step]]) -> List[Any]:
-    """Output 卡用**名字**吃的數字（排序、欄位、要畫的數字），產出它的卡不在
-    這張卡上游（F123 期 3）。
-
-    Output 寫的是線上游的東西（`rows_for_output`）—— 所以一格指著上游以外的
-    數字，跑得完、資料夾出得來，只是**那一欄整排空白**，而空白的一欄跟「這一批
-    真的量不到」長得一模一樣。warning：卡片照樣寫得出東西。
+    **warning**：引擎照舊拿得到每一個數字（整顆 defect 都在），跑得完、寫得出來
+    —— 只是畫布講的流跟實際用到的對不上，使用者看著畫布講不出那個數字從哪來。
+    ``connect`` 給畫面那顆鈕：每張卡找一張拉了線就流得進來的（`feeder`）。
     """
     from .recipe_validate import Issue, card_name
 
+    nodes = recipe.nodes
+    names = tuple(n for ns in away.values() for n in ns)
+    who: List[str] = []
+    connect: List[str] = []
+    stuck: List[str] = []
+    for owner in away:
+        if owner == "":
+            dec = next((n for n, node in nodes.items()
+                        if node.step == DECISION_KEY and node.enabled), "")
+            via = dec
+            who.append("Decision")
+        else:
+            via = feeder(recipe, owner, reg)
+            who.append(card_name(nodes, owner))
+        if via and via != dst and via not in connect:
+            connect.append(via)
+        elif not via:
+            stuck.append(who[-1])
+    if connect:
+        advice = ("Connect %s to %s so the canvas shows where %s come%s from."
+                  % (" and ".join(Q % card_name(nodes, c) for c in connect),
+                     where, "that number" if len(names) == 1 else "those numbers",
+                     "s" if len(names) == 1 else ""))
+    else:
+        advice = ("Nothing that measures after %s flows into %s - add a "
+                  "measuring card after it, or ask about another number."
+                  % (" and ".join(Q % w for w in stuck), where))
+    return Issue(
+        code=code, level="warning", node_id=dst, title=title,
+        detail="route '%s': it uses %s, from %s. %s"
+               % (kind, ", ".join(names), " and ".join(Q % w for w in who),
+                  advice),
+        names=names, route=str(kind), advice=advice, connect=tuple(connect))
+
+
+def _numbers_not_upstream(recipe: Any, nid: str, c: Type[Step], kind: str,
+                          decided: bool,
+                          reg: Dict[str, Type[Step]]) -> List[Any]:
+    """Output 卡用**名字**吃的數字（排序、欄位、要畫的數字），產出它的卡沒有
+    流進這張卡（F123 期 3；F124 起是提醒）。
+
+    F124 起 Output 寫整張表，所以那一欄不會空 —— 這一條留著是因為畫布講的流跟
+    實際用到的對不上（跟 Decision 那一條同一個理由、同一顆「Connect」鈕）。
+    """
     try:
         names = [str(n) for n in c.feature_names_in(
             c.validate_params(recipe.nodes[nid].params))]
     except Exception:  # 參數壞了由 bad-param 講
         return []
-    owners = _owners(recipe, [kind], reg)
-    away: List[str] = []
-    who: List[str] = []
-    for name in names:
-        found = owners.get(name, set())
-        cards = {o for o in found if o}
-        if cards and not (cards & up):
-            away.append(name)
-            who.extend(card_name(recipe.nodes, o) for o in sorted(cards)
-                       if card_name(recipe.nodes, o) not in who)
-        elif "" in found and not cards and not decided \
-                and name not in _NOT_THE_DECISIONS:
-            away.append(name)
-            if "Decision" not in who:
-                who.append("Decision")
+    away = _not_flowing(recipe, nid, names, kind, reg, decided)
     if not away:
         return []
-    advice = ("Wire %s into this card (its numbers port into the results "
-              "port) - it only writes what is upstream of its lines, so that "
-              "column would be empty." % " and ".join(Q % w for w in who))
-    return [Issue(
-        code="output-number-not-upstream", level="warning", node_id=nid,
-        title="%s uses numbers from a card that is not wired into it"
+    from .recipe_validate import card_name
+    return [_not_flowing_issue(
+        recipe, "output-number-not-upstream", nid, away, kind, reg,
+        title="%s uses numbers that do not flow into it"
               % (Q % card_name(recipe.nodes, nid)),
-        detail="route '%s': it uses %s. %s" % (kind, ", ".join(away), advice),
-        names=tuple(away), route=str(kind), advice=advice)]
+        where="this card")]
 
 
 Q = "“%s”"

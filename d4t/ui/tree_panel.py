@@ -752,10 +752,13 @@ class TreePanel(QWidget):
             # 而一格空白會把使用者丟回原點，那才是要避免的東西。
             rows = list(self._rows)
         lets = [str(x.name) for x in getattr(self._model.decide, "let", [])]
-        # 只建議**接進 Decision** 的數字（F123 期 2：數字線必要）—— 跟這個面板
-        # 的「插入數字 ▾」同一份（宿主餵的就是 `decision_numbers`；還沒餵就問 model）。
+        # 只建議**流進 Decision** 的數字（F124）：「插入數字 ▾」列得出全部，但
+        # 建議一個沒流進來的數字，等於建議一題馬上會被提醒的題目。清單跟這個
+        # 面板那支同一份（宿主餵的就是 `decision_numbers`；還沒餵就問 model）。
         pool = self._features or list(self._model.decision_numbers())
-        wired = [str(x).split("\t", 1)[0] for x in pool]
+        far = set(self._model.decision_numbers_not_flowing())
+        wired = [n for n in (str(x).split("\t", 1)[0] for x in pool)
+                 if n not in far]
         cond = suggest_condition(rows, prefer=lets, allowed=wired + lets)
         if cond is None:
             return False

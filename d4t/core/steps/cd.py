@@ -196,6 +196,7 @@ class CdMeasureStep(MultiSourceStep):
     """CD：一條線有多寬，或一團東西有多大（見模組說明的岔路）。"""
 
     key = "cd_measure"
+    measures = True                 # 產出就是數字：送得進判定（F124）
     #: 這張卡有一本手冊（F117 K1）—— 參數區那一行 "Manual" 打開它。
     manual = "USING-CD.md"
     label = "CD"

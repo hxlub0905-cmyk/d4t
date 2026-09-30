@@ -40,8 +40,9 @@ def test_an_unmarked_recipe_writes_exactly_what_it_used_to():
     F119 之前的檔案）存出來跟以前逐位元組相同，`RECIPE_VERSION` 也不必動。
     """
     # F119 沒有動版本號（它沒有遷移）；之後第 6 版是 F123 期 1 的 Decision 卡、
-    # 第 7 版是 F123 期 2 的數字線與結果線。
-    assert RECIPE_VERSION == 7
+    # 第 7 版是 F123 期 2 的數字線與結果線、第 8 版是 F124 的「只有量測卡送得
+    # 進判定」。
+    assert RECIPE_VERSION == 8
     r = Recipe(recipe_id="t", routes={"ebi_patch": []}, nodes={}, edges=[],
                score=ScoreSpec(expr="", threshold=0.0, bins={}),
                decide=DecideSpec(tree=_tree(),

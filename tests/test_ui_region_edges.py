@@ -462,8 +462,9 @@ def test_ports_never_pile_up_on_a_card_with_many_regions(window):
     # 一條原樣送出的流 ＋ 五層 × **三個名字**（F29 之前一層只有一個名字，
     # 所以這裡本來是 6）。`canvas._MAX_REGION_PORTS` 數的是埠不是區域 ——
     # 它留在 6 的話，第三層開始的每一個區域在畫布上都沒有出口。
-    # ＋1：ROI 卡寫數字，所以還有一顆 numbers 出埠（F123 期 2）—— 它也不准疊。
-    assert len(anchors) == 1 + 5 * 3 + 1, [d["name"] for d in item.out_specs()]
+    # ROI 卡記的數字（``layout_ok`` 等）跟著流下去，沒有自己的出埠（F124：送去
+    # 判定的埠只長在量測卡上；F123 期 2 那時這裡是 ＋1）。
+    assert len(anchors) == 1 + 5 * 3, [d["name"] for d in item.out_specs()]
     gaps = [anchors[i + 1].y() - anchors[i].y() for i in range(len(anchors) - 1)]
     assert min(gaps) >= 2 * canvas_mod._PORT_R, gaps
     for i, anchor in enumerate(anchors):
@@ -485,7 +486,7 @@ def test_pick_none_folds_a_family_into_one_port(window):
     window._refresh_pipeline()
 
     item = window.pipeline.node_item(gds)
-    assert len(item.out_anchors_local()) == 1 + 5 * 1 + 1, \
+    assert len(item.out_anchors_local()) == 1 + 5 * 1, \
         [d["name"] for d in item.out_specs()]
     names = [d["name"] for d in item.out_specs() if d["kind"] == "region"]
     assert names == ["a", "b", "c", "d", "e"]

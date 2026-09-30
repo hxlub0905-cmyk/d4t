@@ -1,6 +1,6 @@
 # F124 — 畫布是一條從頭接到尾的資料流
 
-狀態：**計畫（2026-09-29）—— 使用者看過六張示意圖說「可以」；還沒動程式。**
+狀態：**期 1 做完（2026-09-30）；期 2～4 未動。** 使用者看過六張示意圖說「可以」。
 前一份：[`F123`](../history/plans/F123-decision-and-output-cards.md)（Decision 與 Output
 變成真的卡）。這一份修 F123 期 2 的規則，F123 其餘三期照留。
 
@@ -164,3 +164,30 @@ characterization 那條流因此是 Pair source → H2H → Decision：判定第
 （repo 沒動）：① ebi-die-to-die ② rsem-worst-box ③ one-image-uniformity
 ④ characterization（手動排版）⑤ 判定問到另一條支線上的 CD 時的提醒 ⑥ 從 Denoise
 丟到 Write comparison 時的小選單。⑤ 的提醒框、⑥ 的虛線與選單是手畫的。
+
+## 8. 期 1 的紀錄（2026-09-30）
+
+* `Step.measures`（GLV、CD、Focus index、H2H）；`Step.data_output` 只給它們 ``numbers``。
+* `data_lines`：`feeder`（要接哪一張卡，這個數字才流得進來 —— 它自己，或它下游
+  第一張量測卡）、`_not_flowing`；`decision-not-wired` 與 `output-number-not-upstream`
+  共用 `_not_flowing_issue`：warning、判準是「不在上游」、`Issue.connect` 帶接誰
+  （新的選配欄位）。`needs-decision` 也帶 `connect`（那張 Decision）。
+* `output-not-connected`：**一份沒有任何東西接得進 Output 的 recipe 不講**（只有影像
+  卡、整理圖片那種）—— 量測卡以外的卡沒有送出去的埠之後，那一條在那種 recipe 上是
+  修不好的紅字。任何一條線（含 Write comparison 的左圖右圖）都算流進來。
+* `rows_for_output` 寫整張表；Write charts 與 `charts-need-each-box` /
+  `unknown-chart-metric` 回到看每一張 GLV（`output._upstream_notes` 刪掉）。
+* 「插入數字 ▾」：`decision_numbers` 與 Output 卡的 `labelled_features` 全部列出，
+  流進來的排前面，沒流進來的那一組標題加「· not connected」。判定面板的「建議一題」
+  避開確定沒流進來的（`decision_numbers_not_flowing` —— 問「確定沒流進來」不問
+  「確定流進來」：宿主餵的名字可能 model 不認得來歷）。
+* **第 8 版遷移** `_migrate_measured_lines` 取代第 7 版那一道（`version < 8` 一道
+  跑完）：拿掉從不量東西的卡拉出來的數字線、判定問到但沒流進來的從 `feeder` 補、
+  一條線都沒有的 Output 補（有 Decision 從 Decision，沒有從每一張量測卡）。第 7 版
+  那道給每一張「以前寫得出去」的卡補的直接線不補了（報表寫整張表）。
+  `describe_migration` 講得出「took off N wires from cards that do not measure」。
+* 出貨 recipe 存成第 8 版（線不變）；one-image-uniformity 的 `numbers` 改名 `report`。
+* 文件：`USING-CHARACTERIZATION.md` 的步驟與 §3／§3.1（「不用接線」拿掉，`pair_found`
+  不用另外拉線）；ARCHITECTURE 那一行。
+* 黃金值三份逐項相同；pyright 128（第一版 +2：Write charts 的 `notes` 可能是 None ——
+  刪掉的那一支以前順手把它變成 list）。

@@ -4,9 +4,11 @@
 1. **Write comparison** 的左右兩張圖是真的影像埠 —— 線接哪一張卡的哪一顆埠，
    拿的就是那一張卡當時吐的那一份（`engine.image_through_line`），不是整份結果裡
    「最後一個寫這個名字的人」。
-2. **Write charts** 只畫它上游那幾張 GLV 量的框（`output._upstream_notes`）。
-3. Output 卡用名字吃的數字，產出它的卡不在上游 → 講出來
-   （`output-number-not-upstream`），不然那一欄會安靜地整排空白。
+2. **Write charts** 畫每一張 GLV 量的框（F124 起；F123 期 3 只畫上游那幾張，
+   跟著「Output 只寫上游」一起退掉）。
+3. Output 卡用名字吃的數字，產出它的卡沒有流進來 → 提醒＋接誰
+   （`output-number-not-upstream`，warning）。F124 起 Output 寫整張表，那一欄
+   不會空 —— 提醒的是畫布講的流跟用到的對不上。
 """
 from __future__ import annotations
 
@@ -28,7 +30,6 @@ from d4t.core.pipeline.recipe import (  # noqa: E402
     Edge, Recipe, RecipeNode, ScoreSpec,
 )
 from d4t.core.pipeline.step import NUMBERS, RESULTS, get_step  # noqa: E402
-from d4t.core.steps.output import _upstream_notes  # noqa: E402
 
 KIND = "ebi_patch"
 
@@ -99,25 +100,23 @@ def test_an_unconnected_left_picture_is_none(dataset):
 
 
 # --------------------------------------------------------------------------- #
-# 2. Write charts：只畫上游那幾張 GLV 的框
+# 2. Write charts：每一張 GLV 的框都算（F124）
 # --------------------------------------------------------------------------- #
-class _Bctx:
-    def __init__(self, recipe, node_id):
-        self.recipe, self.node_id = recipe, node_id
-
-
-def test_the_charts_draw_only_the_boxes_of_the_gray_level_cards_upstream():
+def test_the_charts_count_every_gray_level_card_not_just_the_wired_one():
+    """`charts-need-each-box` 看的是整份 recipe 的 GLV，不是接進來的那一張。"""
     recipe = Recipe(recipe_id="c", routes={KIND: ["g1", "g2", "out"]},
                     nodes={"g1": RecipeNode("g1", "glv_stats", {}),
-                           "g2": RecipeNode("g2", "glv_stats", {}),
-                           "out": RecipeNode("out", "output_uniformity", {})},
+                           "g2": RecipeNode("g2", "glv_stats",
+                                            {"across_boxes": "each box",
+                                             "metrics": "glv_median"}),
+                           "out": RecipeNode("out", "output_uniformity",
+                                             {"folder": "/tmp/x",
+                                              "metric": "glv_median"})},
                     edges=[Edge("g1", "out", NUMBERS, RESULTS)],
                     score=ScoreSpec(expr="", threshold=0.0, bins={}))
-    notes = [{"node": "g1", "region": "a"}, {"node": "g2", "region": "b"},
-             {"region": "old"}]
-    kept = _upstream_notes(_Bctx(recipe, "out"), notes)
-    assert [n["region"] for n in kept] == ["a", "old"], \
-        "g2 不在上游；沒記是誰量的（舊快照）留著"
+    codes = {i.code for i in validate(recipe, kind=KIND)}
+    assert "charts-need-each-box" not in codes, "g2 沒接進來也算"
+    assert "unknown-chart-metric" not in codes
 
 
 # --------------------------------------------------------------------------- #
@@ -145,10 +144,16 @@ def _warned(recipe):
             if i.code == "output-number-not-upstream"]
 
 
-def test_a_column_from_a_card_that_is_not_wired_in_is_called_out():
+def test_a_column_from_a_card_that_does_not_flow_in_is_called_out():
     got = _warned(_report("cd_median"))
     assert got and got[0].level == "warning" and got[0].node_id == "out"
     assert "cd_median" in got[0].names
+    assert got[0].connect == ("cd",), "一顆「Connect」：接 CD 就流進來了"
     assert not _warned(_report("cd_median",
                                Edge("cd", "out", NUMBERS, RESULTS)))
-    assert not _warned(_report("glv_max")), "GLV 經 Decision 在上游"
+    assert not _warned(_report("glv_max")), "GLV 經 Decision 流進來"
+
+
+def test_a_number_that_rides_along_the_lines_is_not_called_out():
+    """Input 記的 `n_channels` 跟著圖流到 GLV、再進 Decision、再到報表 —— 不必另外接。"""
+    assert not _warned(_report("n_channels"))

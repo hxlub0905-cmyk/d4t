@@ -76,7 +76,19 @@ def describe_migration(raw: Any, recipe: Any) -> List[str]:
     raw_nodes = raw.get("nodes") or {}
     if old_version < RECIPE_VERSION:
         raw_edges = raw.get("edges") or []
-        added = len(getattr(recipe, "edges", []) or []) - len(raw_edges)
+        # 第 8 版那一道（F124）會**拿掉**幾條：從不再送得出數字的卡拉進 Decision／
+        # Output 的線。只數那一種 —— 其他遷移改埠名的線在新舊兩邊各算一次，
+        # 用集合相減會把一次改名講成「加一條、拿一條」。
+        new_set = {tuple(e.to_json()) for e in (getattr(recipe, "edges", []) or [])
+                   if hasattr(e, "to_json")}
+        dropped = [e for e in raw_edges
+                   if isinstance(e, (list, tuple)) and len(e) == 4
+                   and e[1] == NUMBERS and tuple(e) not in new_set]
+        added = (len(getattr(recipe, "edges", []) or [])
+                 - (len(raw_edges) - len(dropped)))
+        if dropped:
+            says.append("took off %d wire%s from cards that do not measure"
+                        % (len(dropped), "" if len(dropped) == 1 else "s"))
         if added > 0:
             says.append("added %d wire%s" % (added, "" if added == 1 else "s"))
         if isinstance(raw_nodes, dict):
@@ -483,34 +495,54 @@ def _migrate_decision_into_a_card(nodes: Dict[str, "RecipeNode"],
         routes[key] = list(order[:at]) + [nid] + list(order[at:])
 
 
-def _migrate_data_lines(recipe: Any) -> None:
-    """數字線與結果線（F123 期 2）：舊檔案補線，**判定與寫出去的東西逐項不變**。
+def _migrate_measured_lines(recipe: Any) -> None:
+    """送去判定、送去寫出的線（F123 期 2 開的頭，F124 定的形狀）。
 
-    **只對第 6 版以前的檔案**（`Recipe.from_json_dict` 的版本閘，鐵則 9 —— 第 7 版
-    起線是使用者拉的，一份刻意沒接某張卡的新 recipe 不該被補）。補三種：
+    **只對第 7 版以前的檔案**（`Recipe.from_json_dict` 的版本閘，鐵則 9 —— 第 8 版
+    起線是使用者拉的，一份刻意沒接某張卡的新 recipe 不該被補）。三步：
 
-    1. 判定問到的每一個數字 → 產出它的卡補一條 ``numbers`` 線接進 Decision
-       （數字線是必要的，`validate` 的 ``decision-not-wired``）；
-    2. 有 Decision 的話，每一張 Output 卡補一條 Decision → Output 的 ``results``；
-    3. **以前寫得出去、補完之後不在上游的**：Output 以前寫整張數字表，現在寫的是
-       線上游的東西（`batch.rows_for_output`）—— 每一張寫數字、但不在那張 Output
-       上游的卡，各補一條直接接 Output 的 ``numbers`` 線。不補的話舊報表會安靜地
-       少幾欄。
+    1. **拿掉從不再送得出數字的卡拉出來的數字線**（F124：只有量測卡有那顆埠；
+       第 7 版的檔案可能有 Normalize／Input → Decision 那種線）。判準是「舊東西
+       在」：一條 ``numbers`` 資料線、來源那張卡的 `Step.data_output` 已經不是
+       ``numbers``。
+    2. **判定問到的數字要流得進 Decision**：產出它的卡不在 Decision 上游，就從
+       `data_lines.feeder`（它自己，或它下游第一張量測卡）補一條線。沒有路可流的
+       留給 lint 講（`decision-not-wired`，warning）。
+    3. **每一張 Output 都要有東西流進來**：一條線都沒有的，有 Decision 就從
+       Decision 接；沒有就從每一張量測卡接。
 
+    F123 的版本（第 7 版）另外給「以前寫得出去、補完之後不在上游的卡」各補一條
+    直接接 Output 的線 —— F124 起 Output 寫整張表，那幾條不再需要，所以不補。
     在 `Recipe` 組好之後跑：「誰產出哪個數字」只有一份答案（`bound_specs`），而它
-    要一份完整的 recipe。只加線，不動任何卡片或參數 —— 引擎算出來的數字不變。
+    要一份完整的 recipe。只動線，不動任何卡片或參數 —— 引擎算出來的數字不變。
     """
-    from .recipe_schema import upstream_of
+    from .data_lines import feeder
+    from .recipe_schema import is_data_edge, upstream_of
     from .recipe_validate import referenced_features
     from .verdict_features import bound_specs   # 延後：它 import recipe
 
     nodes, edges = recipe.nodes, recipe.edges
+
+    def sends(nid: str) -> bool:
+        node = nodes.get(nid)
+        cls = REGISTRY.get(node.step) if node is not None else None
+        if cls is None:
+            return False
+        try:
+            return cls.data_output(cls.validate_params(node.params)) == NUMBERS
+        except Exception:  # 參數壞了由 bad-param 講
+            return False
+
+    edges[:] = [e for e in edges
+                if not (e.src_out == NUMBERS and is_data_edge(e, nodes)
+                        and e.src in nodes and not sends(e.src))]
+
     owners: Dict[str, Set[str]] = {}
     for kind in recipe.routes:
         try:
             specs = bound_specs(recipe, kind)
         except Exception:  # 壞掉的 route 由 lint 講；這裡只是少補幾條線
-            swallowed("recipe_migrations._migrate_data_lines")
+            swallowed("recipe_migrations._migrate_measured_lines")
             continue
         for b in specs:
             if b.node_id:
@@ -526,17 +558,24 @@ def _migrate_data_lines(recipe: Any) -> None:
     if decision:
         for name in sorted(referenced_features(recipe)):
             for owner in sorted(owners.get(name, ())):
-                add(Edge(owner, decision, NUMBERS, NUMBERS))
-    writers = sorted({o for found in owners.values() for o in found})
+                if owner in upstream_of(decision, edges):
+                    continue
+                via = feeder(recipe, owner)
+                if via and via != decision:
+                    add(Edge(via, decision, NUMBERS, NUMBERS))
+    senders: List[str] = []
+    for order in recipe.routes.values():
+        senders.extend(n for n in order if n not in senders and sends(n))
     for out in sorted(nid for nid, n in nodes.items()
                       if getattr(REGISTRY.get(n.step), "scale", "") == SCALE_LOT
                       and RESULTS in getattr(REGISTRY.get(n.step),
                                              "data_inputs", ())):
+        if any(e.dst == out for e in edges):
+            continue
         if decision:
             add(Edge(decision, out, RESULTS, RESULTS))
-        up = upstream_of(out, edges)
-        for w in writers:
-            if w not in up:
+        else:
+            for w in senders:
                 add(Edge(w, out, NUMBERS, RESULTS))
 
 

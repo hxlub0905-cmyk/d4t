@@ -25,7 +25,6 @@ from .recipe_schema import (
     is_region_edge,
     let_names_written,
     route_for,
-    upstream_of,
     version_skew,
 )
 from .step import (
@@ -689,6 +688,10 @@ class Issue:
     #: 在產地做又對又便宜；畫面留著的是**它才答得出來**的那兩件
     #: （幾條 route、列到第幾個）。
     advice: str = ""
+    #: 「接上這幾張卡就好」（F124）：一顆「Connect」鈕要從哪幾張卡（node id）
+    #: 拉一條線進 ``node_id``。空的＝沒有一鍵的解法。鈕是使用者按的，線走跟手拉
+    #: 同一條路（鐵則 10）——這裡只說**接誰**，不接。
+    connect: Tuple[str, ...] = ()
 
 
 #: 使用者面的名字在句子裡一律**加彎引號**。一個沒有引號的名字在一串英文中間
@@ -991,11 +994,8 @@ def _chart_metric_issues(recipe: "Recipe", step_cls, p: Dict[str, Any],
     # `route()` —— 於是那個迴圈一次都沒跑，正常的 recipe 也被報一句話。
     have: List[str] = []
     each_box = False
-    # **只算它上游的 GLV**（F123 期 3）：這張卡畫的是線上游那幾張量的框
-    # （`output._upstream_notes`），不是整條 route 上的每一張。
-    up = upstream_of(nid, recipe.edges)
     for other in list(recipe.routes.get(k, []) or []):
-        if other == nid or other not in up:
+        if other == nid:
             continue
         node = recipe.nodes.get(other)
         if node is None or not getattr(node, "enabled", True):
@@ -1894,7 +1894,7 @@ def validate(recipe: Recipe, kind: Optional[str] = None,
                 title="Two Decision cards", route=str(k), advice=advice,
                 detail="route '%s' has %d Decision cards. %s"
                        % (k, len(cards), advice)))
-        # 數字線與結果線（F123 期 2）：數字線必要、Output 寫上游的東西。
+        # 送去判定／寫出的線（F123 期 2、F124）：流得進來嗎、接錯了沒。
         from .data_lines import data_line_issues
         issues.extend(data_line_issues(recipe, k, order, registry))
 

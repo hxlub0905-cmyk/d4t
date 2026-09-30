@@ -40,9 +40,9 @@ class DecisionStep(Step):
     reads = []
     writes = []
     features_out = []
-    #: 量測卡的數字從這裡接進來（F123 期 2）。判定問得到的數字**只有**接進來的
-    #: 那幾張卡的（`validate` 的 ``decision-not-wired``）；引擎照舊把整張數字表
-    #: 給判定 —— 必要性由 lint 守（error 不跑），算出來的數字一個都不動。
+    #: 量測卡把量完的 defect 從這裡送進來（F123 期 2）。判定問得到的是**流進
+    #: 來的**每一個數字 —— 上游每一張卡的（F124）；問到沒流進來的卡是提醒
+    #: （``decision-not-wired``，warning）。引擎照舊把整張數字表給判定。
     data_inputs = (NUMBERS,)
 
     @classmethod

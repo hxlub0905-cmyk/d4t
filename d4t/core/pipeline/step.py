@@ -1045,15 +1045,23 @@ class Step(ABC):
     #: 收**資料線**的入埠（F123 期 2；見 :data:`NUMBERS`）。一顆資料埠**接很多
     #: 條**，跟影像埠「一顆一條」相反。預設沒有。
     data_inputs: ClassVar[Tuple[str, ...]] = ()
+    #: **這張卡的產出就是數字**（F124）：它有一顆把量完的 defect 送去判定的埠。
+    #: 只有量東西的卡（GLV、CD、Focus index、H2H）是 —— 其餘的卡順手記的數字
+    #: （Input 的 ``n_channels``、Normalize 的 ``clip_frac``、Pair source 的
+    #: ``pair_found``）是附帶的紀錄，跟著 defect 沿線流下去，不另外長一顆埠。
+    #: 使用者（2026-09-29）：「Denoise 吐出數字」跟「畫布說明每一步變成什麼」
+    #: 是矛盾的。
+    measures: ClassVar[bool] = False
 
     @classmethod
     def data_output(cls, params: Dict[str, Any]) -> str:
-        """這張卡的資料出埠：寫數字的卡是 :data:`NUMBERS`，其餘 ``""``。
+        """這張卡的資料出埠：量東西的卡（:attr:`measures`）是 :data:`NUMBERS`，
+        其餘 ``""``。
 
-        「寫數字」＝宣告了特徵（`resolve_features`）。整批一次的卡是終點
-        （Output 段不吐東西）；Decision 覆寫成 :data:`RESULTS`。
+        整批一次的卡是終點（Output 段不吐東西）；Decision 覆寫成 :data:`RESULTS`。
+        一張量測卡還沒宣告任何數字（壞掉的參數）也不長 —— 沒有東西可以送。
         """
-        if cls.scale == SCALE_LOT:
+        if cls.scale == SCALE_LOT or not cls.measures:
             return ""
         try:
             return NUMBERS if cls.resolve_features(params) else ""

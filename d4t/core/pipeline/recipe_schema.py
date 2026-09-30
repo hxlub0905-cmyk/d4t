@@ -784,8 +784,8 @@ def is_data_edge(edge: "Edge", nodes: Dict[str, "RecipeNode"],
 def upstream_of(node_id: str, edges: Sequence["Edge"]) -> Set[str]:
     """沿**所有**線（影像、區域、數字、結果）往回走得到的卡，不含自己（F123 期 2）。
 
-    「Output 寫的是線上游的東西」的那個「上游」，也是「判定接得到哪幾張卡」
-    的答案的一半 —— 兩個問題問同一支，才不會一個說得到、一個說不到。
+    「判定問得到哪幾張卡的數字」、「Output 有沒有類別」、「用到的數字有沒有
+    流進來」都問這一支（F124）—— 問同一支，才不會一個說得到、一個說不到。
     """
     parents: Dict[str, Set[str]] = {}
     for e in edges:
@@ -820,7 +820,10 @@ def upstream_of(node_id: str, edges: Sequence["Edge"]) -> Set[str]:
 #:     「有判定就有那張卡」是存檔就成立的事，「卡不在」不是舊檔案的記號。
 #: 7 = **數字線與結果線**（F123 期 2）：判定問到的卡接一條 ``numbers`` 進
 #:     Decision、Output 卡的東西從接進來的線來。第 7 版起線是使用者拉的，
-#:     「線不在」不是舊檔案的記號（`_migrate_data_lines`）。
+#:     「線不在」不是舊檔案的記號。
+#: 8 = **送去判定的埠只長在量測卡上**（F124）：第 7 版的檔案可能有從 Input／
+#:     Normalize 拉進 Decision 的數字線，那幾條拿掉、改接它下游的量測卡；判定
+#:     問得到的是流進它的（上游）每一張卡的數字（`_migrate_measured_lines`）。
 #:
 #: 新建的 recipe 就是「這一版寫的」，所以 :class:`Recipe` 的預設值是它 ——
 #: 那不是裝飾：遷移以 ``version < RECIPE_VERSION`` 為判準，而一份記憶體裡組出來
@@ -828,7 +831,7 @@ def upstream_of(node_id: str, edges: Sequence["Edge"]) -> Set[str]:
 #: ``to_json_dict → from_json_dict``（`run_batch` 送進 worker 的路）。
 #: 預設留在 1 的話，**每一次送進 worker 都會再跑一次遷移**，而遷移會把版本號
 #: 改成 2 —— 那一對就不再是 identity 了（鐵則 9）。
-RECIPE_VERSION = 7
+RECIPE_VERSION = 8
 
 
 def _cycles_with(edges: List["Edge"], extra: "Edge",

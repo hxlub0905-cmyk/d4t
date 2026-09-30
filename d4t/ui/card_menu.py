@@ -65,8 +65,8 @@ def grouped(step_keys: Sequence[str]) -> List[Tuple[str, List[Tuple[str, str]]]]
 def _takes_data(step_key: str, kind: str) -> str:
     """這張卡收 ``kind``（``numbers`` / ``results``）那種線的資料埠（沒有回空）。
 
-    Decision 只收數字；Output 卡的 ``results`` 兩種都收（F123 期 2：Output
-    寫的是線上游的東西，直接接量測卡也可以）。
+    Decision 只收數字；Output 卡的 ``results`` 兩種都收（F123 期 2：接
+    Decision 有類別，直接接量測卡沒有 —— 使用者「不想綁死一定要有 Decision」）。
     """
     try:
         ports = tuple(get_step(step_key).data_inputs)

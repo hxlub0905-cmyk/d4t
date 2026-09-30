@@ -47,6 +47,7 @@ class AlignToStep(Step):
     """小圖當模板在大圖裡找位置，裁一塊同尺寸的出來。"""
 
     key = "align_to"
+    measures = True                 # 產出就是數字：送得進判定（F124）
     #: ``key`` 不動（recipe 的鍵）。名字是使用者取的（F16）：**H2H = head to
     #: head**。三個字母在卡片庫裡看不出它做什麼，所以 ``help`` 的**第一句**要
     #: 把全稱與這張卡做的事一起講完 —— 那一句同時是節點副標與 tooltip 的開頭，

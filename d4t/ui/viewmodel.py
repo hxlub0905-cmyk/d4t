@@ -25,13 +25,13 @@ from d4t.core.pipeline.recipe import (RECIPE_VERSION, DecideSpec, Let, Rule,
                                       _tree_to_json, feature_referrers,
                                       is_data_edge, is_region_edge,
                                       region_edge_values, rules_to_tree)
-from d4t.core.pipeline.step import NUMBERS
 from d4t.core.steps._util import centre_name, others_name
 from d4t.core.ingest.dataset import data_profile
 from d4t.core.steps.load import channel_map_for
 from d4t.core.steps.glv_stats import EACH_BOX, POOLED
 from d4t.core.steps.decision import DecisionStep
 from d4t.core.pipeline.recipe_schema import legacy_decision
+from . import strings
 
 #: GLV 卡最上面那三顆「要量什麼」（PR-2 2a）。**preset 不是參數**：recipe
 #: 沒有新欄位，選了只動 roi / reference_region 兩條線與 across_boxes 那一格
@@ -1159,48 +1159,79 @@ class RecipeModel:
         """
         out: List[str] = []
         known = self.nm_per_px_is_known()
-        # Output 卡只列**它上游**的數字（F123 期 3）：它寫的是線上游的東西，
-        # 列一個上游以外的數字＝一欄整排空白（lint `output-number-not-upstream`）。
-        up = self._upstream_if_output(upto_node)
         for nid, step_cls, s in self._declared_specs(upto_node, include_upto):
             if not known and s.variant in ("nm", "nm2"):
-                continue
-            if up is not None and nid not in up:
                 continue
             label = str(getattr(step_cls, "label", "") or
                         self.nodes[nid].step)
             if not any(x.split(self.FEATURE_LABEL_SEP, 1)[0] == s.name
                        for x in out):
                 out.append(s.name + self.FEATURE_LABEL_SEP + label)
+        if self._takes_data(upto_node):
+            # Output 卡（F124）：**全部列出**，流進這張卡的排前面、沒流進來的
+            # 排後面並註明 —— 跟 Decision 同一個規則（`decision_numbers`）。
+            out = self._flowing_first(out, str(upto_node))
         return out
 
-    def _upstream_if_output(self, node_id: Optional[str]) -> Optional[set]:
-        """``node_id`` 是一張收資料線的卡（Output）→ 它上游的卡；否則 ``None``。"""
+    def _takes_data(self, node_id: Optional[str]) -> bool:
+        """``node_id`` 是一張收資料線、但不是 Decision 的卡（Output）。"""
         node = self.nodes.get(str(node_id or ""))
         try:
-            takes = node is not None and get_step(node.step).data_inputs
+            takes = node is not None and bool(get_step(node.step).data_inputs)
         except KeyError:
             takes = False
-        if not takes or node.step == DecisionStep.key:
-            return None
+        return takes and node.step != DecisionStep.key
+
+    def _flowing_first(self, items: List[str], dst: str) -> List[str]:
+        """流進 ``dst`` 的數字在前；沒流進來的排後面，標題註明（F124）。
+
+        F123 期 2 是**只列**接進來的卡 —— 使用者：「Feature 就可以處理了，而且
+        可用的參數更多」。所以不藏，只排序：沒流進來的照樣挑得到（挑了之後
+        lint 提醒、給一顆「Connect」），只是它的那一組標題寫著它沒接上。
+        """
+        near, far = self._split_flowing(items, dst)
+        tag = strings.tr("not connected")
+        return near + [x + " · " + tag for x in far]
+
+    def _split_flowing(self, items: List[str],
+                       dst: str) -> Tuple[List[str], List[str]]:
+        """``(流進 dst 的, 沒流進來的)``，各自保持原順序。"""
         from d4t.core.pipeline.recipe_schema import upstream_of
-        return upstream_of(str(node_id), self.edges)
+
+        up = upstream_of(dst, self.edges) | {dst}
+        owners = self.feature_owners()
+        near: List[str] = []
+        far: List[str] = []
+        for x in items:
+            owner = owners.get(x.split(self.FEATURE_LABEL_SEP, 1)[0])
+            (near if not owner or owner in up else far).append(x)
+        return near, far
+
+    def decision_numbers_not_flowing(self) -> List[str]:
+        """**知道是誰的、而且沒流進** Decision 的數字名（給「建議一題」避開 ——
+        建議一個沒流進來的數字，等於建議一題馬上會被提醒的題目）。
+
+        問的是「確定沒流進來的」而不是「確定流進來的」：宿主餵的清單裡可能有
+        model 不認得來歷的名字（舊名字、測試餵的），那些不該因此被排掉。
+        沒有 Decision 卡就是空的。"""
+        nid = self.decision_node()
+        if not nid:
+            return []
+        far = self._split_flowing(self.labelled_features(), nid)[1]
+        return [x.split(self.FEATURE_LABEL_SEP, 1)[0] for x in far]
 
     def decision_numbers(self) -> List[str]:
-        """判定的「插入數字 ▾」：`labelled_features` 裡**接進 Decision** 的那幾張
-        卡的（F123 期 2，使用者：數字線必要 —— 判定只問得到接進來的卡）。
+        """判定的「插入數字 ▾」：**全部**的數字（F124）。
 
-        沒有 Decision 卡（手寫的 recipe）就沒有東西可接，整份照舊。
+        流進 Decision 的（它上游每一張卡記的，含量測卡以外那幾張順手記的）
+        排前面；沒流進來的排後面、那一組的標題註明 —— 挑得到，挑了會被提醒
+        （`decision-not-wired`，warning）。沒有 Decision 卡（手寫的 recipe）
+        就照原順序。
         """
         nid = self.decision_node()
         if not nid:
             return self.labelled_features()
-        wired = {e.src for e in self.edges
-                 if e.dst == nid and e.src_out == NUMBERS
-                 and is_data_edge(e, self.nodes)}
-        owners = self.feature_owners()
-        return [x for x in self.labelled_features()
-                if owners.get(x.split(self.FEATURE_LABEL_SEP, 1)[0]) in wired]
+        return self._flowing_first(self.labelled_features(), nid)
 
     def feature_owners(self) -> Dict[str, str]:
         """特徵名 → 產出它的**節點 id**（幽靈線／淡線用，F24 ④）。
