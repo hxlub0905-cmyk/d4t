@@ -211,7 +211,7 @@ c02b5ed1aa8d2c33e7bfa8a9ca830a324fbd0cb4 docs/plans/F117-ui-review.md
 45f1e8d8a78055d054e6bd4d799644b046856481 docs/plans/F121-simple-input.md
 79710ff832663a05b11c2f6fe57e1bd070e5c993 docs/plans/F122-adc-and-output.md
 591da5f7fbce061335cd67d94483a299a2247595 docs/plans/F124-measured-flow.md
-71f73876b46e33997bda42aa2ebc39c852948ee4 docs/plans/F125-build-exe.md
+e43b1f2c4a981a953375df5baaa854d94aa3c56b docs/plans/F125-build-exe.md
 81236a2c24b1a65f3021e5f578777644484fa874 fab_probe/README.md
 3650e05ec9f8e1093ad36d6c2d6e2cad3034f408 fab_probe/probe_klarf.py
 e8ab5c63b10ad13bac47230d092ec80a90944bcc fab_probe/probe_stats.py
