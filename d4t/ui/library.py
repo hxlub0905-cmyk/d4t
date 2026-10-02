@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from ..core.pipeline.step import GROUPS as STAGE_GROUPS
 from . import strings
 from . import theme
-from .buttons import small_button
+from .buttons import clear_layout, small_button
 from .icons import restyle
 from .theme import TOKENS
 
@@ -773,9 +773,4 @@ class LibraryPanel(QWidget):
     def _clear(self) -> None:
         self._items = {}
         for box in self._section_boxes.values():
-            while box.count():
-                item = box.takeAt(0)
-                w = item.widget()
-                if w is not None:
-                    w.setParent(None)
-                    w.deleteLater()
+            clear_layout(box)

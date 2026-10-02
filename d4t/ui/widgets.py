@@ -8,7 +8,7 @@
 U7 那一刀把它拆成八支，一支一個主題：
 
 ===================  ==========================================================
-`ui/buttons.py`      最底層：`small_button`、`FilterChip`、「停放不銷毀」
+`ui/buttons.py`      最底層：`small_button`、`FilterChip`、「停放不銷毀」與「丟掉 widget」
 `ui/icons.py`        **按鈕上**那些自繪的圖（膠囊上的在 `ui/glyphs.py`）
 `ui/image_view.py`   `ImageView` ＋ 記號的角色 → 顏色
 `ui/fields.py`       參數表單上一列一列的編輯器

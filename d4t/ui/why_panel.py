@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from ..core.pipeline.expression import ExpressionError, parse_expression
 from ..core.pipeline.verdict_trace import _collect_var_spans
+from .buttons import discard_widget
 from .numbers import format_feature_value
 
 __all__ = ["WhyPanel", "why_rows"]
@@ -230,8 +231,7 @@ class WhyPanel(QWidget):
                            if self._defect_id else "Why this verdict")
         self._rows = why_rows(trace)
         for w in self._row_widgets:
-            w.setParent(None)
-            w.deleteLater()
+            discard_widget(w)
         self._row_widgets = []
         for row in self._rows:
             w = _Row(row, self._body)

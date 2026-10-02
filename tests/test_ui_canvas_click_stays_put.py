@@ -132,23 +132,6 @@ def test_double_clicking_a_card_opens_no_stray_windows(window, qapp):
     assert window.selected_node == nid
 
 
-def test_clearing_the_form_hides_rows_before_detaching_them():
-    """`_clear_rows` 的順序是機制本身：先 hide 再 setParent(None)。用 ast 守，
-    因為上面那條在某些平台上雙擊的重建只發生一次、看不到症狀。"""
-    import ast
-
-    src = (Path(__file__).resolve().parent.parent / "d4t" / "ui" / "param_form.py"
-           ).read_text(encoding="utf-8")
-    fn = next(n for n in ast.walk(ast.parse(src))
-              if isinstance(n, ast.FunctionDef) and n.name == "_clear_rows")
-    calls = [n.func.attr for n in ast.walk(fn)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
-    for i, name in enumerate(calls):
-        if name == "setParent":
-            assert i > 0 and calls[i - 1] == "hide", (
-                "setParent(None) 前面要先 hide()：%s" % calls)
-
-
 # --------------------------------------------------------------------------- #
 # 2. 按在靠邊的卡上，卡不動、畫布不捲
 # --------------------------------------------------------------------------- #

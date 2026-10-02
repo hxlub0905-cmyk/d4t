@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from .buttons import clear_layout
 from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
 from .feature_text import VARIANT_COLUMNS as _VARIANT_COLUMNS
@@ -349,11 +350,7 @@ class FeaturePanel(QScrollArea):
 
     # ---- 畫 ---------------------------------------------------------------
     def _rebuild(self) -> None:
-        while self._lay.count():
-            item = self._lay.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
+        clear_layout(self._lay)
         for sec in self._model:
             if not self._matches(sec):
                 continue

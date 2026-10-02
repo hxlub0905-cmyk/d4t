@@ -32,7 +32,7 @@ from . import fit_screen
 from . import region_words
 from . import strings
 from . import theme
-from .buttons import small_button
+from .buttons import clear_layout, small_button
 from .icons import draw_glyph_icon
 from .theme import TOKENS, region_hex
 
@@ -1067,12 +1067,7 @@ class MultiChoicePicker(QWidget):
         """
         keep = self.text() if value is None else str(value)
         grid = self.layout()
-        while grid.count():
-            item = grid.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        clear_layout(grid)
         self._boxes = []
         picked = [t.strip() for t in keep.split(",") if t.strip()]
         names: List[str] = []

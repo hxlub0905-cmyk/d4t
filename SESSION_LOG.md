@@ -28,6 +28,20 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## 拆 widget 全面改走 `buttons.discard_widget`（2026-10-02）
+
+使用者：「全面改」（上一輪只修了會閃的那一處）。`d4t/ui` 裡二十一處各自寫的
+`setParent(None)`，只有 `clear_layout_parked` 順序對。
+
+* `ui/buttons.py` 多三支：`detach_widget`（hide → setParent(None)）、`discard_widget`
+  （從 layout 拿下 → detach → deleteLater）、`clear_layout`（整個 layout 丟掉，子 layout
+  遞迴；要停放的照舊用 `clear_layout_parked`）。十三個模組的拆法全部改走它們。
+* `tests/test_widget_teardown.py`（核心批，純 ast）：`setParent(None)` 只准出現在
+  `detach_widget` 裡、hide 在 setParent 前、discard 先 detach 再 deleteLater、至少十個
+  模組真的在用（反空洞）。canvas 那檔裡只守 `_clear_rows` 的那條拿掉了。
+* ⚠ 寫進 helper 說明與 PITFALLS：藏起來的 widget 再掛回 layout **不會自己顯示**，
+  停放再用的那一方要自己 `show()`。
+
 ## 畫布：雙擊跳空白視窗、點卡片被推走（2026-10-02）
 
 使用者：「快速點單張卡兩下，會快速跳出好幾個空白視窗顯示然後關掉」、「點卡片時

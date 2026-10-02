@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from d4t.core.pipeline import get_step
 from d4t.core.pipeline.engine import run_defect
 
+from .buttons import discard_widget
 from . import fit_screen
 from . import wording
 from .gallery import make_thumb, thumb_placement
@@ -350,9 +351,7 @@ class RegionCheckWindow(QDialog):
     # ---- 內部 -------------------------------------------------------------
     def _relayout(self) -> None:
         for cell in self._cells:
-            self._grid.removeWidget(cell)
-            cell.setParent(None)
-            cell.deleteLater()
+            discard_widget(cell, self._grid)
         self._cells = []
 
         shown = self._results

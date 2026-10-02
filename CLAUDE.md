@@ -234,7 +234,7 @@ git add -A && python tools/release.py && git add -A
 **一塊新的面板／畫布元件＝一個新模組**；`studio.py` 留給**接線**，不留給內容。
 先問那一塊該不該是一塊（F50 的 `output_band.py` 就是因為「框的意思是一組、真相是
 跑的時間不一樣」而刪掉的）。`d4t/ui` 裡不准直接 `QSplitter(`（用 `ui/splitters.py`，
-有測試數像素）。新元件直接 import 拆出來的那幾支（`ui/fields.py`、`ui/chips.py`、
+有測試數像素）；拆 widget 不准自己 `setParent(None)`（用 `ui/buttons.py` 的 `discard_widget`／`clear_layout`，`tests/test_widget_teardown.py` 守；沒先 `hide()` 會閃出空白視窗）。新元件直接 import 拆出來的那幾支（`ui/fields.py`、`ui/chips.py`、
 `ui/icons.py`、`ui/library.py`、`ui/histogram.py`、`ui/image_view.py`、
 `ui/param_form.py`、`ui/buttons.py`、`ui/feature_text.py`）；**`widgets.py` 只是一道
 轉出口，裡面不准再有 class / def**（幾行去 `tests/test_size_ceilings.py` 看）。

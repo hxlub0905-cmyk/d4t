@@ -86,6 +86,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from .buttons import discard_widget
 from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
 from . import frozen_column
@@ -1255,8 +1256,7 @@ class ResultsTablePane(QWidget):
 
     def _refresh_filter_chip(self) -> None:
         if self._filter_chip is not None:
-            self._filter_chip.setParent(None)
-            self._filter_chip.deleteLater()
+            discard_widget(self._filter_chip)
             self._filter_chip = None
         text = self.table.filter_text()
         if not text:
@@ -1295,16 +1295,13 @@ class ResultsTablePane(QWidget):
             return
         i = self._dims.index(pair)
         self._dims.pop(i)
-        chip = self._chips.pop(i)
-        chip.setParent(None)
-        chip.deleteLater()
+        discard_widget(self._chips.pop(i))
         self._apply_visibility()
 
     def _clear_dims(self) -> None:
         self._dims = []
         for chip in self._chips:
-            chip.setParent(None)
-            chip.deleteLater()
+            discard_widget(chip)
         self._chips = []
 
     def _rebuild_dim_menus(self) -> None:

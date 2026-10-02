@@ -33,6 +33,7 @@ from d4t.core.log import swallowed
 from d4t.core.pipeline import get_step
 from d4t.core.pipeline.engine import FEATURE_OWNER_KEY, feature_prefixes
 from d4t.core.pipeline.step import REGISTRY
+from .buttons import discard_widget
 from . import theme
 from .inspectors import inspector_for
 from .widgets import ProfilePanel
@@ -84,9 +85,7 @@ class GaugePanel(QObject):
             if self._inspector is not None:
                 # 面板被拆掉就不會再有「放開」——影像上的綠帶會永遠留著。
                 self._on_measure_ended()
-                self.w.inspector_slot.removeWidget(self._inspector)
-                self._inspector.setParent(None)
-                self._inspector.deleteLater()
+                discard_widget(self._inspector, self.w.inspector_slot)
                 self._inspector = None
             if cls is not None:
                 self._inspector = cls(self.w.inspector_host)
