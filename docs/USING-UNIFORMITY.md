@@ -40,7 +40,9 @@
 3. **Gray level**：卡片**最上面**那排 `What to measure` 按
    **`Odd box out`** —— 那顆鈕會幫你把 `Boxes in the region` 設成 `each box`。
    （三顆鈕在還沒拉區域虛線之前是灰的，所以順序是**先拉線、再按鈕**。）
-   然後 `How even are the boxes` 勾你要的數字。
+   然後 `How even are the boxes` 勾你要的數字。`Z-score each box on` 是拿哪個
+   統計量算每一格的 z 分數（算法只有這一種）；方向、參照配對、「超過幾 σ 算一格」
+   收在 `Show more settings` 底下，第一次不必動。
 4. **`Write charts`**：`Write to` 填**完整路徑**的資料夾，然後**拉一條線進它
    左邊那顆方埠** —— 從 Gray level 的 `numbers`，或從接了 Gray level 的
    Decision 的 `results`。它只畫**上游**那幾張 Gray level 量的框（F123）：

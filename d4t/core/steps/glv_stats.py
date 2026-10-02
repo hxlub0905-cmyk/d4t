@@ -419,6 +419,16 @@ LEGACY_BOX_RENAMES = {
 #: 「照哪個數字挑最異常」的預設。median 跟 Statistics 的預設第一顆同一個。
 JUDGE_DEFAULT = "glv_median"
 
+#: ``judge`` 那一格在畫面上的名字 —— 錯誤訊息引用它，所以只寫一份。
+#:
+#: 2026-10-02 從「Pick the odd one by」改過來。使用者：「找異常的點我想改成就是算
+#: 每個的 z 分數就好（不然 Pick the odd one 太多選項，user 是否會搞混）」。
+#: 算法本來就只有一種（穩健的留一法 z 分數，`algo_glv.odd_box_scores`），
+#: 這一格挑的只是**拿哪個統計量**去算 —— 舊名字聽起來像在挑方法，新名字講的
+#: 是它真正做的事。配套：方向、參照配對、超過 k σ 三格收成進階設定
+#: （``advanced=True``），第一次打開這張卡的人只看到這一格。
+JUDGE_LABEL = "Z-score each box on"
+
 
 def _canonical(mid: str) -> str:
     """把使用者寫的 metric id 轉成 algo.glv 認得的 id；不認得回傳空字串。"""
@@ -692,27 +702,29 @@ class GlvStatsStep(MultiSourceStep):
                 POOLED: "One pile of pixels. Every box's pixels go into the "
                         "same statistics - use it when the region is one "
                         "area that happens to be drawn as several boxes.",
-                EACH_BOX: "Measure every box on its own, then report the "
-                          "typical one, the odd one out, and which box that "
-                          "was. This is how you hunt a defect that sits in "
-                          "one box.",
+                EACH_BOX: "Measure every box on its own and give each one a "
+                          "z-score against the others; report the typical "
+                          "box, the odd one out, and which box that was. "
+                          "This is how you hunt a defect that sits in one "
+                          "box.",
             },
             help=("A region can be many boxes at once (a Golden Cell template "
                   "lays hundreds of them across a big image). pooled treats "
                   "them as one pile of pixels; each box measures every box on "
-                  "its own and reports the typical one, the odd one out, and "
-                  "which box that was.\n\n"
+                  "its own, z-scores each one against the others, and reports "
+                  "the typical box, the odd one out, and which box that "
+                  "was.\n\n"
                   "Two families of numbers come out of each box, and they "
                   "often point at different boxes: <stat>_worst is that "
-                  "statistic measured on the ONE box the judge below picked "
-                  "(glv_worst_score says how far out it is, in sigmas; "
+                  "statistic measured on the ONE box with the biggest z-score "
+                  "(glv_worst_score is that z-score, in sigmas; "
                   "glv_worst_baseline is the other boxes' middle) - use these "
                   "when you want every number to come from the same box. "
                   "<stat>_typical is the middle of all the boxes, "
-                  "<stat>_outlier is the furthest-out box on that one "
-                  "statistic alone, and <stat>_outlier_box is that box's "
-                  "number - use these when one statistic matters on its "
-                  "own."),
+                  "<stat>_outlier is the box furthest out on that one "
+                  "statistic alone (a plain gap, not a z-score), and "
+                  "<stat>_outlier_box is that box's number - use these when "
+                  "one statistic matters on its own."),
         ),
         ParamSpec(
             name="report", type="multi_choice", default=DEFAULT_REPORT,
@@ -754,30 +766,31 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="judge", type="metric_choice", default=JUDGE_DEFAULT,
             choices=list(METRIC_CHOICES) + list(COMPARE_CHOICES),
-            label="Pick the odd one by",
+            label=JUDGE_LABEL,
             section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
-            help=("Which number decides the odd box out. Every box is "
-                  "compared against the middle of all the other boxes, in "
-                  "robust sigmas - the winner's box and score come out as "
-                  "glv_worst_x/y/w/h and glv_worst_score, ready to rank a "
-                  "report by "
-                  "and to draw on the overlay. The median ignores a few hot "
-                  "pixels inside a box; use the max to hunt for a single "
-                  "bright speck instead. “+ Percentile…” adds any percentile "
-                  "you like (hand-written recipes may also use glv_q<0-100>, "
-                  "glv_trim<0-49> or glv_above<0-255>).\n\n"
+            help=("Every box gets one z-score: how many sigmas this "
+                  "statistic, measured on that box, sits from the middle of "
+                  "all the OTHER boxes (|value - their median| / their robust "
+                  "spread). There is only this one way of scoring - what you "
+                  "choose here is which statistic to score. The box with the "
+                  "biggest z-score is the odd one out: its box and score come "
+                  "out as glv_worst_x/y/w/h and glv_worst_score, ready to rank "
+                  "a report by and to draw on the overlay. The median ignores "
+                  "a few hot pixels inside a box; use the max to hunt for a "
+                  "single bright speck instead. “+ Percentile…” adds any "
+                  "percentile you like (hand-written recipes may also use "
+                  "glv_q<0-100>, glv_trim<0-49> or glv_above<0-255>).\n\n"
                   "The second group (delta, snr, …) needs a reference wired "
-                  "in below: those pick the box that differs most from the "
-                  "reference, rather than the box that differs most from the "
-                  "other boxes. With a ref image that is usually the one you "
-                  "want."),
+                  "in below: those z-score how much each box differs from "
+                  "the reference, rather than from the other boxes. With a "
+                  "ref image that is usually the one you want."),
         ),
         ParamSpec(
             name="direction", type="chip_choice", default=algo_glv.BOTH,
             choices=list(algo_glv.ODD_BOX_DIRECTIONS),
             icons=["odd_either", "odd_darker", "odd_brighter"],
-            label="Looking for boxes that are",
+            label="Looking for boxes that are", advanced=True,
             section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             choice_help={
@@ -799,7 +812,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="ref_pairing", type="chip_choice", default=PER_BOX_REF,
             choices=list(REF_PAIRINGS), icons=["pair_each", "pair_pooled"],
-            label="Take the reference",
+            label="Take the reference", advanced=True,
             section="3 · How to find it",
             show_when=((("reference_source",), (ANY_VALUE,)),
                        ("reference_region", ("",)),
@@ -823,7 +836,7 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="over_k", type="float", default=0.0, min=0.0, max=99.0,
-            unit="σ", label="Also count boxes beyond",
+            unit="σ", label="Also count boxes beyond", advanced=True,
             section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             help=("Count how many boxes are further than this many robust "
@@ -1234,7 +1247,7 @@ class GlvStatsStep(MultiSourceStep):
         if (str(params.get("across_boxes", POOLED)) == EACH_BOX
                 and _judge_of(params) in algo_glv.COMPARE_METRICS
                 and _reference_of(params) == REF_NONE):
-            out.append("“Pick the odd one by” is set to “%s”, which compares "
+            out.append("“" + JUDGE_LABEL + "” is set to “%s”, which compares "
                        "each box against a reference - but nothing is wired "
                        "into “Compare with”. Wire a reference in, or pick one "
                        "of the plain gray-level statistics instead."
@@ -1433,7 +1446,7 @@ class GlvStatsStep(MultiSourceStep):
             # 最後一道）。
             raise StepError(
                 self.key,
-                f"“Pick the odd one by” is set to '{judge}', which compares "
+                f"“{JUDGE_LABEL}” is set to '{judge}', which compares "
                 f"each box against a reference - but no reference is wired "
                 f"into this card. Wire one in, or pick an absolute statistic "
                 f"instead.")
@@ -1441,7 +1454,7 @@ class GlvStatsStep(MultiSourceStep):
             # 同 `metrics` 那一句 —— 打錯的 id 要當場講，不是安靜換成預設。
             raise StepError(
                 self.key,
-                f"unknown statistic '{judge}' in “Pick the odd one by”; "
+                f"unknown statistic '{judge}' in “{JUDGE_LABEL}”; "
                 f"available: {sorted(algo_glv.GLV_STATS)}, "
                 f"{sorted(algo_glv.COMPARE_METRICS)} or glv_q<0-100> / "
                 f"glv_p<0-100>.")
@@ -1493,7 +1506,7 @@ class GlvStatsStep(MultiSourceStep):
                 # 沒有判準就選不出贏家 —— 講出真正的原因，不要安靜換一個。
                 raise StepError(
                     self.key,
-                    f"“Pick the odd one by” is set to '{judge}', but it "
+                    f"“{JUDGE_LABEL}” is set to '{judge}', but it "
                     f"cannot be computed on this defect (a reference of a "
                     f"single box has no box-to-box spread, so snr, tstat and "
                     f"pct_rank are blank). Pick delta or abs_delta, or point "

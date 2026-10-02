@@ -28,6 +28,22 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## GLV：「Pick the odd one by」改成「Z-score each box on」＋三格收進階（2026-10-02）
+
+使用者：「Odd box out 請改描述文字 ＋ 你建議的收起來」。算法本來就只有一種
+（穩健的留一法 z 分數），那一格挑的只是拿哪個統計量 —— 舊名字聽起來像在挑方法。
+
+* `glv_stats.JUDGE_LABEL = "Z-score each box on"`（label 與四句錯誤訊息引用同一份）；
+  help 改寫成「每一格一個 z 分數…只有這一種算法，你選的是統計量」；`across_boxes`
+  的 each box 說明與兩個家族那段也改（`_outlier` 明寫「是原始差距、不是 z 分數」）。
+* `direction`／`ref_pairing`／`over_k` 加 `advanced=True`：each box 之後第一眼只剩
+  「Z-score each box on」與「How even are the boxes」，其餘在 `Show N more settings`。
+  **recipe 一個鍵都沒動**，數字不變（show_when 照舊，I9 不受影響）。
+* 預設鈕「Odd box out」名字不動（三處測試與 lint 建議引用它），一句話改成講 z 分數。
+* `recipes/README.md` 兩列改名、並把「預設 glv_mean」改成「這份填 glv_mean（卡片預設是
+  glv_median）」—— 以前那句話是錯的。`USING-UNIFORMITY.md` §0 補一句。
+* `_outlier` 與 `_worst` 兩個家族名字容易混（使用者問），建議另開一輪改名（見對話）。
+
 ## F121 期 4 回歸：Open data… 選不到檔案（2026-10-02）
 
 使用者回報三件事，先修第一件（另兩件只分析：GLV 的「Odd box out」其實只有一種

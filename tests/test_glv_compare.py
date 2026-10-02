@@ -1199,7 +1199,8 @@ def test_a_bad_judge_id_fails_loudly_not_quietly():
     with pytest.raises(StepError) as e:
         _run_each_box(_grid_ctx(), judge="glv_qq7")
     text = str(e.value)
-    assert "glv_qq7" in text and "Pick the odd one by" in text
+    from d4t.core.steps.glv_stats import JUDGE_LABEL
+    assert "glv_qq7" in text and JUDGE_LABEL in text
 
 
 def test_judge_takes_one_id_not_a_list():
@@ -1662,7 +1663,8 @@ def test_judging_by_a_comparison_without_a_reference_is_caught_before_the_run():
     says = card.configuration_issues(
         {"source": "test", "roi": "cells", "across_boxes": "each box",
          "judge": "snr"})
-    assert says and "Pick the odd one by" in says[0]
+    from d4t.core.steps.glv_stats import JUDGE_LABEL
+    assert says and JUDGE_LABEL in says[0]
     # 而手寫 recipe 硬跑的話，錯誤訊息要講得出原因
     with pytest.raises(StepError) as e:
         _each_box(_dir_ctx(), judge="snr")
