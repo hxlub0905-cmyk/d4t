@@ -28,6 +28,32 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F125：把 d4t 包成 exe（2026-10-02）
+
+使用者：「請幫忙製作一件打包 exe 程式（可選擇單檔 exe 或資料夾）」。問了三題：
+Studio + 命令列（兩個 exe）、要 CI、範本／手冊／範例資料產生器全包。計畫書
+`docs/plans/F125-build-exe.md`，手冊 `docs/BUILD-EXE.md`。
+
+* `tools/build_exe.py`（stdlib-only，問 1=資料夾／2=單檔或吃 `--onedir`／`--onefile`）
+  ＋ `tools/exe/d4t.spec`、`launch_cli.py`、`launch_studio.py`、`make_icon.py`。
+  清單（要包的檔案、hidden imports、排掉的 Qt 模組、exe 名字）**只住在 build_exe.py**，
+  spec import 它，`tests/test_build_exe.py` 逐條驗檔案真的在、spec 裡沒抄第二份。
+* **一行找檔案的程式都沒改**：datas 目的地鏡射 repo 版面，`parents[2]` 在 exe 裡就是
+  `_internal`。證據是 exe 的 `--version` 印出真的 build id。
+* 真的改的三處：兩個進入點的 `__main__` 守衛加 `multiprocessing.freeze_support()`
+  （少了它 Windows 上 `--workers N` 開 N 個 Studio）、`language._relaunch_command` 加
+  frozen 分支（`sys.executable` 就是 exe）、`pyproject` 的 `dev` extra 加 `pyinstaller>=6`。
+* `.github/workflows/exe.yml`：windows-latest，兩種模式各一份 artifact；只在 main 與手動。
+  它是 spec 在真的 Windows 上能不能過的唯一證明 —— 容器只建得出 Linux 的執行檔。
+* 容器裡（Linux）兩種模式都建過且冒煙全過：資料夾版約 578 MB（兩個 exe 共用），單檔版
+  兩個各約 142 MB；Studio offscreen 活到 timeout、frozen CLI `run --workers 2` 跑完 12 顆
+  CSV 正確。體積的下一刀記在計畫書 §3。
+* 文件：README／CLAUDE §0 §4／AGENTS §4.5／ARCHITECTURE 樹／LICENSING §4 一列＋LGPL 段改寫
+  （exe **會**把 PySide6 包進去，資料夾版比單檔版站得住）／ROADMAP M6／PITFALLS 一列。
+* 踩到：`make_icon.py` 兩個 segfault —— `QGuiApplication` 沒抓著參照、
+  `QBuffer(QByteArray())` 的暫時物件。`make_lot_from_gc.py` 還 import `show_template.py`，
+  是「包進去的 tools 要把 sibling import 一起帶」那條測試抓到的。
+
 ## F124 期 4：丟在卡上就好的拉線（2026-09-30）
 
 使用者：「繼續」。紀錄在計畫書 §11。F124 四期都做完。

@@ -66,4 +66,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 if __name__ == "__main__":
+    # 同 `d4t/__main__.py`：包成 exe 之後 spawn worker 要認得自己（F125）。
+    import multiprocessing
+    multiprocessing.freeze_support()
     raise SystemExit(main())

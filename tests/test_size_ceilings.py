@@ -394,7 +394,10 @@ FILE_CEILINGS = {
     # 指向的交接檔跟著刪，所以這裡跟著降。**上限掉下去要跟著降**是這張表的
     # 另一半（`test_the_ceilings_are_not_far_above_the_truth` 會叫）——
     # 一個沒人踩得到的上限等於沒有上限。
-    "CLAUDE.md": 332,
+    # 2026-10-02（F125）332 → 334：§0 的表多一列（`docs/BUILD-EXE.md` 是「包成 exe」
+    # 這個主題的家，而 §0 那張表就是「每個主題只有一個家」的索引）、§4 的指令
+    # 清單多一行 `python tools/build_exe.py`。各一行，剛好兩行。
+    "CLAUDE.md": 334,
 }
 
 #: 沒被列名的檔案共用的上限。

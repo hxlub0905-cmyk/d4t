@@ -44,8 +44,15 @@ _SECTION = re.compile(r"(%s)[`）)\]]*\s*(?:的)?\s*§\s*(\d+(?:\.\d+)*)"
 _HEADING = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)[.、 ]")
 
 
+#: 建置產物住的地方（都在 `.gitignore`）。`tools/build_exe.py` 會把 `docs/USING-*.md`
+#: 複製進 `dist/d4t/_internal/docs/`，那些複本的相對連結指回一個不存在的鄰居 ——
+#: 它們不是文件，是搬運品，跟 `bundle/` 同一個道理。
+_ARTEFACT_DIRS = {"dist", "build"}
+
+
 def _markdown_files():
-    return sorted(p for p in REPO.rglob("*.md") if ".git" not in p.parts)
+    return sorted(p for p in REPO.rglob("*.md")
+                  if ".git" not in p.parts and not (_ARTEFACT_DIRS & set(p.parts)))
 
 
 def _sections(name: str):
