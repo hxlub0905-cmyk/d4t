@@ -89,32 +89,18 @@ EXPECTED = {
     ],
     "glv_eachbox": [
         "glv_median_typical",
-        "glv_median_outlier",
-        "glv_median_outlier_box",
         "glv_median_worst",
         "cmp_delta_median_typical",
-        "cmp_delta_median_outlier",
-        "cmp_delta_median_outlier_box",
         "cmp_delta_median_worst",
         "cmp_delta_q90_typical",
-        "cmp_delta_q90_outlier",
-        "cmp_delta_q90_outlier_box",
         "cmp_delta_q90_worst",
         "cmp_snr_median_typical",
-        "cmp_snr_median_outlier",
-        "cmp_snr_median_outlier_box",
         "cmp_snr_median_worst",
         "cmp_snr_q90_typical",
-        "cmp_snr_q90_outlier",
-        "cmp_snr_q90_outlier_box",
         "cmp_snr_q90_worst",
         "cmp_overlap_typical",
-        "cmp_overlap_outlier",
-        "cmp_overlap_outlier_box",
         "cmp_overlap_worst",
         "cmp_spread_ratio_typical",
-        "cmp_spread_ratio_outlier",
-        "cmp_spread_ratio_outlier_box",
         "cmp_spread_ratio_worst",
         # F85 新增（**加名字不是改名字**，同下面 F76 那一句）：均勻度那一組
         # 掛在**絕對統計量**上，不掛在 `cmp_*` 上 —— 均勻度問的是「這一塊自己
@@ -464,9 +450,10 @@ def test_center_wired_regions_carry_their_role():
 
 def test_eachbox_suffixes_are_variants_with_the_metric_stripped_back():
     by = _specs("glv_eachbox")
-    s = by["glv_median_outlier_box"]
-    assert s.variant == "outlier_box" and s.metric == "glv_median"
+    s = by["glv_median_worst"]
+    assert s.variant == "worst" and s.metric == "glv_median"
     assert by["glv_median_typical"].variant == "typical"
+    assert not [n for n in by if "outlier" in n], "那一族 2026-10-02 砍了"
     # worst 那一族是 metric，不是 variant（2026-08-27 使用者定調）。
     w = by["glv_worst_score"]
     assert w.metric == "glv_worst_score" and w.variant == ""

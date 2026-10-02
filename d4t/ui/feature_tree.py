@@ -47,13 +47,12 @@ def fixed_columns() -> List[str]:
     return [BADGE_COLUMN] + base[:i] + [CLASS_COLUMN] + base[i:]
 
 
-#: 變體後綴在表頭上的字（2026-09-09）。**同一個統計量的四個變體以前四欄都
-#: 寫 ``Min``** —— `glv_stats` 開 each box 之後 ``_typical`` / ``_outlier`` /
-#: ``_outlier_box`` / ``_worst`` 各一欄，而表頭只看 metric（使用者：「中間會有
-#: 4 欄一樣的 min 4 欄一樣的 max」）。原始欄名仍然在懸停第一行。
+#: 變體後綴在表頭上的字（2026-09-09）。**同一個統計量的幾個變體以前每一欄都
+#: 寫 ``Min``** —— `glv_stats` 開 each box 之後 ``_typical`` / ``_worst``（當時
+#: 還有 ``_outlier`` / ``_outlier_box``）各一欄，而表頭只看 metric（使用者：
+#: 「中間會有 4 欄一樣的 min 4 欄一樣的 max」）。原始欄名仍然在懸停第一行。
 VARIANT_WORDS = {
-    "typical": "typical", "outlier": "outlier", "outlier_box": "box #",
-    "worst": "worst", "nm": "nm", "nm2": "nm²", "missing": "missing?",
+    "typical": "typical", "worst": "worst", "nm": "nm", "nm2": "nm²", "missing": "missing?",
     "raw": "raw", "rescued": "overwritten",
     "range": "range", "range_pct": "range %", "cv_pct": "cv %",
     "slope_x": "slope x", "slope_y": "slope y",

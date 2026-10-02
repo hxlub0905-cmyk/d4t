@@ -900,30 +900,29 @@ def test_measuring_each_box_finds_the_odd_one_out():
 
     assert ctx.features["glv_boxes"] == 25.0
     assert ctx.features["glv_median_typical"] == pytest.approx(100.0)
-    assert ctx.features["glv_median_outlier"] == pytest.approx(160.0)
-    assert ctx.features["glv_median_outlier_box"] == 12.0, "缺陷定位的答案"
+    assert ctx.features["glv_median_worst"] == pytest.approx(160.0)
+    assert ctx.features["glv_worst_i"] == 12.0, "缺陷定位的答案"
 
     # pooled（預設）答的是另一個問題，而它**看不出**那一格
     pooled = _grid_ctx()
     get_step("glv_stats")().run(pooled, {
         "source": "test", "roi": "cells", "metrics": "glv_median"})
     assert pooled.features["glv_median"] == pytest.approx(100.0)
-    assert "glv_median_outlier" not in pooled.features
+    assert "glv_median_worst" not in pooled.features
 
 
 def test_each_box_declares_exactly_what_it_writes():
     """框的數量**隨影像而異**，所以逐格吐特徵是寫不出宣告的。
 
-    宣告的是分布的兩端加一個地址 —— 那三個名字的數量不隨資料變。
+    宣告的是典型值與贏家那一格 —— 那幾個名字的數量不隨資料變。
     """
     card = get_step("glv_stats")
     p = {"source": "test", "roi": "cells", "metrics": "glv_median,glv_mad",
          "across_boxes": "each box"}
     assert set(card.resolve_features(p)) == {
-        "glv_median_typical", "glv_median_outlier", "glv_median_outlier_box",
-        "glv_mad_typical", "glv_mad_outlier", "glv_mad_outlier_box",
-        # F68：贏家那一格的每一個量（`_outlier` 是「這個量自己最極端的那格」，
-        # `_worst` 是「judge 挑的那格」—— 兩者不一定是同一格）。
+        "glv_median_typical", "glv_mad_typical",
+        # F68：贏家那一格的每一個量（`_worst` 是「z 分數最高的那格」身上的量；
+        # `_outlier` 那一族 2026-10-02 砍了）。
         "glv_median_worst", "glv_mad_worst",
         "glv_boxes", "glv_pixels",
         # F31：總冠軍那一組（照 `judge` 挑）＋ score 的分布。
@@ -955,8 +954,8 @@ def test_each_box_compares_each_box_too():
         "across_boxes": "each box",
         "reference_region": "background", "compare_metrics": "delta"})
     assert ctx.features["cmp_delta_mean_typical"] == pytest.approx(0.0, abs=1.0)
-    assert ctx.features["cmp_delta_mean_outlier"] == pytest.approx(60.0, abs=1.0)
-    assert ctx.features["cmp_delta_mean_outlier_box"] == 12.0
+    assert ctx.features["cmp_delta_mean_worst"] == pytest.approx(60.0, abs=1.0)
+    assert ctx.features["glv_worst_i"] == 12.0
 
 
 def test_each_box_without_a_region_is_caught_before_the_run():
@@ -1591,15 +1590,6 @@ def test_the_default_direction_is_exactly_what_it_did_before():
         _each_box(_dir_ctx(), direction="darker").features["glv_worst_score"])
 
 
-def test_the_outlier_family_follows_the_direction_too():
-    """同一張卡上兩族名字不可以用兩種「極端」的定義。"""
-    dark = _each_box(_dir_ctx(), direction="darker").features
-    assert dark["glv_median_outlier"] == pytest.approx(70.0)
-    assert dark["glv_median_outlier_box"] == 4.0
-    bright = _each_box(_dir_ctx(), direction="brighter").features
-    assert bright["glv_median_outlier"] == pytest.approx(130.0)
-
-
 def _rough_ctx():
     """六個框：第 5 格比較亮，第 1 格一樣亮**但很粗糙**。"""
     rng = np.random.default_rng(0)
@@ -1680,25 +1670,6 @@ def test_the_winner_box_reports_every_statistic_that_was_ticked():
     # 贏家那一格的每一個量都在，而且真的是**那一格**的值（第 4 格整片 70）
     for name in ("glv_median_worst", "glv_q25_worst", "glv_max_worst"):
         assert f[name] == pytest.approx(70.0), name
-    # ⚠ 而 `_outlier` 那一族答的是另一個問題 —— 同一份資料上它們相等只是
-    # 因為 judge 就是 median；把 judge 換掉就分家（下一條）。
-    assert f["glv_median_outlier"] == pytest.approx(70.0)
-
-
-def test_worst_and_outlier_are_not_the_same_box():
-    """兩族名字的差別要**看得出來**，不然 `_worst` 只是 `_outlier` 的別名。"""
-    # 值：max 最極端的是第 1 格（有一個亮點），median 最極端的是第 4 格
-    n = 5
-    img = np.full((20, 20 * n), 100.0, np.float32)
-    img[:, 80:100] = 60.0                 # 第 4 格整片暗 → median 最極端
-    img[0, 20:22] = 255.0                 # 第 1 格一個亮點 → max 最極端
-    ctx = Context(images={"test": img})
-    ctx.set_roi_boxes("cells", [(i / n, 0.0, 1.0 / n, 1.0) for i in range(n)])
-    f = _each_box(ctx, metrics="glv_median,glv_max", judge="glv_median").features
-    assert f["glv_worst_i"] == 4.0, "judge 是 median → 贏家是整片暗的那格"
-    assert f["glv_max_outlier_box"] == 1.0, "max 自己最極端的是有亮點那格"
-    assert f["glv_max_worst"] == pytest.approx(60.0), "贏家那格的 max"
-    assert f["glv_max_outlier"] == pytest.approx(255.0), "另一格的 max"
 
 
 def test_counting_the_boxes_over_the_line():

@@ -381,18 +381,16 @@ def test_visible_columns_dims_are_pure_too():
 # --------------------------------------------------------------------------- #
 def test_variants_of_one_statistic_get_four_different_labels(qapp):
     """使用者：「中間會有 4 欄一樣的 min 4 欄一樣的 max」—— `glv_stats` 開
-    each box 之後同一個統計量有 typical / outlier / outlier_box / worst 四欄，
+    each box 之後同一個統計量有 typical / worst 兩欄（當時還有 outlier 那兩欄），
     表頭以前只看 metric。原始欄名仍在懸停第一行。"""
     from d4t.ui.feature_tree import stat_label
     specs = tuple(
         _spec(name, "m1", "GLV", base="glv_min", metric="glv_min",
               family="glv", variant=var)
         for name, var in (("N_glv_min_typical", "typical"),
-                          ("N_glv_min_outlier", "outlier"),
-                          ("N_glv_min_outlier_box", "outlier_box"),
                           ("N_glv_min_worst", "worst")))
     labels = [stat_label(b) for b in specs]
-    assert len(set(labels)) == 4, labels
+    assert len(set(labels)) == 2, labels
     assert all(lb.startswith("Min") for lb in labels), labels
     # 沒有變體、沒有比的統計量 → 一個字都不變
     plain = _spec("glv_median", "m1", "GLV", base="glv_median",

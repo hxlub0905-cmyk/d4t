@@ -181,6 +181,11 @@ class WorkbenchLayout:
         """攤開／收起工作台（Tune 模式）。Build 模式下什麼都不做。"""
         if self.mode == "build":
             return False
+        if on and self.open:
+            # 已經開著：**不要再設一次分隔比例**。雙擊卡片會走到這裡（攤開設定），
+            # 而使用者剛拖過的比例會被存檔裡的那一份吃掉 —— 畫布在按鈕還按著時
+            # 被縮放，卡片跟著被推走（2026-10-02）。
+            return True
         self.open = bool(on)
         if self.open:
             self._open_workbench()

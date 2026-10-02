@@ -379,7 +379,10 @@ FILE_CEILINGS = {
     # 純函式）搬進 `ui/layout.py`、「線繞開卡片」的幾何放 `ui/edge_route.py`；
     # 留在這裡的是 `path` 叫它的那幾行、`card_bodies`、`SIDE`，與「沒有入口的
     # 卡是起點」那一條排版前提。
-    "d4t/ui/canvas.py": 3245,
+    # 2026-10-02 3245 → 3265：按在卡上的那一下不捲（`_emit_selected_from_press`）、
+    # 雙擊那一下不是拖曳（關 ItemIsMovable 到放開）—— 兩個「按著滑鼠時畫布動了，
+    # 卡片被推走」的修法，各幾行；故事在 docs/PITFALLS.md。
+    "d4t/ui/canvas.py": 3265,
     # `CLAUDE.md` **每個 session 都會被讀進去**。2026-09-09 之前它是 647 行，
     # 一半是「某年某月使用者說了什麼」的故事 —— 規則留下、故事搬進
     # `docs/history/CLAUDE-2026-09-09.md`，瘦到 319 行。這一格擋它長回去：

@@ -105,22 +105,16 @@ def feature_gloss(name: str, about: Optional[Dict[str, str]] = None,
 #: 那一句（`metric_formula` 或卡片的 `FEATURE_HELP`）。
 #:
 #: 為什麼一定要有這一層：`feature_gloss` 以前只讀 `spec.metric`，於是
-#: ``glv_median_typical`` / ``_outlier`` / ``_outlier_box`` / ``_worst``
-#: 四列的說明**一字不差**（都寫 ``median(gray)``）—— 而 ``_outlier_box``
-#: 的值根本不是灰階，它是一個框號。實測：出貨的 `rsem-worst-box` 上有 97 個
-#: 特徵的說明跟別的特徵完全相同。
+#: ``glv_median_typical`` / ``_worst``（當時還有 ``_outlier`` / ``_outlier_box``）
+#: 幾列的說明**一字不差**（都寫 ``median(gray)``）。實測：出貨的 `rsem-worst-box`
+#: 上有 97 個特徵的說明跟別的特徵完全相同。
 #:
-#: ⚠ **`_outlier` 跟 `_worst` 常常不是同一格**（實測 24 顆：judge 那個量
-#: 24/24 相同，其他量只有 2–5/24）。使用者 2026-09-02 的原話是「反而這樣會
-#: 誤導別人以為他是最 worst 的」—— 所以這兩句話要**明講它們在挑哪一格**，
-#: 那是名字上唯一沒有的資訊。
+#: ⚠ ``_outlier`` 那一族 2026-10-02 砍了（使用者：「outlier 跟 worst 非常容易
+#: 讓人搞混」）—— 這張表上只剩 ``typical`` 與 ``worst``，而 ``worst`` 那句要
+#: **明講它在挑哪一格**（z 分數最高的那一格），那是名字上唯一沒有的資訊。
 VARIANT_GLOSS = {
     "typical": "%s - the middle one across all the boxes",
-    "outlier": "%s - on the box furthest out on this statistic alone, "
-               "which is often not the one the judge picked",
-    "outlier_box": "which box was furthest out on this statistic alone "
-                   "(%s)",
-    "worst": "%s - on the box the judge picked as the odd one out",
+    "worst": "%s - on the one box with the biggest z-score, the odd one out",
     "nm": "%s, in nanometres",
     "nm2": "%s, in square nanometres",
     "raw": "%s, before it was scaled against the batch",
@@ -150,7 +144,7 @@ def _with_variant(spec: Any, body: str) -> str:
 def feature_unit(spec: Any) -> str:
     """這個數字的單位 —— **問卡片，不猜**（F76，2026-09-02）。
 
-    先看變體（`step.VARIANT_UNITS`：``_outlier_box`` 的值是框號，不是那個
+    先看變體（`step.VARIANT_UNITS`：均勻度的 ``_cv_pct`` 是百分比，不是那個
     量），再看那張卡的 `Step.feature_units`。查不到就**留白** —— 一個猜錯的
     單位比沒有單位糟得多（同 `feature_gloss` 的退化原則）。
     """
@@ -219,20 +213,18 @@ def _card_says(spec: Any) -> str:
 #: "top,bot" 在一邊是 0/1、在另一邊是 1/0，而**顏色指錯區域比沒有顏色糟得多**。
 #: **哪幾個 variant 攤成欄，以及由左到右的順序**。
 #:
-#: 順序是「先講常態，再講嫌疑人」：這一批長什麼樣 → 贏家那格 → 這個量自己
-#: 最極端的那格。``outlier_box`` **不是一欄** —— 它是一個**地址**，貼在
-#: ``outlier`` 那一格的值旁邊（``188 ← #46``）。以前它自己佔一列，而那一列
-#: 的說明欄寫著「75th percentile」，值卻是 21。
+#: 順序是「先講常態，再講嫌疑人」：這一批長什麼樣 → z 分數最高那格。
+#: （``outlier`` 那一欄與貼在它旁邊的 ``outlier_box`` 地址 2026-10-02 砍了。）
 #:
 #: ⚠ **它住在這裡而不是 `feature_panel`**（F117 C2 搬的）：`feature_html`
 #: 要知道「這個 variant 有沒有別人在畫」才不會畫兩次，而 `feature_panel`
 #: import 這一支 —— 反過來是循環。第一版在這裡抄了一份，而那一份**當場就
 #: 漏了 `worst`**：測試一跑就紅，而那正是「抄第二份」最好的結局。
-VARIANT_COLUMNS = ("typical", "worst", "outlier")
+VARIANT_COLUMNS = ("typical", "worst")
 
-#: 這幾個 variant **由別人畫**（上面那張表是表頭的欄名，`outlier_box` 是貼在
-#: 值旁邊的地址），所以名字上不再畫一次 —— 畫兩次就是重複。
-_VARIANT_DRAWN_ELSEWHERE = VARIANT_COLUMNS + ("outlier_box",)
+#: 這幾個 variant **由別人畫**（上面那張表是表頭的欄名），所以名字上不再畫
+#: 一次 —— 畫兩次就是重複。
+_VARIANT_DRAWN_ELSEWHERE = VARIANT_COLUMNS
 
 FEATURE_SUP = "region"
 FEATURE_SUB = "stream"
@@ -272,7 +264,7 @@ def feature_html(name: str, parts: Optional[Dict[str, Any]] = None) -> str:
     # **名字裡的 variant 也要畫出來**（F117 C2）。`peak` 與 `peak_missing`
     # 的 base 都是 `peak` —— 一張表上兩列一模一樣的名字配不同的數字。
     #
-    # ⚠ **只畫沒有別人在畫的那幾個**：`typical` / `outlier` 那一族是**表頭的
+    # ⚠ **只畫沒有別人在畫的那幾個**：`typical` / `worst` 那一族是**表頭的
     # 欄名**（`feature_panel.VARIANT_COLUMNS`），在名字上再畫一次就是重複。
     # ⚠ `rescued` 也不畫 —— **上面那一段下標已經把它分出來了**。兩個都畫的話
     # 那一列讀起來是 `clip_frac(ref) rescued`，而第二個字沒有多講任何東西

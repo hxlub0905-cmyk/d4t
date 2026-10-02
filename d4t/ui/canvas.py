@@ -1302,13 +1302,16 @@ class _NodeItem(QGraphicsItem):
             self.canvas.begin_link(self, hit)  # 從某一個輸出埠拉線
             e.accept()
             return
-        self.canvas.node_selected.emit(self.node_id)
+        # 雙擊那一下關掉的可拖曳要在下一次按下時回來（放開那一拍可能沒送到）。
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self._emit_selected_from_press()
         # 從這裡到放開為止，位置的改變都是**使用者的手**（見 itemChange）。
         self._dragging = e.button() == Qt.LeftButton
         super().mousePressEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:  # Qt hook
         self._dragging = False
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
         super().mouseReleaseEvent(e)
 
     def mouseDoubleClickEvent(self, e) -> None:  # Qt hook
@@ -1316,10 +1319,28 @@ class _NodeItem(QGraphicsItem):
 
         參數面板平常是收起來的，畫布因此吃得到整欄。單擊仍然只是選取
         （右邊的預覽會跟著跑到這張卡為止），雙擊才把設定攤開。
+
+        ⚠ **雙擊那一下不是拖曳**：攤開設定、Decision 收合都在按鈕還按著時改了
+        畫布的對應，Qt 把那一下重播成移動，卡片被推走（`docs/PITFALLS.md`
+        「按著滑鼠時畫布動了」）。到放開為止不准動，`mouseReleaseEvent` 再打開。
         """
-        self.canvas.node_selected.emit(self.node_id)
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self._dragging = False
+        self._emit_selected_from_press()
         self.canvas.node_activated.emit(self.node_id)
         e.accept()
+
+    def _emit_selected_from_press(self) -> None:
+        """發「選到這張卡」，並讓 `select_card` 知道**這是按在卡上發的**。
+
+        按在卡上的那一下不准捲動畫布（F117 A3）：捲動發生在滑鼠還按著時，那一下
+        被重播成移動，卡片被推走（同上，`docs/PITFALLS.md`）。點得到的卡本來就看得到。
+        """
+        self.canvas._press_selecting = True
+        try:
+            self.canvas.node_selected.emit(self.node_id)
+        finally:
+            self.canvas._press_selecting = False
 
     def itemChange(self, change, value):  # Qt hook
         if change == QGraphicsItem.ItemPositionChange and self._dragging:
@@ -2303,7 +2324,10 @@ class PipelineCanvas(QGraphicsView):
         """
         self.set_selected(node_id)
         self.set_tree_selected(None)
-        self.ensure_card_visible(node_id)
+        # 按在卡上發的選取不捲（`_NodeItem._emit_selected_from_press` 的理由）；
+        # 從別處選到的（Results 單擊、問題清單、鍵盤）才捲進視野。
+        if not getattr(self, "_press_selecting", False):
+            self.ensure_card_visible(node_id)
 
     def ensure_card_visible(self, node_id: Optional[str]) -> bool:
         """把一張卡捲進視野 —— **只捲，不亮也不選**（F117 A3／J2）。

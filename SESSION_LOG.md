@@ -28,6 +28,35 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## 畫布：雙擊跳空白視窗、點卡片被推走（2026-10-02）
+
+使用者：「快速點單張卡兩下，會快速跳出好幾個空白視窗顯示然後關掉」、「點卡片時
+有時候會亂排版（跑到畫布上很遠的地方）」。兩個都在容器裡用真的滑鼠事件重現。
+
+* 空白視窗：設定面板在同一回合重建兩次（雙擊＝選到＋啟用），`_clear_rows` 拆列時
+  沒先 `hide()`，排著的顯示讓每一列變成一個頂層視窗。修：先 `hide()`；
+  `_on_node_activated` 已經選著就不再選一次。
+* 被推走：按下時立刻 `ensureVisible`（F117 A3）、雙擊重設分隔比例、Decision 收合
+  重算畫布範圖 —— 都在按鈕還按著時改了畫布對應，Qt 把那一下重播成移動。修：
+  按在卡上發的選取不捲（旗標）、雙擊那一下關 `ItemIsMovable` 到放開、
+  `workbench.set_open(True)` 已開就不重設。
+* `tests/test_ui_canvas_click_stays_put.py`：送真的按／放／雙擊事件量視窗數與
+  卡片位置；反向守「不是按在卡上的選取照舊捲進視野」。canvas.py 上限 3245 → 3265。
+* PITFALLS 兩列。
+
+## GLV：砍掉 `_outlier` 家族，只留 z 分數那一族（2026-10-02）
+
+使用者：「outlier 跟 worst 非常容易讓人搞混」，三條路選了「砍掉」。砍的是
+`<量>_outlier`（這個量自己離 typical 最遠那一格，原始差距）與 `<量>_outlier_box`；
+留 `<量>_typical`（所有格的中位數）與 `<量>_worst`／`glv_worst_*`（z 分數最高那一格）。
+
+* `glv_stats`：常數、宣告、`_measure_each_box` 的寫出、`_pick_odd` 整支、說明文字。
+  `step.VARIANT_UNITS` 少一條；`feature_text.VARIANT_GLOSS`／`VARIANT_COLUMNS`、
+  `feature_panel` 的「← #46」地址邏輯、`feature_tree.VARIANT_WORDS` 跟著拿掉。
+* **不做遷移**：用到 `_outlier` 的舊 recipe 在 lint 會看到「沒有這個數字」。安靜
+  換成 `_worst` 是換掉意思（不同的格），比報錯糟。出貨 recipe 與黃金值都沒用它。
+* 九個測試檔改；兩條專門比較兩族的測試刪掉。
+
 ## GLV：「Pick the odd one by」改成「Z-score each box on」＋三格收進階（2026-10-02）
 
 使用者：「Odd box out 請改描述文字 ＋ 你建議的收起來」。算法本來就只有一種

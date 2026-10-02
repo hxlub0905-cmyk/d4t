@@ -679,14 +679,22 @@ class ParamForm(QWidget):
 
     # -- internals ---------------------------------------------------------
     def _clear_rows(self) -> None:
+        # ⚠ **先 `hide()` 再 `setParent(None)`**（2026-10-02）。面板在同一回合被
+        # 重建兩次（雙擊 = 選到＋啟用）時，第一次塞進去的每一列都還排著一個
+        # Qt 的「顯示」；沒藏起來就拆下來，那個顯示落在一個沒有父視窗的 widget
+        # 上 —— 它變成一個空白的頂層視窗閃一下再被 deleteLater 收掉。使用者看到
+        # 的是「雙擊一張卡跳出好幾個空白視窗」（GLV 卡量到 16 個）。
+        # `buttons.clear_layout_parked` 一直都是這個順序。
         for row in self._rows.values():
             self._form.removeWidget(row)
+            row.hide()
             row.setParent(None)
             row.deleteLater()
         self._rows = {}
         for heads in self._sections.values():
             for head in heads:
                 self._form.removeWidget(head)
+                head.hide()
                 head.setParent(None)
                 head.deleteLater()
         self._sections, self._section_of = {}, {}
