@@ -28,6 +28,24 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## F121 期 4 回歸：Open data… 選不到檔案（2026-10-02）
+
+使用者回報三件事，先修第一件（另兩件只分析：GLV 的「Odd box out」其實只有一種
+算法就是穩健 z 分數，困惑來自 each box 之後冒出的五格與 `_outlier`／`_worst` 兩個
+家族；Focus 不接線數字也到 Decision 是 F124 定的「線講流向不當閘門」，欠的是鐵則 10
+那一句沒補）。
+
+* **病根**：F121 期 4 的「Open data…」是非原生 Qt 對話框設成 `FileMode.Directory`
+  再關 `ShowDirsOnly` —— 檔案看得到、**選不到**（Qt 的 accept 只收目錄），點 KLARF
+  按 Choose 什麼都不發生；在容器裡 offscreen 重現。「視窗怪、磁碟讀不到」是同一個
+  對話框。測試全把 `ask_data` 換成假的，所以沒人看到。細節在 F121 計畫書 §8。
+* **修**：`ask_data` 回原生 `getOpenFileName` 挑一個檔案；「整批」改成挑了一張影像、
+  旁邊還有別的時問「只開這張還是全部 N 張」（`widen_to_folder`，旗標 `ASK` 與
+  `CHOOSE` 同 `link_drop` 形狀，conftest 關掉）。`ingest.dataset.image_files` 新的
+  公用函式，`load_folder` 與問句共用一份清單。`plan_open`／CLI 沒動。
+* 守門：`test_ui_one_open.py` 反向守 `DontUseNativeDialog`／`FileMode.Directory`
+  不准再出現，加五條問句行為測試。PITFALLS 一列。
+
 ## F125：把 d4t 包成 exe（2026-10-02）
 
 使用者：「請幫忙製作一件打包 exe 程式（可選擇單檔 exe 或資料夾）」。問了三題：

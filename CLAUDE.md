@@ -269,7 +269,7 @@ git add -A && python tools/release.py && git add -A
 
 **一張載入卡**：`load_patch`「Input」，一張或好幾張都吃，**名字表開資料時照資料填**
 （F121 期 2 把 `load_single`「SEM image」併回來了，舊 recipe 由遷移換卡；key 沒動）。
-**入口只有一顆**「Open data…」（F121 期 4），檔案或資料夾都吃；是哪一種由
+**入口只有一顆**「Open data…」（F121 期 4）：**原生**檔案對話框挑一個檔案（KLARF／一張影像／`.raw`），要整批就挑資料夾裡任何一張影像、它會問（2026-10-02：非原生的「選目錄」模式選不到檔案，見 `open_dialogs.ask_data`）；是哪一種由
 `ingest.dataset.plan_open` 看那條路徑回答（CLI 叫同一支）。三種 source：
 
 | kind | 什麼樣的資料 |
