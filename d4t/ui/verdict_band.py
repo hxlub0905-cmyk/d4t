@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.pipeline import decide_tree
+from .buttons import discard_widget
 from .theme import TOKENS
 
 __all__ = ["VerdictBand", "verdict_rows"]
@@ -162,8 +163,7 @@ class VerdictBand(QWidget):
     # ---- 畫 ----------------------------------------------------------------
     def _rebuild(self) -> None:
         for w in self._row_widgets:
-            w.setParent(None)
-            w.deleteLater()
+            discard_widget(w)
         self._row_widgets = []
         if not self._rows:
             self.hint.setText("")

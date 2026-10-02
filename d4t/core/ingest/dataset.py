@@ -544,6 +544,24 @@ def load_image_file(path) -> Dataset:
                                               channel="single")})])
 
 
+def image_files(folder: Any) -> List[str]:
+    """``folder`` 裡（不遞迴）的影像檔名，排好序。
+
+    `load_folder` 一個檔案一顆，顆就是它們；Studio 的「Open data…」挑了一張影像之後
+    問「只開這一張，還是這個資料夾裡全部」（`open_dialogs.widen_to_folder`，
+    2026-10-02）數的也是它們 —— 兩邊同一份清單，不然問句裡的數字會跟真的載進來
+    的顆數對不上。讀不到的資料夾回空清單（講不講那件事是呼叫端的事）。
+    """
+    d = str(folder)
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return []
+    return [n for n in names
+            if os.path.isfile(os.path.join(d, n))
+            and os.path.splitext(n)[1].lower() in _IMAGE_EXTS]
+
+
 def load_folder(folder) -> Dataset:
     """掃描資料夾（不遞迴）成 Dataset(kind="folder")。
     無座標資訊（GLAS load_folder 模式）：每個影像檔一個 DefectItem，
@@ -555,25 +573,24 @@ def load_folder(folder) -> Dataset:
         return Dataset(kind="folder", klarf=None, items=[],
                        warnings=[f"Not a directory: {d}"])
     multipage: List[str] = []
-    for name in sorted(os.listdir(d)):
+    for name in image_files(d):
         path = os.path.join(d, name)
         stem, ext = os.path.splitext(name)
-        if os.path.isfile(path) and ext.lower() in _IMAGE_EXTS:
-            if ext.lower() in _TIFF_EXTS:
-                # 這條路是「一個檔案一顆、一顆一張圖」，所以多頁 TIFF **只讀得到
-                # 第 0 頁**（``imageio.load_gray`` 走 ``cv2.imdecode``）。
-                # 以前那件事完全沒有聲音：一個 15 頁的檔案安靜地變成一顆 defect。
-                # 現在講出來，並指向那種資料真正的入口（``load_tiff_stack``）。
-                try:
-                    if int(tiff_index.n_pages(path)) > 1:
-                        multipage.append(name)
-                except (OSError, ValueError):
-                    pass        # 讀不出頁數不是這條路要解的問題
-            items.append(DefectItem(
-                defect_id=stem, die=None, xrel_nm=None, yrel_nm=None,
-                images={"single": ImageRef(path=path, page=None,
-                                           channel="single")},
-            ))
+        if ext.lower() in _TIFF_EXTS:
+            # 這條路是「一個檔案一顆、一顆一張圖」，所以多頁 TIFF **只讀得到
+            # 第 0 頁**（``imageio.load_gray`` 走 ``cv2.imdecode``）。
+            # 以前那件事完全沒有聲音：一個 15 頁的檔案安靜地變成一顆 defect。
+            # 現在講出來，並指向那種資料真正的入口（``load_tiff_stack``）。
+            try:
+                if int(tiff_index.n_pages(path)) > 1:
+                    multipage.append(name)
+            except (OSError, ValueError):
+                pass        # 讀不出頁數不是這條路要解的問題
+        items.append(DefectItem(
+            defect_id=stem, die=None, xrel_nm=None, yrel_nm=None,
+            images={"single": ImageRef(path=path, page=None,
+                                       channel="single")},
+        ))
     if multipage:
         warnings.append(_MULTIPAGE_WARNING
                         % (len(multipage), ", ".join(multipage[:3])

@@ -146,21 +146,28 @@ d4t 是 **public**。
 | `pytest`（開發用） | `>=8.2` | MIT |
 | `ruff`（開發用） | `==0.15.8` | MIT |
 | `pyright`（開發用） | `==1.1.408` | MIT（pip 套件是 npm 版的包裝，第一次跑會下載 node —— node 本身 MIT）|
+| `pyinstaller`（開發用） | `>=6` | **GPL-2.0-or-later WITH Bootloader-exception**（例外條款明寫：用它包出來的程式**不**因此受 GPL 約束；2026-10-02 查）|
 
 前四個都是寬鬆授權，照著附上授權條款就沒事。**要注意的是 PySide6。**
 
-最後三列（`pytest` / `ruff` / `pyright`）是 `dev` extra —— **只裝在開發機、不隨任何一條
-搬運路徑進廠**（bundle 裝的是原始碼、`fetch_wheels.py` 抓的是
-`requirements.txt` 那幾個）。所以它們不在 `LICENSE` 的第三方 carve-out 裡：
-那一段講的是「執行時相依」，而這三個一次都不執行。
+開發用那幾列（`pytest` / `ruff` / `pyright` / `pyinstaller`）是 `dev` extra —— **只裝在開發機、
+不隨任何一條搬運路徑進廠**（bundle 裝的是原始碼、`fetch_wheels.py` 抓的是
+`requirements.txt` 那幾個；`pyinstaller` 在建置機上跑一次，產出裡沒有它）。所以它們不在
+`LICENSE` 的第三方 carve-out 裡：那一段講的是「執行時相依」，而這幾個一次都不執行。
 
 ### PySide6 的 LGPL 值得看一眼
 
 兩件跟這個 repo 的實際做法有關的事實：
 
-1. **d4t 不把 PySide6 打包進去。** `pyproject.toml` 把它放在具名的 `gui` extra
+1. **d4t 的原始碼不把 PySide6 打包進去。** `pyproject.toml` 把它放在具名的 `gui` extra
    （`pip install .[gui]`），因為 CLI 那條路（`python -m d4t run`）不需要 Qt。
    所以「散布 d4t 的原始碼」不等於散布 Qt。
+   **但 `tools/build_exe.py` 產的 exe 會**（F125，2026-10-02，見 [`BUILD-EXE.md`](BUILD-EXE.md)）：
+   資料夾版把 PySide6 的 DLL **原樣**放在 `_internal\` 裡、單檔版把同一批檔案壓進 exe、
+   執行時解開 —— 兩者都是對**未修改的官方 wheel 內容**做動態連結，`LICENSE` 與這份文件
+   跟在包裡。LGPL 要的是收到程式的人能換掉那份 Qt：資料夾版天然成立（換掉 `_internal\`
+   裡的 DLL 就是），單檔版要靠重新打包，所以**要對外散布的話資料夾版比較站得住**。
+   這算不算「散布」同樣是下面那個法務問題。
 2. **但離線安裝那條路會搬 wheel 檔本身。**
    [`tools/fetch_wheels.py`](../tools/fetch_wheels.py)（有網路的機器抓）→
    [`tools/install_offline.py`](../tools/install_offline.py)（air-gapped 機器裝）

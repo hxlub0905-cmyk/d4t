@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.algo import glv as algo_glv
+from .buttons import discard_widget
 from . import theme
 from .icons import draw_glyph_icon, draw_metric_glyph
 from .theme import TOKENS
@@ -389,10 +390,10 @@ class _ChipFlow(QWidget):
         self._relayout()
 
     def remove(self, item: QWidget) -> None:
-        """拿掉一顆（呼叫端自己 `deleteLater`）。"""
+        """拿掉一顆並排定刪除（呼叫端再 `deleteLater` 也無害）。"""
         if item in self._items:
             self._items.remove(item)
-            item.setParent(None)
+            discard_widget(item)
             self._relayout()
 
     def chips(self) -> List["_ChipBase"]:
@@ -528,8 +529,7 @@ class MetricChips(QWidget):
             item = self._grid.takeAt(1)
             w = item.widget()
             if w is not None and w is not self.count and w is not self.out:
-                w.setParent(None)
-                w.deleteLater()
+                discard_widget(w)
         self._chips = []
         self._flows = {}
 

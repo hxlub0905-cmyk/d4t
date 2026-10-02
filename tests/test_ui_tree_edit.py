@@ -647,7 +647,7 @@ def test_the_number_picker_is_grouped_by_who_computes_it(qapp):
 def test_every_number_in_the_picker_says_what_it_is(qapp):
     """滑鼠停上去講它是什麼（2026-09-09）。卡片算的走 `feature_gloss`（跟
     Feature 表那一欄同一支），working number 講它的算式 —— 名字本身講不出
-    「_outlier 跟 _worst 常常不是同一格」那種事。"""
+    「_worst 是 z 分數最高那一格身上的量」那種事。"""
     from PySide6.QtCore import Qt
 
     m = _model_with_a_working_number()
@@ -668,9 +668,7 @@ def test_every_number_in_the_picker_says_what_it_is(qapp):
 
     assert tip("QAA") == "= glv_max * 2\nif missing → 0"
     assert "fallback" in tip("QAA_missing")
-    assert "judge picked" in tip("N_glv_median_worst")
-    assert "furthest out on this statistic alone" in tip("N_glv_median_outlier")
-    assert "[box]" in tip("N_glv_median_outlier_box"), "它是框號不是灰階"
+    assert "biggest z-score" in tip("N_glv_median_worst")
     # 每一個卡片算的名字都有一句話 —— 一格空白讀起來像「這個沒什麼」
     blank = [which.itemText(i) for i in range(1, which.count())
              if which.itemData(i) and not

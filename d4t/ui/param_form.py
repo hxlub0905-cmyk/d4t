@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from d4t.core.steps.load import fit_channel_map
 
+from .buttons import discard_widget
 from . import strings
 from . import theme
 from .chips import ChoiceChips, MetricChips, MetricPick, _ChipFlow, _ChoiceChip
@@ -279,7 +280,8 @@ class ParamForm(QWidget):
         title = str(title or "")
         # 重建（選項是呼叫端給的，張數可能變）。
         #
-        # ⚠ **`deleteLater()` 不夠，要先 `setParent(None)`。** 延遲刪除要等
+        # ⚠ **`deleteLater()` 不夠，要先拿下來**（`_ChipFlow.remove` 走
+        # `buttons.discard_widget`：藏、脫離、再排刪）。延遲刪除要等
         # 事件圈的 DeferredDelete 那一趟，而在那之前那幾顆**還在畫面上**，
         # 停在上一次版面給它們的位置 —— 這一排是有 stretch 的，面板一換寬度
         # 位置就變，於是舊的那幾顆變成疊在標題與新膠囊上的鬼影
@@ -679,16 +681,14 @@ class ParamForm(QWidget):
 
     # -- internals ---------------------------------------------------------
     def _clear_rows(self) -> None:
+        # 2026-10-02：這裡就是「雙擊一張卡跳出好幾個空白視窗」的案發現場 ——
+        # 面板在同一回合重建兩次，拆列時沒先藏。順序住在 `buttons.discard_widget`。
         for row in self._rows.values():
-            self._form.removeWidget(row)
-            row.setParent(None)
-            row.deleteLater()
+            discard_widget(row, self._form)
         self._rows = {}
         for heads in self._sections.values():
             for head in heads:
-                self._form.removeWidget(head)
-                head.setParent(None)
-                head.deleteLater()
+                discard_widget(head, self._form)
         self._sections, self._section_of = {}, {}
         self._advanced = set()
 

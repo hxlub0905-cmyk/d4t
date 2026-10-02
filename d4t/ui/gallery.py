@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
 )
 
 from d4t.core.pipeline.decide_tree import leaf_color
+from .buttons import discard_widget
 from .numbers import format_feature_value
 from . import theme
 from .theme import TOKENS
@@ -1189,9 +1190,7 @@ class GalleryPanel(QWidget):
 
     def _clear_chips(self) -> None:
         for chip in self._chips:
-            self._chip_row.removeWidget(chip)
-            chip.setParent(None)
-            chip.deleteLater()
+            discard_widget(chip, self._chip_row)
         self._chips = []
 
     def _add_chip(self, text: str, tip: str, on_remove: Callable[[], None]) -> None:

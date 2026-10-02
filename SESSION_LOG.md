@@ -28,6 +28,109 @@ main 的那一輪」，而這條分支從 2026-08-19 起就沒有再併回 `main
 
 ---
 
+## 拆 widget 全面改走 `buttons.discard_widget`（2026-10-02）
+
+使用者：「全面改」（上一輪只修了會閃的那一處）。`d4t/ui` 裡二十一處各自寫的
+`setParent(None)`，只有 `clear_layout_parked` 順序對。
+
+* `ui/buttons.py` 多三支：`detach_widget`（hide → setParent(None)）、`discard_widget`
+  （從 layout 拿下 → detach → deleteLater）、`clear_layout`（整個 layout 丟掉，子 layout
+  遞迴；要停放的照舊用 `clear_layout_parked`）。十三個模組的拆法全部改走它們。
+* `tests/test_widget_teardown.py`（核心批，純 ast）：`setParent(None)` 只准出現在
+  `detach_widget` 裡、hide 在 setParent 前、discard 先 detach 再 deleteLater、至少十個
+  模組真的在用（反空洞）。canvas 那檔裡只守 `_clear_rows` 的那條拿掉了。
+* ⚠ 寫進 helper 說明與 PITFALLS：藏起來的 widget 再掛回 layout **不會自己顯示**，
+  停放再用的那一方要自己 `show()`。
+
+## 畫布：雙擊跳空白視窗、點卡片被推走（2026-10-02）
+
+使用者：「快速點單張卡兩下，會快速跳出好幾個空白視窗顯示然後關掉」、「點卡片時
+有時候會亂排版（跑到畫布上很遠的地方）」。兩個都在容器裡用真的滑鼠事件重現。
+
+* 空白視窗：設定面板在同一回合重建兩次（雙擊＝選到＋啟用），`_clear_rows` 拆列時
+  沒先 `hide()`，排著的顯示讓每一列變成一個頂層視窗。修：先 `hide()`；
+  `_on_node_activated` 已經選著就不再選一次。
+* 被推走：按下時立刻 `ensureVisible`（F117 A3）、雙擊重設分隔比例、Decision 收合
+  重算畫布範圖 —— 都在按鈕還按著時改了畫布對應，Qt 把那一下重播成移動。修：
+  按在卡上發的選取不捲（旗標）、雙擊那一下關 `ItemIsMovable` 到放開、
+  `workbench.set_open(True)` 已開就不重設。
+* `tests/test_ui_canvas_click_stays_put.py`：送真的按／放／雙擊事件量視窗數與
+  卡片位置；反向守「不是按在卡上的選取照舊捲進視野」。canvas.py 上限 3245 → 3265。
+* PITFALLS 兩列。
+
+## GLV：砍掉 `_outlier` 家族，只留 z 分數那一族（2026-10-02）
+
+使用者：「outlier 跟 worst 非常容易讓人搞混」，三條路選了「砍掉」。砍的是
+`<量>_outlier`（這個量自己離 typical 最遠那一格，原始差距）與 `<量>_outlier_box`；
+留 `<量>_typical`（所有格的中位數）與 `<量>_worst`／`glv_worst_*`（z 分數最高那一格）。
+
+* `glv_stats`：常數、宣告、`_measure_each_box` 的寫出、`_pick_odd` 整支、說明文字。
+  `step.VARIANT_UNITS` 少一條；`feature_text.VARIANT_GLOSS`／`VARIANT_COLUMNS`、
+  `feature_panel` 的「← #46」地址邏輯、`feature_tree.VARIANT_WORDS` 跟著拿掉。
+* **不做遷移**：用到 `_outlier` 的舊 recipe 在 lint 會看到「沒有這個數字」。安靜
+  換成 `_worst` 是換掉意思（不同的格），比報錯糟。出貨 recipe 與黃金值都沒用它。
+* 九個測試檔改；兩條專門比較兩族的測試刪掉。
+
+## GLV：「Pick the odd one by」改成「Z-score each box on」＋三格收進階（2026-10-02）
+
+使用者：「Odd box out 請改描述文字 ＋ 你建議的收起來」。算法本來就只有一種
+（穩健的留一法 z 分數），那一格挑的只是拿哪個統計量 —— 舊名字聽起來像在挑方法。
+
+* `glv_stats.JUDGE_LABEL = "Z-score each box on"`（label 與四句錯誤訊息引用同一份）；
+  help 改寫成「每一格一個 z 分數…只有這一種算法，你選的是統計量」；`across_boxes`
+  的 each box 說明與兩個家族那段也改（`_outlier` 明寫「是原始差距、不是 z 分數」）。
+* `direction`／`ref_pairing`／`over_k` 加 `advanced=True`：each box 之後第一眼只剩
+  「Z-score each box on」與「How even are the boxes」，其餘在 `Show N more settings`。
+  **recipe 一個鍵都沒動**，數字不變（show_when 照舊，I9 不受影響）。
+* 預設鈕「Odd box out」名字不動（三處測試與 lint 建議引用它），一句話改成講 z 分數。
+* `recipes/README.md` 兩列改名、並把「預設 glv_mean」改成「這份填 glv_mean（卡片預設是
+  glv_median）」—— 以前那句話是錯的。`USING-UNIFORMITY.md` §0 補一句。
+* `_outlier` 與 `_worst` 兩個家族名字容易混（使用者問），建議另開一輪改名（見對話）。
+
+## F121 期 4 回歸：Open data… 選不到檔案（2026-10-02）
+
+使用者回報三件事，先修第一件（另兩件只分析：GLV 的「Odd box out」其實只有一種
+算法就是穩健 z 分數，困惑來自 each box 之後冒出的五格與 `_outlier`／`_worst` 兩個
+家族；Focus 不接線數字也到 Decision 是 F124 定的「線講流向不當閘門」，欠的是鐵則 10
+那一句沒補）。
+
+* **病根**：F121 期 4 的「Open data…」是非原生 Qt 對話框設成 `FileMode.Directory`
+  再關 `ShowDirsOnly` —— 檔案看得到、**選不到**（Qt 的 accept 只收目錄），點 KLARF
+  按 Choose 什麼都不發生；在容器裡 offscreen 重現。「視窗怪、磁碟讀不到」是同一個
+  對話框。測試全把 `ask_data` 換成假的，所以沒人看到。細節在 F121 計畫書 §8。
+* **修**：`ask_data` 回原生 `getOpenFileName` 挑一個檔案；「整批」改成挑了一張影像、
+  旁邊還有別的時問「只開這張還是全部 N 張」（`widen_to_folder`，旗標 `ASK` 與
+  `CHOOSE` 同 `link_drop` 形狀，conftest 關掉）。`ingest.dataset.image_files` 新的
+  公用函式，`load_folder` 與問句共用一份清單。`plan_open`／CLI 沒動。
+* 守門：`test_ui_one_open.py` 反向守 `DontUseNativeDialog`／`FileMode.Directory`
+  不准再出現，加五條問句行為測試。PITFALLS 一列。
+
+## F125：把 d4t 包成 exe（2026-10-02）
+
+使用者：「請幫忙製作一件打包 exe 程式（可選擇單檔 exe 或資料夾）」。問了三題：
+Studio + 命令列（兩個 exe）、要 CI、範本／手冊／範例資料產生器全包。計畫書
+`docs/plans/F125-build-exe.md`，手冊 `docs/BUILD-EXE.md`。
+
+* `tools/build_exe.py`（stdlib-only，問 1=資料夾／2=單檔或吃 `--onedir`／`--onefile`）
+  ＋ `tools/exe/d4t.spec`、`launch_cli.py`、`launch_studio.py`、`make_icon.py`。
+  清單（要包的檔案、hidden imports、排掉的 Qt 模組、exe 名字）**只住在 build_exe.py**，
+  spec import 它，`tests/test_build_exe.py` 逐條驗檔案真的在、spec 裡沒抄第二份。
+* **一行找檔案的程式都沒改**：datas 目的地鏡射 repo 版面，`parents[2]` 在 exe 裡就是
+  `_internal`。證據是 exe 的 `--version` 印出真的 build id。
+* 真的改的三處：兩個進入點的 `__main__` 守衛加 `multiprocessing.freeze_support()`
+  （少了它 Windows 上 `--workers N` 開 N 個 Studio）、`language._relaunch_command` 加
+  frozen 分支（`sys.executable` 就是 exe）、`pyproject` 的 `dev` extra 加 `pyinstaller>=6`。
+* `.github/workflows/exe.yml`：windows-latest，兩種模式各一份 artifact；只在 main 與手動。
+  它是 spec 在真的 Windows 上能不能過的唯一證明 —— 容器只建得出 Linux 的執行檔。
+* 容器裡（Linux）兩種模式都建過且冒煙全過：資料夾版約 578 MB（兩個 exe 共用），單檔版
+  兩個各約 142 MB；Studio offscreen 活到 timeout、frozen CLI `run --workers 2` 跑完 12 顆
+  CSV 正確。體積的下一刀記在計畫書 §3。
+* 文件：README／CLAUDE §0 §4／AGENTS §4.5／ARCHITECTURE 樹／LICENSING §4 一列＋LGPL 段改寫
+  （exe **會**把 PySide6 包進去，資料夾版比單檔版站得住）／ROADMAP M6／PITFALLS 一列。
+* 踩到：`make_icon.py` 兩個 segfault —— `QGuiApplication` 沒抓著參照、
+  `QBuffer(QByteArray())` 的暫時物件。`make_lot_from_gc.py` 還 import `show_template.py`，
+  是「包進去的 tools 要把 sibling import 一起帶」那條測試抓到的。
+
 ## F124 期 4：丟在卡上就好的拉線（2026-09-30）
 
 使用者：「繼續」。紀錄在計畫書 §11。F124 四期都做完。

@@ -42,7 +42,8 @@ from . import strings
 #: 「The defect's box」／「The most unusual box」／「The whole region」——
 #: 帶冠詞的口語短句，跟底下每一格的膠囊（``Pooled`` / ``Each box`` /
 #: ``Brightest``）不是同一種語氣。現在是名詞片語，而且用的是這張卡自己的詞
-#: （``odd box out`` 就是 ``Pick the odd one by`` 那一格在挑的東西）。
+#: （``odd box out`` 就是 ``Z-score each box on`` 那一格在挑的東西；那一格
+#: 2026-10-02 之前叫 ``Pick the odd one by``）。
 #:
 #: **圖示是底下那幾格的圖**（不是另外畫三張）：這一排是那幾格的捷徑，
 #: 圖一樣才看得出「按這一顆＝把那幾格設成這樣」。
@@ -51,7 +52,7 @@ GLV_INTENTS: Tuple[Tuple[str, str, str, str], ...] = (
      "Measure the centred box, judged against the other boxes.",
      "pick_centre"),
     ("oddest_box", "Odd box out",
-     "Measure every box and report the odd one out.",
+     "Z-score every box against the others; the furthest out is the odd one out.",
      "boxes_each"),
     ("region_stats", "Whole region",
      "Pool every box into one pile of pixels.",

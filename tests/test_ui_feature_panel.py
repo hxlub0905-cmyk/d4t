@@ -60,49 +60,11 @@ def _model(measured, **kw):
 def test_the_four_variants_become_columns_not_rows(measured):
     """19 列 → 一個標題 + 兩列。**這就是這一刀的全部**。"""
     sec = [s for s in _model(measured) if s["grid"]["rows"]][0]
-    assert sec["grid"]["columns"] == ["typical", "worst", "outlier"], \
-        "順序是「先講常態，再講嫌疑人」"
+    assert sec["grid"]["columns"] == ["typical", "worst"], \
+        "順序是「先講常態，再講嫌疑人」（`outlier` 那一欄 2026-10-02 砍了）"
     assert [r["label"] for r in sec["grid"]["rows"]] == ["Median", "Std dev"]
 
 
-def test_outlier_box_is_an_address_not_a_row(measured):
-    """``_outlier_box`` 的值是**框號**，所以它貼在 outlier 那一格旁邊。
-
-    以前它自己佔一列，而那一列的說明欄寫著「median(gray)」、值是 46 ——
-    一個框的序號被當成灰階讀。
-    """
-    from d4t.ui.feature_panel import VARIANT_COLUMNS
-
-    sec = [s for s in _model(measured) if s["grid"]["rows"]][0]
-    assert "outlier_box" not in sec["grid"]["columns"]
-    assert "outlier_box" not in VARIANT_COLUMNS
-    for row in sec["grid"]["rows"]:
-        assert row["outlier_box"] is not None
-    # 而它一列都不佔
-    flat = {r["name"] for r in sec["flat"]}
-    assert not [n for n in flat if n.endswith("_outlier_box")]
-
-
-def test_the_row_says_whether_the_outlier_is_the_same_box_as_the_winner(measured):
-    """**這一欄唯一沒有的資訊就是「那是哪一格」**，所以它一定要在。
-
-    造的五格：judge 是 median，所以贏家是 #4（median 160）；而 std 那一欄
-    最極端的是 #3（std 30）—— 兩個不同的格，名字上沒有任何線索。
-    使用者 2026-09-02：「反而這樣會誤導別人以為他是最 worst 的」。
-    """
-    sec = [s for s in _model(measured) if s["grid"]["rows"]][0]
-    by = {r["label"]: r for r in sec["grid"]["rows"]}
-    assert by["Median"]["same_box"] is True
-    assert by["Std dev"]["same_box"] is False
-    assert by["Std dev"]["outlier_box"] == 3
-    # 而兩個值真的不一樣（6.2 vs 29.8）—— 這才是它值得講的理由
-    assert by["Std dev"]["cells"]["worst"]["value"] \
-        != by["Std dev"]["cells"]["outlier"]["value"]
-
-
-# --------------------------------------------------------------------------- #
-# 2. 標題那一行 = 那張卡自己說的（通用掛鉤）
-# --------------------------------------------------------------------------- #
 def test_the_headline_comes_from_the_card_not_from_the_panel(measured):
     """`Step.panel_headline` 是掛鉤 —— UI 不認得 `glv_worst_*` 這些名字。"""
     sec = [s for s in _model(measured) if s["headline"]][0]
@@ -319,8 +281,7 @@ def test_the_score_is_always_visible_next_to_the_verdict(tmp_path):
 def test_the_panel_can_look_up_everything_it_shows(measured):
     """**畫面上有的，取用口就要查得到。**
 
-    `glv_worst_i` 那一族被升格到區段標題、`<量>_outlier_box` 變成「← #46」
-    那個地址 —— 它們仍然在畫面上，只是不佔一列。而改之前
+    `glv_worst_i` 那一族被升格到區段標題 —— 它們仍然在畫面上，只是不佔一列。而改之前
     `value_text("glv_worst_i")` 回 `None`：**取用口跟畫面說的是兩件事**。
 
     實測抓到的（一份接了 ROI ＋ GLV 逐框 ＋ Focus 的 recipe）：引擎寫了 52 個
@@ -338,8 +299,7 @@ def test_the_panel_can_look_up_everything_it_shows(measured):
         missing = sorted(set(feats) - set(panel.feature_names()))
         assert not missing, "畫面上有、但查不到的：%s" % missing
         # 而且查得到的是**值**，不是空字串
-        for name in ("glv_worst_i", "glv_worst_score",
-                     "glv_median_outlier_box"):
+        for name in ("glv_worst_i", "glv_worst_score", "glv_median_worst"):
             assert panel.value_text(name), name
     finally:
         panel.deleteLater()

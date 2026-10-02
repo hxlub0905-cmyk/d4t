@@ -130,6 +130,8 @@ python -m d4t export  <run_id> --db /tmp/runs.db --mode annotate \
 [`docs/NO-GIT-SETUP.md`](docs/NO-GIT-SETUP.md)，離線安裝相依套件見
 [`docs/OFFLINE-INSTALL.md`](docs/OFFLINE-INSTALL.md)。
 `tools/` 底下的 bootstrap 工具因此一律維持 **stdlib-only**。
+不想裝 Python 的機器可以改帶 exe：`python tools/build_exe.py`（資料夾版或單檔版），
+見 [`docs/BUILD-EXE.md`](docs/BUILD-EXE.md)。
 
 ---
 
@@ -214,6 +216,7 @@ git add -A && python tools/release.py && git add -A
 | 廠內待驗證假設、受限機器部署 | [`docs/FAB-VALIDATION.md`](docs/FAB-VALIDATION.md) |
 | 上游 GLAS 的介面契約 | [`docs/GLAS-INTERFACE.md`](docs/GLAS-INTERFACE.md) |
 | 受限機器：怎麼拿程式碼／怎麼離線裝套件 | [`docs/NO-GIT-SETUP.md`](docs/NO-GIT-SETUP.md)、[`docs/OFFLINE-INSTALL.md`](docs/OFFLINE-INSTALL.md) |
+| 包成 Windows exe（不用裝 Python 就能開 Studio；資料夾版或單檔版） | [`docs/BUILD-EXE.md`](docs/BUILD-EXE.md) |
 | 逐輪決策與理由 | [`SESSION_LOG.md`](SESSION_LOG.md)、[`docs/history/`](docs/history/) |
 
 ---

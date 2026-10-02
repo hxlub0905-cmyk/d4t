@@ -1,6 +1,6 @@
 # F121 — 入口簡單化：一顆 Open、一張 Input 卡、recipe 不認資料型別
 
-狀態：**五期都做完了（2026-09-29）—— 拿掉 DOE、recipe 不認型別、一張 Input 卡、Input 卡看資料、一顆 Open。等使用者試用後說收，再搬進 `docs/history/plans/`。**
+狀態：**五期都做完了（2026-09-29）；期 4 的對話框 2026-10-02 修過一次回歸（§8：選不到檔案）。等使用者再試用後說收，再搬進 `docs/history/plans/`。**
 方向與四項做法使用者已同意（「好 開始做」）。
 
 同一系列的後續：ADC 與 Output 那兩張「特別的卡」各自另開一份（見 §6）。
@@ -339,3 +339,39 @@ CLI 的 `_open_input` 叫同一支（`tests/test_ui_input_kinds.py` 讀兩邊原
 * 舊 recipe（含 `load_single`、含 `doe_folder` 以外的每一種 kind 鍵）開得起來、
   跑出一樣的數字；`to_json_dict → from_json_dict` 是 identity（鐵則 9）。
 * CLI 與 Studio 對同一個路徑判出同一種資料（一支函式）。
+
+---
+
+## 8. 期 4 的回歸：那一顆 Open 選不到檔案（2026-10-02）
+
+使用者：「目前 input 都無法載入檔案（不管是 klarf+RSEM image or klarf+patch 或單純
+圖片），且點選 Open Data 跳出的瀏覽資料夾視窗變得很奇怪（有些磁碟無法讀取）」。
+使用者選的修法：**原生對話框**。
+
+**病根**：期 4 為了「一顆鈕檔案與資料夾都挑得到」，用 Qt 自己畫的對話框
+（`DontUseNativeDialog`）設成 `FileMode.Directory` 再把 `ShowDirsOnly` 關掉。
+那個組合底下檔案**看得到**，但 Qt 的 accept **只收目錄** —— 點一個 KLARF 按 Choose
+什麼都不會發生（按鈕灰掉、視窗不關）。在容器裡用 offscreen 的 Qt 重現了：選檔案
+→ 不關；選資料夾 → 關。所以 KLARF＋patch、KLARF＋RSEM、單張影像一種都開不了，
+只有「選 lot 資料夾、裡面正好一份 KLARF」那條路通。「視窗奇怪、有些磁碟讀不到」
+是同一個對話框：它套了 d4t 的主題與樣式表，列磁碟走 Qt 的檔案系統模型而不是
+檔案總管（斷線的網路磁碟機不重連、沒有快速存取）。
+
+**為什麼測試沒抓到**：每一條開檔的測試都把 `ask_data` 換成假的直接餵路徵；
+`plan_open` 與底層載入器三種資料都正常，壞的只有對話框那一層。
+
+**修法**（`d4t/ui/open_dialogs.py`）：
+
+* `ask_data` 回到原生 `getOpenFileName`，挑**一個檔案**（KLARF／一張影像／`.raw`）。
+* 「整個資料夾」改成問出來的：挑了一張影像、旁邊還有別的影像時，
+  `widen_to_folder` 問「只開這一張，還是資料夾裡全部 N 張」（`QMessageBox`，
+  兩顆鈕加取消）。只有它一張、或挑的是 KLARF，不問（看得出來的事不問）。
+  數影像用新的 `ingest.dataset.image_files`，跟 `load_folder` 同一份清單。
+* 問句有關得掉的旗標（`open_dialogs.ASK`，`tests/conftest.py` 關掉）與
+  `CHOOSE` 注入點，形狀同 `link_drop`。
+* 守門：`test_ui_one_open.py` 用 ast 反向守 `DontUseNativeDialog` 與
+  `FileMode.Directory` 不准再出現在那一支、`ask_data` 要走 `getOpenFileName`；
+  問句三種答案各開什麼、不該問的兩種情況不問、真的問句的鈕對到哪條路。
+
+**沒做的**：`plan_open` 與 CLI 一個字沒動 —— 資料夾那條判斷還在，CLI 給資料夾
+照舊走。

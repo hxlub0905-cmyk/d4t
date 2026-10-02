@@ -22,7 +22,10 @@ dependencies = ["numpy>=1.24", "opencv-python>=4.8", "tifffile>=2023.7", "openpy
 # 浮動版本 = 某天 CI 自己紅了，而沒有人改過任何一行。
 # pyright 同理釘住：它每一版都會多認得幾種錯，浮動版本＝某天 CI 自己紅。
 # 上限與為什麼只掃 core 在 `tools/typecheck.py`。
-dev = ["pytest>=8.2", "ruff==0.15.8", "pyright==1.1.408"]
+# pyinstaller：`tools/build_exe.py` 把 d4t 包成 exe 用的（F125）。放 `dev` 是因為它
+# 只在**建置**那台機器上跑一次，不是執行時相依 —— 不隨任何一條搬運路徑進廠
+# （`docs/LICENSING.md` §4 那張表因此只多一列，LICENSE 的 carve-out 不動）。
+dev = ["pytest>=8.2", "ruff==0.15.8", "pyright==1.1.408", "pyinstaller>=6"]
 # Studio（PySide6）**刻意不在 dependencies 裡**：CLI 那條路
 # （`python -m d4t run`）不需要 Qt，而公司機上有「只要跑批次」的情境。
 # 但這件事以前是隱性的 —— `pip install .` 裝出來的東西 CLI 跑得動、

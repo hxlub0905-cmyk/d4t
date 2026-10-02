@@ -258,6 +258,7 @@ Path 行都建在它上面。
 ├── recipes/                  # **出貨的 recipe**：走 `Open recipe…`，不走範本庫
 │                             #   每一份都被 `tests/test_shipped_recipes.py` 真的跑一次
 ├── tools/                    # 開發／搬運／診斷腳本（bootstrap 那幾支 stdlib-only）
+│   └── exe/                  #   PyInstaller 的 spec、兩支 exe 的啟動腳本、SVG→ICO（`tools/build_exe.py` 用，F125）
 ├── fab_probe/                # 廠內格式探測腳本（stdlib-only、純文字輸出、單檔可貼）
 ├── bundle/
 │   └── d4t_bundle.py         #   整個 repo 打成的單檔純文字包 —— 公司機拿程式碼的唯一路徑
@@ -265,6 +266,7 @@ Path 行都建在它上面。
 │                             #   而那台機器不能跑 git）
 ├── docs/                     # 文件（下一段展開）
 ├── .github/workflows/ci.yml  # CI
+├── .github/workflows/exe.yml # 在 Windows runner 上包 exe、掛 artifact（只在 main 與手動觸發；F125）
 ├── conftest.py               # 讓 `pytest` 在 repo 根跑得起來
 ├── pyproject.toml            # 套件中繼資料；`gui` extra ＝ PySide6（CLI 那條路不需要 Qt）
 ├── requirements.txt          # 開發環境（含 PySide6 —— 跟 pyproject 的用途不一樣）

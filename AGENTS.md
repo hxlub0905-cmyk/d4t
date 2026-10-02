@@ -276,6 +276,7 @@ python tools/make_text_bundle.py --out bundle/d4t.py --split 400
 | `release.py` | **家用機** | ✅ 要 | 重產清單 + 搬運包（每次改完都跑）|
 | `make_filelist.py` / `make_text_bundle.py` | **家用機** | ✅ 要 | `release.py` 底下的兩支，通常不直接叫 |
 | `fetch_wheels.py` | **家用機** | ❌ | 抓 Windows wheels，帶 `wheels\` 過去 |
+| `build_exe.py` | **家用機**（Windows） | ❌ | 用 PyInstaller 把 d4t 包成 `d4t.exe`（命令列）＋ `d4t-studio.exe`（Studio），資料夾版或單檔版（F125）。spec 與啟動腳本在 `tools/exe/`，清單在這支最上面。要 `pip install pyinstaller`（`dev` extra）。exe 是二進位，**不走剪貼簿、不進 repo／bundle**，帶進公司機跟 `wheels\` 同一條路；公司機能走內部鏡像裝 pyinstaller 的話也能在那裡建。見 `docs/BUILD-EXE.md` |
 | `make_mgepi_real.py` / `validate_mgepi.py` | **家用機** | ❌ | 擬真 BSE 合成 lot（MG×EPI×spacer）＋可分性驗證（要 numpy/cv2）|
 | `make_lot_from_gc.py`（CLI）／`python -m d4t simgen`（UI）| **家用機** | ❌ | **拿一張 Golden Cell 鋪成整批擬真資料**：RSEM 大圖（1000²）＋ 從大圖切下來的 patch（81²，test/ref 成對）＋ 兩份 KLARF ＋ ground truth。跟其他產生器的差別是**它不畫圖案，它鋪你給的那一張** —— 圖案是輸入不是參數，所以換 layer 換世代都不用改程式（最高指導原則）。週期用次像素量、缺陷落點從 GC 量出來。⚠ GC 可能是廠內圖案，**吃的跟吐的都不進版控**（鐵則 8）。UI 版（F60）多的只有「貼上就能用」：剪貼簿 `Ctrl+V`／影像檔／recipe／`gc2:` 字串四條路，週期看得到也改得動 |
 | `make_glas_export.py` | **家用機** | ❌ | 合成一份 **GLAS 匯出**（`<id>_label.png` + v4 manifest）掛在 RSEM lot 上 —— Region-3 在家用機唯一的資料來源（要 numpy/cv2）|

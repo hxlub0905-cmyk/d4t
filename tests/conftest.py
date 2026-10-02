@@ -44,6 +44,12 @@ def _no_modal_dialogs_in_tests():
     if drop is not None:
         drop.ASK = False
         drop.CHOOSE = None
+    # 2026-10-02：「Open data…」挑了一張影像、旁邊還有別的影像時問「只開這張還是
+    # 整批」。關掉＝只開挑的那一張；要驗問句的測試用 `open_dialogs.CHOOSE`。
+    od = sys.modules.get("d4t.ui.open_dialogs")
+    if od is not None:
+        od.ASK = False
+        od.CHOOSE = None
     yield
 
 

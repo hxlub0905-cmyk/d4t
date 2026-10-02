@@ -379,7 +379,10 @@ FILE_CEILINGS = {
     # 純函式）搬進 `ui/layout.py`、「線繞開卡片」的幾何放 `ui/edge_route.py`；
     # 留在這裡的是 `path` 叫它的那幾行、`card_bodies`、`SIDE`，與「沒有入口的
     # 卡是起點」那一條排版前提。
-    "d4t/ui/canvas.py": 3245,
+    # 2026-10-02 3245 → 3265：按在卡上的那一下不捲（`_emit_selected_from_press`）、
+    # 雙擊那一下不是拖曳（關 ItemIsMovable 到放開）—— 兩個「按著滑鼠時畫布動了，
+    # 卡片被推走」的修法，各幾行；故事在 docs/PITFALLS.md。
+    "d4t/ui/canvas.py": 3265,
     # `CLAUDE.md` **每個 session 都會被讀進去**。2026-09-09 之前它是 647 行，
     # 一半是「某年某月使用者說了什麼」的故事 —— 規則留下、故事搬進
     # `docs/history/CLAUDE-2026-09-09.md`，瘦到 319 行。這一格擋它長回去：
@@ -394,7 +397,10 @@ FILE_CEILINGS = {
     # 指向的交接檔跟著刪，所以這裡跟著降。**上限掉下去要跟著降**是這張表的
     # 另一半（`test_the_ceilings_are_not_far_above_the_truth` 會叫）——
     # 一個沒人踩得到的上限等於沒有上限。
-    "CLAUDE.md": 332,
+    # 2026-10-02（F125）332 → 334：§0 的表多一列（`docs/BUILD-EXE.md` 是「包成 exe」
+    # 這個主題的家，而 §0 那張表就是「每個主題只有一個家」的索引）、§4 的指令
+    # 清單多一行 `python tools/build_exe.py`。各一行，剛好兩行。
+    "CLAUDE.md": 334,
 }
 
 #: 沒被列名的檔案共用的上限。

@@ -1,0 +1,42 @@
+# 把 d4t 包成 Windows exe（F125）。
+#
+# 跟 `ci.yml` 分開的理由：這一支要 Windows runner（分鐘數是 Linux 的兩倍）、每次要
+# 幾分鐘、產出幾百 MB —— 不該跟著每一個 PR 跑。只在推上 main 與手動觸發時跑。
+# 它同時是 `tools/exe/d4t.spec` **在真的 Windows 上能不能過**的唯一證明：家用機之外
+# 的開發環境是 Linux 容器，那裡只建得出 Linux 的執行檔。
+#
+# 產出掛成 artifact（兩種模式各一份）。⚠ 公司機下載不了 artifact（`AGENTS.md` §1），
+# 所以這裡的 artifact 是給家用機拿的；帶進公司機的路跟 `wheels\` 一樣。
+# 冒煙（`d4t.exe --version` 含 build id、`d4t.exe steps` 列得出卡片）在
+# `tools/build_exe.py` 裡面，所以這裡不另外寫一步。
+name: exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [onedir, onefile]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install d4t's dependencies and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build (${{ matrix.mode }})
+        run: python tools/build_exe.py --${{ matrix.mode }} --no-prompt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d4t-${{ matrix.mode }}-windows
+          path: dist/
+          if-no-files-found: error

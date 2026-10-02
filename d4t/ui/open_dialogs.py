@@ -9,9 +9,12 @@
 
 **2026-09-18（F114-2）：五顆併成三顆**（見 :data:`OPENABLE` 的說明）；
 **2026-09-24（F121 期 0）：三顆剩兩顆**（DOE 那顆拿掉）；
-**2026-09-29（F121 期 4）：兩顆剩一顆**「Open data…」。它吃「一個檔案**或**一個
-資料夾」，而**是哪一種由那條路徑自己回答** —— 判斷住在 core
-（`ingest.dataset.plan_open`），CLI 的 `d4t.__main__._open_input` 叫同一支。
+**2026-09-29（F121 期 4）：兩顆剩一顆**「Open data…」，**是哪一種由那條路徑自己
+回答** —— 判斷住在 core（`ingest.dataset.plan_open`），CLI 的
+`d4t.__main__._open_input` 叫同一支。
+**2026-10-02：那一顆改回原生檔案對話框**（:func:`ask_data` 的說明有整個故事）：
+挑一個檔案；「整個資料夾」是挑裡面任何一張影像之後被問出來的
+（:func:`widen_to_folder`），不再是對話框裡選目錄。
 
 ⚠ **每一支都回「使用者選了什麼」，不自己去載。** 載入是 `StudioWindow` 的事
 （它要管 `_pending_dataset_name`、進度列、worker 忙不忙）—— 這裡只問問題。
@@ -19,11 +22,11 @@
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog
+from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox
 
-from . import wording
+from . import strings, wording
 
 if TYPE_CHECKING:                  # 只給型別看：這一支不 import studio
     from .studio import StudioWindow
@@ -56,28 +59,90 @@ OTHER_LAYOUT = "Something else - let me type it in"
 OPENABLE = ("data",)
 
 
+#: 挑了一張影像、而它旁邊還有別的影像時，問「只開這一張還是整批」
+#: （:func:`widen_to_folder`）。測試關掉（`tests/conftest.py`）＝只開挑的那一張；
+#: 要驗那個問句的測試用 :data:`CHOOSE` 換掉使用者的選擇（同 `link_drop` 的形狀）。
+ASK = True
+#: ``CHOOSE(image_path, folder, n_images) -> image_path | folder | None``。
+CHOOSE: Optional[Callable[[str, str, int], Optional[str]]] = None
+
+#: 問句上那兩顆鈕的字（`tests/test_ui_one_open.py` 用它們認鈕）。
+THIS_IMAGE = "Just this image"
+WHOLE_FOLDER = "All %d images in the folder"
+
+
 def ask_data(parent: Any) -> Optional[str]:
-    """「Open data…」—— **一個檔案（KLARF 或一張影像）或一個資料夾**。
+    """「Open data…」—— **原生**檔案對話框，挑**一個檔案**：KLARF、一張影像、或 `.raw`。
 
-    對話框用的是 ``FileMode.Directory`` **加上 `ShowDirsOnly` 關掉** —— 那組合
-    底下檔案看得到也選得到，所以「選一個資料夾」與「選一個檔案」**同一顆鈕就
-    夠了**，而回來的是一條路徑。要分哪一種交給 :func:`open_path`（→
-    `plan_open`），使用者不必先回答一個他還沒看到資料就答不出來的問題。
+    2026-09-29 ～ 10-02 這裡是 Qt 自己畫的對話框（`DontUseNativeDialog`），設成
+    `FileMode.Directory` 再把 `ShowDirsOnly` 關掉，前提是「這樣檔案與資料夾都選得到，
+    一顆鈕就夠」。看得到是真的，**選得到是假的**：那個模式下 Qt 的 accept 只收目錄，
+    點一個 KLARF 按 Choose **什麼都不會發生**（按鈕灰掉、視窗不關）—— 於是三種資料
+    一種都開不了（使用者 2026-10-02 回報「目前 input 都無法載入檔案」）。而且非原生
+    對話框在 Windows 上列磁碟走的是 Qt 的檔案系統模型，不是檔案總管：斷線的網路
+    磁碟機看起來像壞的、沒有「快速存取」，使用者的話是「瀏覽資料夾視窗變得很奇怪」。
+    測試當時全部把這一支換成假的直接餵路徑，所以沒有人看到。
+    `tests/test_ui_one_open.py` 現在反向守著那兩個選項不准再出現在這裡。
 
-    ⚠ **非原生對話框**（`DontUseNativeDialog`）：原生的目錄選擇器在每個平台上
-    都只給目錄，那正是這一顆要擺脫的限制。
+    「整個資料夾」那條路改成：挑資料夾裡**任何一張影像**，旁邊還有別的影像時
+    :func:`widen_to_folder` 會問「只開這張還是整批」。lot 資料夾不必問 ——
+    挑 KLARF 就是整批（`plan_open`）。回 ``None`` = 使用者取消。
     """
-    d = QFileDialog(parent, "Open data - a KLARF, a folder of images, or "
-                            "one image")
-    d.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-    d.setFileMode(QFileDialog.FileMode.Directory)
-    d.setOption(QFileDialog.Option.ShowDirsOnly, False)
-    d.setNameFilters([DATA_FILTER, KLARF_FILTER.split(";;")[0],
-                      IMAGE_FILTER.split(";;")[0], RAW_FILTER, "All files (*)"])
-    if not d.exec():
+    path, _ = QFileDialog.getOpenFileName(
+        parent, "Open data - pick a KLARF, an image, or a .raw file", "",
+        ";;".join([DATA_FILTER, KLARF_FILTER.split(";;")[0],
+                   IMAGE_FILTER.split(";;")[0], RAW_FILTER, "All files (*)"]))
+    return path or None
+
+
+def widen_to_folder(parent: Any, path: str) -> Optional[str]:
+    """挑了一張影像、旁邊還有別的影像 → 問要開這一張還是整批。
+
+    回要開的那條路徑（那張影像、或它的資料夾）；``None`` = 取消。不是影像、或
+    資料夾裡只有它一張，原路回去**不問**（看得出來的事不拿去問人）。數影像用
+    `ingest.dataset.image_files` —— 跟 `load_folder` 同一份清單，問句上的數字才會
+    等於載進來的顆數。
+    """
+    import os
+
+    from d4t.core.ingest.dataset import image_files, plan_open
+
+    if plan_open(path).what != "image":
+        return path
+    folder = os.path.dirname(os.path.abspath(path))
+    n = len(image_files(folder))
+    if n <= 1:
+        return path
+    if CHOOSE is not None:
+        return CHOOSE(path, folder, n)
+    if not ASK:
+        return path
+    picked = _ask_box(
+        parent, strings.tr("Open data"),
+        strings.tr("This folder has other images next to the one you picked.")
+        + "\n" + strings.tr("Open just this image, or every image in the folder?"),
+        [strings.tr(THIS_IMAGE), strings.tr(WHOLE_FOLDER) % n])
+    if picked is None:
         return None
-    got = d.selectedFiles()
-    return got[0] if got else None
+    return folder if picked == 1 else path
+
+
+def _ask_box(parent: Any, title: str, text: str, labels: Any) -> Optional[int]:
+    """一題多顆鈕的小問句：回被按的那顆的序號，取消回 ``None``。
+
+    拆成一支是為了測試換得掉（`QMessageBox.clickedButton` 換不掉）。
+    """
+    box = QMessageBox(parent)
+    box.setWindowTitle(title)
+    box.setText(text)
+    buttons = [box.addButton(label, QMessageBox.AcceptRole) for label in labels]
+    box.addButton(QMessageBox.Cancel)
+    box.exec()
+    clicked = box.clickedButton()
+    for i, b in enumerate(buttons):
+        if clicked is b:
+            return i
+    return None
 
 
 def ask_raw_layout(parent: Any, probe: str) -> Optional[Any]:
@@ -139,6 +204,8 @@ def open_source(window: Any, key: str) -> None:
     """
     if key == "data":
         path = ask_data(window)
+        if path:
+            path = widen_to_folder(window, path)
         if path:
             open_path(window, path)
     else:

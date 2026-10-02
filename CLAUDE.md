@@ -23,6 +23,7 @@
 | CD 卡的使用手冊 | [`docs/USING-CD.md`](docs/USING-CD.md) | 動 CD 卡的參數、help、輸出名之前 |
 | Focus index 與機台 F.I. 校正的使用手冊 | [`docs/USING-FOCUS.md`](docs/USING-FOCUS.md) | 動 `focus_quality`／`algo/iqi.py`、或要解釋一個對焦分數之前 |
 | Golden Cell 產模擬資料的使用手冊 | [`docs/USING-SIMGEN.md`](docs/USING-SIMGEN.md) | 動 `simgen` 視窗或 `tools/make_lot_from_gc.py` 之前 |
+| 包成 Windows exe（資料夾版／單檔版）的使用手冊 | [`docs/BUILD-EXE.md`](docs/BUILD-EXE.md) | 動 `tools/build_exe.py`／`tools/exe/`、或 Studio 要在執行時讀 repo 裡的檔案之前 |
 | **架構**：三段式心智模型、資料模型、目錄結構 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 動 pipeline／資料流之前 |
 | **已知的坑**（只增不減）| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 動 Qt 繪圖／快取／批次平行／KLARF 寫回／recipe 遷移之前，**先搜關鍵字** |
 | **進度與 phase 計畫** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 想知道「接下來做什麼」 |
@@ -186,6 +187,7 @@ python tools/make_sample.py /tmp/lot --n 100       # 產合成資料
 python -m d4t gui                                  # 開 Studio
 python -m d4t run <recipe>.json /tmp/lot/LOT_SYN.001 --workers 4 --cache /tmp/cache --csv f.csv
 python -m d4t --version                            # 版本 + build id（= bundle 檔頭那個數）
+python tools/build_exe.py --onedir                 # 包成 exe（家用機、Windows；單檔版用 --onefile；見 docs/BUILD-EXE.md）
 ```
 
 **一律 `python -m pytest`**，不是 `pytest`：兩者可能不是同一個直譯器（2026-09-09
@@ -232,7 +234,7 @@ git add -A && python tools/release.py && git add -A
 **一塊新的面板／畫布元件＝一個新模組**；`studio.py` 留給**接線**，不留給內容。
 先問那一塊該不該是一塊（F50 的 `output_band.py` 就是因為「框的意思是一組、真相是
 跑的時間不一樣」而刪掉的）。`d4t/ui` 裡不准直接 `QSplitter(`（用 `ui/splitters.py`，
-有測試數像素）。新元件直接 import 拆出來的那幾支（`ui/fields.py`、`ui/chips.py`、
+有測試數像素）；拆 widget 不准自己 `setParent(None)`（用 `ui/buttons.py` 的 `discard_widget`／`clear_layout`，`tests/test_widget_teardown.py` 守；沒先 `hide()` 會閃出空白視窗）。新元件直接 import 拆出來的那幾支（`ui/fields.py`、`ui/chips.py`、
 `ui/icons.py`、`ui/library.py`、`ui/histogram.py`、`ui/image_view.py`、
 `ui/param_form.py`、`ui/buttons.py`、`ui/feature_text.py`）；**`widgets.py` 只是一道
 轉出口，裡面不准再有 class / def**（幾行去 `tests/test_size_ceilings.py` 看）。
@@ -267,7 +269,7 @@ git add -A && python tools/release.py && git add -A
 
 **一張載入卡**：`load_patch`「Input」，一張或好幾張都吃，**名字表開資料時照資料填**
 （F121 期 2 把 `load_single`「SEM image」併回來了，舊 recipe 由遷移換卡；key 沒動）。
-**入口只有一顆**「Open data…」（F121 期 4），檔案或資料夾都吃；是哪一種由
+**入口只有一顆**「Open data…」（F121 期 4）：**原生**檔案對話框挑一個檔案（KLARF／一張影像／`.raw`），要整批就挑資料夾裡任何一張影像、它會問（2026-10-02：非原生的「選目錄」模式選不到檔案，見 `open_dialogs.ask_data`）；是哪一種由
 `ingest.dataset.plan_open` 看那條路徑回答（CLI 叫同一支）。三種 source：
 
 | kind | 什麼樣的資料 |

@@ -25,8 +25,8 @@
 #     back from the same file if that changes.
 #   - SKIPPED PEAR's ``group_outliers`` (Tukey count per group):
 #     ``glv_stats``'s ``glv_boxes_over_k`` (F68) already answers "how many
-#     boxes are off", and ``_outlier`` / ``_outliers`` differ by one letter
-#     while meaning a grey level and a count — see F85 §3.3.
+#     boxes are off", and a second count next to it would use a different
+#     notion of "outlier" — see F85 §3.3.
 #   - No algorithmic changes.
 """均勻度 —— **這一群框之間差多少、有沒有斜掉** vendored from PEAR.
 

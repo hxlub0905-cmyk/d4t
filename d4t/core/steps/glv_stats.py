@@ -256,36 +256,34 @@ POOLED = "pooled"
 EACH_BOX = "each box"
 BOX_MODES = (POOLED, EACH_BOX)
 
-#: 一格一格量之後，每個數字會變成三個（外加一個 ``boxes`` 說總共幾格）。
+#: 一格一格量之後，每個數字會變成兩個（外加一個 ``boxes`` 說總共幾格）。
 #:
-#: 用字而不是 ``med`` / ``p95``：讀它們的人是製程工程師，而 `_typical` 與
-#: `_outlier` 這兩個詞不必查就懂。**刻意只有兩個端點**（計畫書原本還列了
-#: p95）—— 「典型長什麼樣」與「最不一樣的那一格是誰」是這個問題的全部，
-#: 第三個分位數只是多一欄 CSV。
+#: 用字而不是 ``med`` / ``p95``：讀它們的人是製程工程師，而 `_typical` 這個詞
+#: 不必查就懂 —— 它是**所有格的中位數**（「典型的一格長什麼樣」）。
+#:
+#: ⚠ **2026-10-02 砍掉了 ``_outlier`` / ``_outlier_box``**（使用者：「outlier 跟
+#: worst 非常容易讓人搞混」，三條路裡選了「砍掉、只留 z 分數那一族」）。那一族
+#: 是「這個統計量自己離 typical 最遠的那一格」—— 原始差距、不除 σ、每個統計量
+#: 各挑一格；而 ``_worst`` 是 z 分數最高的**那一格**身上的每個量。兩族常常指著
+#: 不同的格，而名字上看不出來（2026-09-02 實測 24 顆只有 2–5 顆相同）。說明
+#: 寫了兩輪（F76 的 gloss、2026-09-09 的 help）使用者還是混，所以不留。
+#: 用到 ``<量>_outlier`` 的舊 recipe 會在 lint 看到「沒有這個數字」，**不做
+#: 遷移**：把它安靜換成 ``_worst`` 是換掉意思（不同的格），那比報錯糟。
 TYPICAL_SUFFIX = "_typical"
-OUTLIER_SUFFIX = "_outlier"
-OUTLIER_BOX_SUFFIX = "_outlier_box"
 
-#: **贏家那一格**的每一個量（F68，2026-09-01）。
+#: **贏家那一格**的每一個量（F68，2026-09-01）：照 **judge**（「Z-score each box
+#: on」那一格）算 z 分數，分數最高的那一格身上的這個量。
 #:
-#: 跟 ``_outlier`` 是**一對，答的是兩個不同的問題** —— 而那正是它做成後綴、
-#: 跟 ``_outlier`` 排在一起的理由：
-#:
-#: ===================  ==================================================
-#: ``<量>_outlier``     照**這個量自己**算，最極端的那一格的值
-#: ``<量>_worst``       照 **judge**（「挑的依據」）挑出來的那一格的這個量
-#: ===================  ==================================================
-#:
-#: 兩者**不一定是同一格**。使用者 2026-09-01 要的「最黑那格的 Q25」是後者，
-#: 而在這之前只有 ``glv_worst_value``（judge 那一個量）拿得到 —— 想要那一格的
-#: 別的統計量，只能把 judge 改成它，於是「照什麼挑」與「要報什麼」被綁死。
+#: 使用者 2026-09-01 要的「最黑那格的 Q25」就是它 —— 在這之前只有
+#: ``glv_worst_value``（judge 那一個量）拿得到，想要那一格的別的統計量只能把
+#: judge 改成它，於是「照什麼挑」與「要報什麼」被綁死。
 WORST_SUFFIX = "_worst"
 
 #: **這一群框均不均勻**（F85，2026-09-07）—— PEAR 的 uniformity 搬過來的那一組。
 #:
 #: 為什麼是這張卡的一格參數，不是一張新卡（使用者問「是有必要新開卡嗎」）：
 #: ``each box`` **已經**逐框量出一串值了，這幾個數字只是那一串值的另一種
-#: 收尾。它問的跟 ``_typical`` / ``_outlier`` 是**同一個樣品、同一組框、
+#: 收尾。它問的跟 ``_typical`` / ``_worst`` 是**同一個樣品、同一組框、
 #: 同一批像素** —— 分成兩張卡的代價是使用者要接兩次線、設兩次 ``metrics``，
 #: 而那兩份**可以設得不一樣，畫面上看不出來**（`roi_compare` 併進這張卡時
 #: 罵過的同一件事）。
@@ -315,9 +313,8 @@ UNIF_CHOICES = (UNIF_RANGE, UNIF_RANGE_PCT, UNIF_CV_PCT,
 DEFAULT_REPORT = "%s,%s,%s" % (UNIF_CV_PCT, UNIF_SLOPE_X, UNIF_SLOPE_Y)
 
 #: ⚠ **不做「幾格是 Tukey 離群」**（F85 §3.3，本來列在計畫書第一版裡）。
-#: :data:`BOXES_OVER_K`（F68「超過 k σ 的有幾格」）已經在回答同一句話，而
-#: ``_outlier``（最極端那格的**值**）與 ``_outliers``（**幾格**）只差一個
-#: 字母、會在同一份 CSV 上並排 —— 一個是灰階，一個是計數。
+#: :data:`BOXES_OVER_K`（F68「超過 k σ 的有幾格」）已經在回答同一句話 ——
+#: 第二個「幾格」會跟它在同一份 CSV 上並排，而兩個計數用兩種離群的定義。
 
 #: 疊圖上「贏家那一格」的**角色**（不是區域名 —— `!` 開頭是慣例，見
 #: `ui.widgets.MARK_ROLE_TOKENS`）。UI 據此畫琥珀色粗框，跟報表同一個語言。
@@ -359,9 +356,8 @@ BOXES_OVER_K_FRAC = "glv_boxes_over_k_frac"
 #: 只要接兩個區域就一定發生，使用者再小心都躲不掉。
 BOX_COUNT = "glv_boxes"
 
-#: 逐框比較的「總冠軍」那一組（F31，2026-08-25）。`_outlier` 那三個後綴回答
-#: 「**每個統計量各自**最極端的是哪一格」；這一組回答的是另一個問題 ——
-#: 「照**使用者挑的那一個**判準（`judge`），哪一格最異常、它在哪、多異常」。
+#: 逐框比較的「總冠軍」那一組（F31，2026-08-25）：「照**使用者挑的那一個**
+#: 判準（`judge`）算 z 分數，哪一格最異常、它在哪、多異常」。
 #: 座標是**整張影像的像素**，逐位元組等於 `ctx.roi_rects()[worst_i]`：ROI 的
 #: 框既是輸入也是報表上要畫的那個框（只有一種框），所以位置不另外量，就是
 #: 那一格 ROI 自己。找不到（單框、或每一格都量不出來）就**一格都不寫**。
@@ -418,6 +414,16 @@ LEGACY_BOX_RENAMES = {
 
 #: 「照哪個數字挑最異常」的預設。median 跟 Statistics 的預設第一顆同一個。
 JUDGE_DEFAULT = "glv_median"
+
+#: ``judge`` 那一格在畫面上的名字 —— 錯誤訊息引用它，所以只寫一份。
+#:
+#: 2026-10-02 從「Pick the odd one by」改過來。使用者：「找異常的點我想改成就是算
+#: 每個的 z 分數就好（不然 Pick the odd one 太多選項，user 是否會搞混）」。
+#: 算法本來就只有一種（穩健的留一法 z 分數，`algo_glv.odd_box_scores`），
+#: 這一格挑的只是**拿哪個統計量**去算 —— 舊名字聽起來像在挑方法，新名字講的
+#: 是它真正做的事。配套：方向、參照配對、超過 k σ 三格收成進階設定
+#: （``advanced=True``），第一次打開這張卡的人只看到這一格。
+JUDGE_LABEL = "Z-score each box on"
 
 
 def _canonical(mid: str) -> str:
@@ -527,21 +533,6 @@ def _direction_of(params: Dict[str, Any]) -> str:
     """往哪一邊找（F68）。不認得的字當 ``both``（＝ F68 之前的唯一行為）。"""
     got = str(params.get("direction", algo_glv.BOTH) or algo_glv.BOTH).strip()
     return got if got in algo_glv.ODD_BOX_DIRECTIONS else algo_glv.BOTH
-
-
-def _pick_odd(values: List[float], typical: float, direction: str) -> int:
-    """一串值裡「最極端」的那一個的位置 —— **跟著方向走**（F68）。
-
-    ``_outlier`` 那一族以前寫死絕對值，而 worst 那一族有方向的話，同一張卡上
-    兩族名字會用兩種「極端」的定義 —— 那是最難發現的那種不一致。
-    """
-    if direction == algo_glv.DARKER:
-        devs = [typical - v for v in values]
-    elif direction == algo_glv.BRIGHTER:
-        devs = [v - typical for v in values]
-    else:
-        devs = [abs(v - typical) for v in values]
-    return int(np.argmax(devs))
 
 
 def _judge_of(params: Dict[str, Any]) -> str:
@@ -692,27 +683,25 @@ class GlvStatsStep(MultiSourceStep):
                 POOLED: "One pile of pixels. Every box's pixels go into the "
                         "same statistics - use it when the region is one "
                         "area that happens to be drawn as several boxes.",
-                EACH_BOX: "Measure every box on its own, then report the "
-                          "typical one, the odd one out, and which box that "
-                          "was. This is how you hunt a defect that sits in "
-                          "one box.",
+                EACH_BOX: "Measure every box on its own and give each one a "
+                          "z-score against the others; report the typical "
+                          "box, the odd one out, and which box that was. "
+                          "This is how you hunt a defect that sits in one "
+                          "box.",
             },
             help=("A region can be many boxes at once (a Golden Cell template "
                   "lays hundreds of them across a big image). pooled treats "
                   "them as one pile of pixels; each box measures every box on "
-                  "its own and reports the typical one, the odd one out, and "
-                  "which box that was.\n\n"
-                  "Two families of numbers come out of each box, and they "
-                  "often point at different boxes: <stat>_worst is that "
-                  "statistic measured on the ONE box the judge below picked "
-                  "(glv_worst_score says how far out it is, in sigmas; "
-                  "glv_worst_baseline is the other boxes' middle) - use these "
-                  "when you want every number to come from the same box. "
-                  "<stat>_typical is the middle of all the boxes, "
-                  "<stat>_outlier is the furthest-out box on that one "
-                  "statistic alone, and <stat>_outlier_box is that box's "
-                  "number - use these when one statistic matters on its "
-                  "own."),
+                  "its own, z-scores each one against the others, and reports "
+                  "the typical box, the odd one out, and which box that "
+                  "was.\n\n"
+                  "Every statistic then comes out twice: <stat>_typical is "
+                  "the middle of all the boxes (their median), and "
+                  "<stat>_worst is that statistic measured on the ONE box "
+                  "with the biggest z-score - the odd one out. Every _worst "
+                  "number comes from that same box; glv_worst_score is its "
+                  "z-score, in sigmas, and glv_worst_baseline is the other "
+                  "boxes' middle."),
         ),
         ParamSpec(
             name="report", type="multi_choice", default=DEFAULT_REPORT,
@@ -754,30 +743,31 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="judge", type="metric_choice", default=JUDGE_DEFAULT,
             choices=list(METRIC_CHOICES) + list(COMPARE_CHOICES),
-            label="Pick the odd one by",
+            label=JUDGE_LABEL,
             section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
-            help=("Which number decides the odd box out. Every box is "
-                  "compared against the middle of all the other boxes, in "
-                  "robust sigmas - the winner's box and score come out as "
-                  "glv_worst_x/y/w/h and glv_worst_score, ready to rank a "
-                  "report by "
-                  "and to draw on the overlay. The median ignores a few hot "
-                  "pixels inside a box; use the max to hunt for a single "
-                  "bright speck instead. “+ Percentile…” adds any percentile "
-                  "you like (hand-written recipes may also use glv_q<0-100>, "
-                  "glv_trim<0-49> or glv_above<0-255>).\n\n"
+            help=("Every box gets one z-score: how many sigmas this "
+                  "statistic, measured on that box, sits from the middle of "
+                  "all the OTHER boxes (|value - their median| / their robust "
+                  "spread). There is only this one way of scoring - what you "
+                  "choose here is which statistic to score. The box with the "
+                  "biggest z-score is the odd one out: its box and score come "
+                  "out as glv_worst_x/y/w/h and glv_worst_score, ready to rank "
+                  "a report by and to draw on the overlay. The median ignores "
+                  "a few hot pixels inside a box; use the max to hunt for a "
+                  "single bright speck instead. “+ Percentile…” adds any "
+                  "percentile you like (hand-written recipes may also use "
+                  "glv_q<0-100>, glv_trim<0-49> or glv_above<0-255>).\n\n"
                   "The second group (delta, snr, …) needs a reference wired "
-                  "in below: those pick the box that differs most from the "
-                  "reference, rather than the box that differs most from the "
-                  "other boxes. With a ref image that is usually the one you "
-                  "want."),
+                  "in below: those z-score how much each box differs from "
+                  "the reference, rather than from the other boxes. With a "
+                  "ref image that is usually the one you want."),
         ),
         ParamSpec(
             name="direction", type="chip_choice", default=algo_glv.BOTH,
             choices=list(algo_glv.ODD_BOX_DIRECTIONS),
             icons=["odd_either", "odd_darker", "odd_brighter"],
-            label="Looking for boxes that are",
+            label="Looking for boxes that are", advanced=True,
             section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             choice_help={
@@ -799,7 +789,7 @@ class GlvStatsStep(MultiSourceStep):
         ParamSpec(
             name="ref_pairing", type="chip_choice", default=PER_BOX_REF,
             choices=list(REF_PAIRINGS), icons=["pair_each", "pair_pooled"],
-            label="Take the reference",
+            label="Take the reference", advanced=True,
             section="3 · How to find it",
             show_when=((("reference_source",), (ANY_VALUE,)),
                        ("reference_region", ("",)),
@@ -823,7 +813,7 @@ class GlvStatsStep(MultiSourceStep):
         ),
         ParamSpec(
             name="over_k", type="float", default=0.0, min=0.0, max=99.0,
-            unit="σ", label="Also count boxes beyond",
+            unit="σ", label="Also count boxes beyond", advanced=True,
             section="3 · How to find it",
             show_when=("across_boxes", (EACH_BOX,)),
             help=("Count how many boxes are further than this many robust "
@@ -956,9 +946,9 @@ class GlvStatsStep(MultiSourceStep):
 
     #: 每個數字的**單位**（F76）—— 見 `Step.feature_units`。
     #:
-    #: 鍵是 metric 那一層，所以 ``glv_median`` 一個鍵服務 ``_typical`` /
-    #: ``_outlier`` / ``_worst`` 三個名字；``_outlier_box`` 由
-    #: `step.VARIANT_UNITS` 覆寫成 ``box``（它的值是框號，不是灰階）。
+    #: 鍵是 metric 那一層，所以 ``glv_median`` 一個鍵服務 ``_typical`` 與
+    #: ``_worst`` 兩個名字；變體自己換掉單位的那幾種（均勻度的 %）住在
+    #: `step.VARIANT_UNITS`。
     #:
     #: 形狀那幾個（skew / kurt / bimodality）**刻意留白**：它們是無量綱的，
     #: 而編一個單位比沒有單位糟。
@@ -1049,17 +1039,13 @@ class GlvStatsStep(MultiSourceStep):
                  DEFAULT_COMPARE_STAT[4:])]
             base = base + [(n, m, s, "", "cmp") for n, m, s in pairs]
         if str(params.get("across_boxes", POOLED)) == EACH_BOX:
-            # 一格一格量：每個數字變成「典型 / 最不一樣的那一格 / 那是第幾格」。
+            # 一格一格量：每個數字變成「典型 / z 分數最高那一格的這個量」。
             # ⚠ 宣告是「**可能**會產出的」（同上面 snr/tstat 那行）：worst 那
             # 一組在只剩一格可量的 defect 上算不出來，那一顆就不會有那幾格。
-            # ``_worst``（F68）跟另外三個並排：同一個量、第四種身分
-            # 「**judge 挑的那一格**的這個量」（``_outlier`` 是「這個量自己
-            # 最極端的那一格」—— 兩者不一定是同一格）。
+            # （``_outlier`` / ``_outlier_box`` 2026-10-02 砍了，見 TYPICAL_SUFFIX。）
             spread = [(n + suffix, m, s, var, fam)
                       for n, m, s, _v, fam in base
                       for suffix, var in ((TYPICAL_SUFFIX, "typical"),
-                                          (OUTLIER_SUFFIX, "outlier"),
-                                          (OUTLIER_BOX_SUFFIX, "outlier_box"),
                                           (WORST_SUFFIX, "worst"))]
             # 均勻度（F85）：**只掛在絕對統計量上**，而且是「這一群框之間」
             # 的身分 —— variant 用 key 本人（`cv_pct` / `slope_x`…），家族
@@ -1234,7 +1220,7 @@ class GlvStatsStep(MultiSourceStep):
         if (str(params.get("across_boxes", POOLED)) == EACH_BOX
                 and _judge_of(params) in algo_glv.COMPARE_METRICS
                 and _reference_of(params) == REF_NONE):
-            out.append("“Pick the odd one by” is set to “%s”, which compares "
+            out.append("“" + JUDGE_LABEL + "” is set to “%s”, which compares "
                        "each box against a reference - but nothing is wired "
                        "into “Compare with”. Wire a reference in, or pick one "
                        "of the plain gray-level statistics instead."
@@ -1375,7 +1361,7 @@ class GlvStatsStep(MultiSourceStep):
         於是同一格參數有兩種意思，而且宣告（`feature_names` 只看參數，吐的是
         帶後綴的名字）跟實際寫出的（pooled 的裸名）對不上。改成 ``>= 1``
         （F31，使用者定調「不要偷偷退回 pooled」）：單框走同一條路，吐
-        ``boxes = 1`` 與那一格自己的 `_typical`/`_outlier`，只是沒有「其他格」
+        ``boxes = 1`` 與那一格自己的 `_typical`，只是沒有「其他格」
         可比所以沒有 worst。``== 0`` 仍走 pooled —— 那是「區域在這一顆上
         不存在」，讓 `roi_pixels` 用它既有的錯誤訊息講。
         """
@@ -1392,12 +1378,12 @@ class GlvStatsStep(MultiSourceStep):
         625 個框，而框的數量**隨影像而異**（換一顆 defect 就不一樣）。逐格吐的
         話 recipe 得寫死一個不存在的數量，CSV 也會多出幾千欄。
 
-        所以吐的是**分布的兩端加一個地址**：
+        所以吐的是**典型值、z 分數最高那一格身上的量、與一個地址**：
 
         =====================  ================================================
         ``<n>_typical``        每一格算完之後的中位數 —— 「這一批單元長什麼樣」
-        ``<n>_outlier``        離 typical 最遠的那一格的值
-        ``<n>_outlier_box``    那是第幾格（0 起算）—— 缺陷定位的答案
+        ``<n>_worst``          z 分數最高那一格（``glv_worst_i``）身上的這個量
+        ``glv_worst_*``        那是第幾格、在哪、多異常 —— 缺陷定位的答案
         ``boxes``              總共量了幾格
         =====================  ================================================
 
@@ -1433,7 +1419,7 @@ class GlvStatsStep(MultiSourceStep):
             # 最後一道）。
             raise StepError(
                 self.key,
-                f"“Pick the odd one by” is set to '{judge}', which compares "
+                f"“{JUDGE_LABEL}” is set to '{judge}', which compares "
                 f"each box against a reference - but no reference is wired "
                 f"into this card. Wire one in, or pick an absolute statistic "
                 f"instead.")
@@ -1441,7 +1427,7 @@ class GlvStatsStep(MultiSourceStep):
             # 同 `metrics` 那一句 —— 打錯的 id 要當場講，不是安靜換成預設。
             raise StepError(
                 self.key,
-                f"unknown statistic '{judge}' in “Pick the odd one by”; "
+                f"unknown statistic '{judge}' in “{JUDGE_LABEL}”; "
                 f"available: {sorted(algo_glv.GLV_STATS)}, "
                 f"{sorted(algo_glv.COMPARE_METRICS)} or glv_q<0-100> / "
                 f"glv_p<0-100>.")
@@ -1493,7 +1479,7 @@ class GlvStatsStep(MultiSourceStep):
                 # 沒有判準就選不出贏家 —— 講出真正的原因，不要安靜換一個。
                 raise StepError(
                     self.key,
-                    f"“Pick the odd one by” is set to '{judge}', but it "
+                    f"“{JUDGE_LABEL}” is set to '{judge}', but it "
                     f"cannot be computed on this defect (a reference of a "
                     f"single box has no box-to-box spread, so snr, tstat and "
                     f"pct_rank are blank). Pick delta or abs_delta, or point "
@@ -1523,11 +1509,7 @@ class GlvStatsStep(MultiSourceStep):
             values = [b[name] for b in per_box if name in b]
             if not values:
                 continue            # 每一格都算不出來（例：參照只有一格）
-            typical = float(np.median(values))
-            k = _pick_odd(values, typical, direction)          # F68：跟著方向
-            out[name + TYPICAL_SUFFIX] = typical
-            out[name + OUTLIER_SUFFIX] = float(values[k])
-            out[name + OUTLIER_BOX_SUFFIX] = float(kept_index[k])
+            out[name + TYPICAL_SUFFIX] = float(np.median(values))
 
         # ---- 這一群框均不均勻（F85）-----------------------------------------
         # 值已經在 `per_box` 裡了 —— 這一段**不再量一次像素**，只是把同一串

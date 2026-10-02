@@ -2316,7 +2316,7 @@ class StudioWindow(QMainWindow):
 
     def _on_node_activated(self, node_id: str) -> None:
         """雙擊一張卡：選它 + 把設定攤開。Decision 卡另外收合／展開它的樹。"""
-        if self.select_node(str(node_id)):
+        if str(node_id) == self.selected_node or self.select_node(str(node_id)):
             self.set_params_open(True)
             if str(node_id) == self.model.decision_node():
                 self.pipeline.toggle_tree_collapsed()

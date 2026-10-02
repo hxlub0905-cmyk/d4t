@@ -1935,12 +1935,12 @@ def test_no_feature_explains_itself_by_repeating_its_own_id():
     assert not bad, "說明欄只是把 id 抄一遍：\n  " + "\n  ".join(sorted(set(bad)))
 
 
-def test_the_four_variants_of_one_statistic_do_not_share_one_sentence():
-    """``_typical`` / ``_outlier`` / ``_outlier_box`` / ``_worst`` 四胞胎。
+def test_the_variants_of_one_statistic_do_not_share_one_sentence():
+    """``_typical`` / ``_worst`` 兩個身分（``_outlier`` 那一族 2026-10-02 砍了）。
 
-    改之前這四列的說明**一字不差**（都寫 ``median(gray)``），而
-    ``_outlier_box`` 的值根本不是灰階 —— 它是一個框號。使用者 2026-09-02：
-    「outliner 完全沒有用 或者我看不懂? 反而這樣會誤導別人以為他是最 worst 的」。
+    改之前這幾列的說明**一字不差**（都寫 ``median(gray)``）。使用者 2026-09-02：
+    「outliner 完全沒有用 或者我看不懂? 反而這樣會誤導別人以為他是最 worst 的」
+    —— 兩輪說明之後還是混，所以 2026-10-02 把那一族砍了。
     """
     from d4t.core.pipeline import get_step
     from d4t.ui.widgets import feature_gloss, feature_unit
@@ -1950,13 +1950,11 @@ def test_the_four_variants_of_one_statistic_do_not_share_one_sentence():
                               "judge": "glv_q75", "metrics": "glv_median"})
     by_name = {s.name: s for s in card.resolve_feature_specs(p)}
     said = {n: feature_gloss(n, {}, by_name[n])[1]
-            for n in ("glv_median_typical", "glv_median_outlier",
-                      "glv_median_outlier_box", "glv_median_worst")}
-    assert len(set(said.values())) == 4, said
-    # 而「這是另一格」那句話要真的在 `_outlier` 上（名字上唯一沒有的資訊）
-    assert "not the one the judge picked" in said["glv_median_outlier"]
-    # 框號的單位是框，不是灰階
-    assert feature_unit(by_name["glv_median_outlier_box"]) == "box"
+            for n in ("glv_median_typical", "glv_median_worst")}
+    assert len(set(said.values())) == 2, said
+    # 「哪一格」那句話要真的在 `_worst` 上（名字上唯一沒有的資訊）
+    assert "biggest z-score" in said["glv_median_worst"]
+    assert not [n for n in by_name if "outlier" in n], "那一族砍了"
     assert feature_unit(by_name["glv_median_worst"]) == "gray"
 
 

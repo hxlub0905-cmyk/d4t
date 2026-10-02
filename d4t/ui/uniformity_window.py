@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.export import uniformity_charts as uc
+from .buttons import clear_layout
 from . import fit_screen
 from .theme import TOKENS
 from .widgets import small_button
@@ -252,12 +253,7 @@ class UniformityWindow(QWidget):
 
     def _rebuild(self) -> None:
         """勾選變了才重建格子 —— 每次餵資料都拆掉重建會讓視窗閃一下。"""
-        while self.grid.count():
-            item = self.grid.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        clear_layout(self.grid)
         self.views = {}
         cols = 2 if len(self._kinds) > 1 else 1
         for i, kind in enumerate(self._kinds):

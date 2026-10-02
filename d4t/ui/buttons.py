@@ -105,6 +105,55 @@ class FilterChip(QPushButton):
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
 
+def detach_widget(w) -> None:
+    """把一個 widget 從它的父視窗上拿下來 —— **先藏，再脫離**。
+
+    順序是機制本身（2026-10-02）：一個剛被塞進 layout 的 widget 身上排著一個
+    Qt 的「顯示」（`QLayout.addWidget` 排的，等下一輪事件圈才跑）。沒藏就
+    ``setParent(None)``，那個顯示落在一個**沒有父視窗**的 widget 上 —— 它變成一個
+    空白的頂層視窗閃一下。使用者看到的是「雙擊一張卡跳出好幾個空白視窗」：設定
+    面板在同一回合重建兩次，第一次的每一列都這樣閃了一次（GLV 卡 16 個）。
+    `d4t/ui` 裡**所有** ``setParent(None)`` 都走這裡（`tests/test_widget_teardown.py`
+    守），不要自己寫 —— 寫對一次很容易，二十個地方全寫對不可能。
+
+    ⚠ 藏起來的 widget 再掛回 layout **不會自己顯示**（Qt 只對沒被明講過 hide 的
+    widget 排顯示），停放再用的那一方要自己 ``show()``。
+    """
+    if w is None:
+        return
+    w.hide()
+    w.setParent(None)
+
+
+def discard_widget(w, layout=None) -> None:
+    """丟掉一個 widget：從 ``layout`` 拿下來（給了的話）、藏、脫離父視窗、下一輪刪。
+
+    「下一輪刪」而不是當場刪：被丟掉的那一格可能正是在發訊號的那一個
+    （:func:`clear_layout_parked` 的說明）—— ``deleteLater`` 排到訊號返回之後。
+    呼叫端不必再 ``deleteLater``（叫兩次也無害，Qt 會合併）。
+    """
+    if w is None:
+        return
+    if layout is not None:
+        layout.removeWidget(w)
+    detach_widget(w)
+    w.deleteLater()
+
+
+def clear_layout(layout) -> None:
+    """把 ``layout`` 裡的東西全部丟掉（widget 走 :func:`discard_widget`，子 layout
+    遞迴，spacer 直接拿掉）。要**停放不銷毀**的那種用 :func:`clear_layout_parked`。"""
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            discard_widget(w)
+            continue
+        sub = item.layout()
+        if sub is not None:
+            clear_layout(sub)
+
+
 def clear_layout_parked(layout, graveyard: list) -> None:
     """把 ``layout`` 裡的 widget 全部拿下來 —— **停放，不銷毀**（F25）。
 
@@ -135,8 +184,7 @@ def clear_layout_parked(layout, graveyard: list) -> None:
             if sub is not None:
                 clear_layout_parked(sub, graveyard)
             continue
-        w.hide()
-        w.setParent(None)
+        detach_widget(w)
         graveyard.append(w)
     if graveyard:
         # 排到下一輪：這一輪的訊號返回之後才真的釋放。

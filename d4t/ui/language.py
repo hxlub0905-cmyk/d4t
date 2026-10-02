@@ -114,6 +114,10 @@ def _relaunch_command():
     import os
 
     argv = list(sys.argv) or ["d4t"]
+    # 包成 exe（PyInstaller，F125）：``sys.executable`` **就是** d4t-studio.exe，
+    # ``argv[0]`` 也是它 —— 這時沒有 ``-m d4t`` 這回事，直接重跑自己。
+    if getattr(sys, "frozen", False):
+        return sys.executable, argv[1:], os.getcwd()
     here = os.path.abspath(argv[0])
     if os.path.basename(here) == "__main__.py":
         pkg_parent = os.path.dirname(os.path.dirname(here))

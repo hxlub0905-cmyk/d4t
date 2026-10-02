@@ -123,7 +123,7 @@ OUT/patch/LOT_SYN.001            KLARF 1.2
 OUT/{rsem,patch}/ground_truth.json
 ```
 
-兩份都是 d4t 直接讀得動的 —— Studio 的 `Open data…` 挑那個 `.001`（或它所在的資料夾）。
+兩份都是 d4t 直接讀得動的 —— Studio 的 `Open data…` 挑那個 `.001`。
 
 `ground_truth.json` 的 key 是 defect id：
 

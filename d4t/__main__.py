@@ -883,4 +883,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
+    # 包成 exe 之後 Windows 的 spawn worker 是「再跑一次這個程式」—— 這一句讓
+    # worker 認出自己是 worker。沒包成 exe 時它什麼都不做（F125）。
+    import multiprocessing
+    multiprocessing.freeze_support()
     raise SystemExit(main())

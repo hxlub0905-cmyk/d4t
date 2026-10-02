@@ -136,7 +136,7 @@ def fill_number_picker(combo: QComboBox, items: Sequence[str],
                     else QStandardItem(name))
             item.setData(name, Qt.UserRole)
             # 滑鼠停上去講它是什麼（`number_tips`）—— 名字本身講不出
-            # 「_outlier 跟 _worst 常常不是同一格」那種事。
+            # 「_worst 是 z 分數最高那一格身上的量」那種事。
             tip = str((tips or {}).get(name, "") or "")
             if tip:
                 item.setData(tip, Qt.ToolTipRole)

@@ -6,14 +6,14 @@
 
 * GLV 一張卡佔 **75 列**，而那 75 列是 **區域 × 統計量 × 身分** 的乘積 ——
   攤成長字串之後，每一串裡真正在變的只有最後一段；
-* 四胞胎（``_typical`` / ``_outlier`` / ``_outlier_box`` / ``_worst``）在畫面
+* 兩個身分（``_typical`` / ``_worst``；``_outlier`` 那一族 2026-10-02 砍了）在畫面
   上**不相鄰**：`glv_q75_worst` 跟 `glv_q75_typical` 差 13 列，因為列序是
   ``features`` dict 的插入序 —— **排版跟著計算順序走，不是跟著意思走**；
 * ``glv_worst_*`` 那 13 個是「這一區的結論」，卻跟量測值混在同一串列裡。
 
 這一份怎麼解
 ------------
-**橫過來。** 四胞胎是同一個量的四種身分，所以它們是**欄**不是列：
+**橫過來。** 它們是同一個量的幾種身分，所以是**欄**不是列：
 
     統計量      這批典型     那一格      自己最極端
     Q75            189         191       191  = 同一格
@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from .buttons import clear_layout
 from .numbers import format_feature_value
 from .theme import TOKENS, region_hex
 from .feature_text import VARIANT_COLUMNS as _VARIANT_COLUMNS
@@ -73,7 +74,6 @@ VARIANT_COLUMN_LABELS = {
     "": "value",
     "typical": "typical of them all",
     "worst": "the odd one out",
-    "outlier": "furthest on this stat",
     "nm": "nm",
     "nm2": "nm²",
 }
@@ -204,16 +204,13 @@ def _card_key(specs: Sequence[Any]) -> str:
 
 def _grid_of(specs: Sequence[Any], feats: Dict[str, Any],
              hi: set, eaten: set) -> Dict[str, Any]:
-    """有 variant 的那些 → 一列一個統計量、一欄一個 variant。
-
-    ``outlier_box`` 不佔欄：它的值貼在 ``outlier`` 那一格旁邊當地址。
-    """
+    """有 variant 的那些 → 一列一個統計量、一欄一個 variant。"""
     by_metric: Dict[str, Dict[str, Any]] = {}
     order: List[str] = []
     seen_cols: List[str] = []
     for s in specs:
         var = str(getattr(s, "variant", "") or "")
-        if var not in VARIANT_COLUMNS and var != "outlier_box":
+        if var not in VARIANT_COLUMNS:
             continue
         if str(s.name) in eaten:
             continue
@@ -224,13 +221,6 @@ def _grid_of(specs: Sequence[Any], feats: Dict[str, Any],
             order.append(mid)
         row = by_metric[mid]
         row["verdict"] = row["verdict"] or str(s.name) in hi
-        if var == "outlier_box":
-            box = feats.get(str(s.name))
-            row["outlier_box"] = None if box is None else int(box)
-            # 名字要留著 —— 那一格在畫面上是「← #46」那個地址，但
-            # `value_text("…_outlier_box")` 仍然要查得到（見 `set_model`）。
-            row["outlier_box_name"] = str(s.name)
-            continue
         if var not in seen_cols:
             seen_cols.append(var)
         row["cells"][var] = {"name": str(s.name),
@@ -242,22 +232,7 @@ def _grid_of(specs: Sequence[Any], feats: Dict[str, Any],
     columns = [c for c in VARIANT_COLUMNS if c in seen_cols]
     # 認不得的 variant（CD 的 nm 那種）接在後面 —— **照原順序**，不排序。
     columns += [c for c in seen_cols if c not in columns]
-    rows = []
-    for mid in order:
-        row = by_metric[mid]
-        # 「跟贏家是不是同一格」是這一欄唯一沒有的資訊，而它決定要不要提防。
-        box, win = row.get("outlier_box"), _winner_box(specs, feats)
-        row["same_box"] = (box is not None and win is not None and box == win)
-        rows.append(row)
-    return {"columns": columns, "rows": rows}
-
-
-def _winner_box(specs: Sequence[Any], feats: Dict[str, Any]):
-    for s in specs:
-        if str(getattr(s, "metric", "")) == "glv_worst_i":
-            got = feats.get(str(s.name))
-            return None if got is None else int(got)
-    return None
+    return {"columns": columns, "rows": [by_metric[mid] for mid in order]}
 
 
 def _flat_of(specs: Sequence[Any], feats: Dict[str, Any], hi: set,
@@ -268,8 +243,7 @@ def _flat_of(specs: Sequence[Any], feats: Dict[str, Any], hi: set,
         name = str(s.name)
         if name in eaten:
             continue
-        if str(getattr(s, "variant", "") or "") in VARIANT_COLUMNS \
-                or str(getattr(s, "variant", "") or "") == "outlier_box":
+        if str(getattr(s, "variant", "") or "") in VARIANT_COLUMNS:
             continue
         out.append({"name": name, "value": feats.get(name),
                     "html": feature_html(name, s.parts()),
@@ -329,9 +303,6 @@ class FeaturePanel(QScrollArea):
                 for cell in row["cells"].values():
                     self._values[cell["name"]] = cell["value"]
                     self._glosses[cell["name"]] = cell.get("gloss", "")
-                # 「← #46」那個地址也是一個特徵（`<量>_outlier_box`）。
-                if row.get("outlier_box_name"):
-                    self._values[row["outlier_box_name"]] = row["outlier_box"]
             # 標題行上的那幾個（`glv_worst_i` / `locate_ok` / …）。
             for got in sec.get("elsewhere") or ():
                 self._values[got["name"]] = got["value"]
@@ -379,11 +350,7 @@ class FeaturePanel(QScrollArea):
 
     # ---- 畫 ---------------------------------------------------------------
     def _rebuild(self) -> None:
-        while self._lay.count():
-            item = self._lay.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
+        clear_layout(self._lay)
         for sec in self._model:
             if not self._matches(sec):
                 continue
@@ -494,10 +461,6 @@ def _grid_widget(grid: Dict[str, Any], parent: QWidget) -> QWidget:
         for c, var in enumerate(columns):
             cell = row["cells"].get(var)
             text = "" if cell is None else format_feature_value(cell["value"])
-            if var == "outlier" and row.get("outlier_box") is not None:
-                # **框號永遠貼著值** —— 這一欄唯一沒有的資訊就是「那是哪一格」。
-                text += ("  = same box" if row.get("same_box")
-                         else "  ← #%d" % row["outlier_box"])
             item = QLabel(text, host)
             item.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             item.setStyleSheet("font-family:monospace;")
